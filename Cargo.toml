@@ -18,7 +18,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 authors = ["TtTRz <romc1224@gmail.com>"]
 license = "MIT"
@@ -58,20 +58,20 @@ clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 
 # Internal crates
-graphify-core = { path = "crates/graphify-core", version = "0.1.6" }
-graphify-detect = { path = "crates/graphify-detect", version = "0.1.6" }
-graphify-extract = { path = "crates/graphify-extract", version = "0.1.6" }
-graphify-build = { path = "crates/graphify-build", version = "0.1.6" }
-graphify-cluster = { path = "crates/graphify-cluster", version = "0.1.6" }
-graphify-analyze = { path = "crates/graphify-analyze", version = "0.1.6" }
-graphify-export = { path = "crates/graphify-export", version = "0.1.6" }
-graphify-cache = { path = "crates/graphify-cache", version = "0.1.6" }
-graphify-security = { path = "crates/graphify-security", version = "0.1.6" }
-graphify-ingest = { path = "crates/graphify-ingest", version = "0.1.6" }
-graphify-serve = { path = "crates/graphify-serve", version = "0.1.6" }
-graphify-watch = { path = "crates/graphify-watch", version = "0.1.6" }
-graphify-hooks = { path = "crates/graphify-hooks", version = "0.1.6" }
-graphify-benchmark = { path = "crates/graphify-benchmark", version = "0.1.6" }
+graphify-core = { path = "crates/graphify-core", version = "0.1.7" }
+graphify-detect = { path = "crates/graphify-detect", version = "0.1.7" }
+graphify-extract = { path = "crates/graphify-extract", version = "0.1.7" }
+graphify-build = { path = "crates/graphify-build", version = "0.1.7" }
+graphify-cluster = { path = "crates/graphify-cluster", version = "0.1.7" }
+graphify-analyze = { path = "crates/graphify-analyze", version = "0.1.7" }
+graphify-export = { path = "crates/graphify-export", version = "0.1.7" }
+graphify-cache = { path = "crates/graphify-cache", version = "0.1.7" }
+graphify-security = { path = "crates/graphify-security", version = "0.1.7" }
+graphify-ingest = { path = "crates/graphify-ingest", version = "0.1.7" }
+graphify-serve = { path = "crates/graphify-serve", version = "0.1.7" }
+graphify-watch = { path = "crates/graphify-watch", version = "0.1.7" }
+graphify-hooks = { path = "crates/graphify-hooks", version = "0.1.7" }
+graphify-benchmark = { path = "crates/graphify-benchmark", version = "0.1.7" }
 
 [package]
 name = "graphify-rs"

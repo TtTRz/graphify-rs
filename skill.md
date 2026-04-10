@@ -1,7 +1,7 @@
 # graphify skill
 
-Run `graphify build` in the project root to build a knowledge graph.
-Run `graphify query "<question>"` to query it.
+Run `graphify-rs build` in the project root to build a knowledge graph.
+Run `graphify-rs query "<question>"` to query it.
 
 ## When to use
 - Before answering architecture questions, check if graphify-out/graph.json exists

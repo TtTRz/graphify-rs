@@ -85,7 +85,7 @@ When the user types `/graphify`, invoke the Skill tool with `skill: "graphify"` 
 
 const CLAUDE_MD_SECTION: &str = r#"## graphify
 
-This project has a graphify knowledge graph at graphify-out/.
+This project has a graphify-rs knowledge graph at graphify-out/.
 
 Rules:
 - Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
@@ -99,7 +99,7 @@ const CLAUDE_MD_MARKER: &str = "## graphify";
 
 const AGENTS_MD_SECTION: &str = r#"## graphify
 
-This project has a graphify knowledge graph at graphify-out/.
+This project has a graphify-rs knowledge graph at graphify-out/.
 
 Rules:
 - Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
@@ -129,7 +129,7 @@ pub fn check_skill_versions() {
                 let installed = installed.trim();
                 if !installed.is_empty() && installed != VERSION {
                     eprintln!(
-                        "  warning: skill is from graphify {}, package is {}. Run 'graphify-rs install' to update.",
+                        "  warning: skill is from graphify-rs {}, package is {}. Run 'graphify-rs install' to update.",
                         installed, VERSION
                     );
                     return; // Only warn once
@@ -187,7 +187,7 @@ pub fn install_skill(platform: &str) -> Result<()> {
     Ok(())
 }
 
-/// `graphify claude install` — project-level Claude integration.
+/// `graphify-rs claude install` — project-level Claude integration.
 pub fn claude_install(project_root: &Path) -> Result<()> {
     // 1. Append section to ./CLAUDE.md
     let claude_md = project_root.join("CLAUDE.md");
@@ -203,7 +203,7 @@ pub fn claude_install(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `graphify claude uninstall` — remove project-level Claude integration.
+/// `graphify-rs claude uninstall` — remove project-level Claude integration.
 pub fn claude_uninstall(project_root: &Path) -> Result<()> {
     // 1. Remove section from ./CLAUDE.md
     let claude_md = project_root.join("CLAUDE.md");
@@ -219,7 +219,7 @@ pub fn claude_uninstall(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `graphify codex install` — project-level Codex integration.
+/// `graphify-rs codex install` — project-level Codex integration.
 pub fn codex_install(project_root: &Path) -> Result<()> {
     let agents_md = project_root.join("AGENTS.md");
     append_section(&agents_md, AGENTS_MD_SECTION, AGENTS_MD_MARKER)?;
@@ -234,7 +234,7 @@ pub fn codex_install(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `graphify codex uninstall`
+/// `graphify-rs codex uninstall`
 pub fn codex_uninstall(project_root: &Path) -> Result<()> {
     let agents_md = project_root.join("AGENTS.md");
     remove_section(&agents_md, AGENTS_MD_MARKER)?;
@@ -250,7 +250,7 @@ pub fn codex_uninstall(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `graphify opencode install` — project-level OpenCode integration.
+/// `graphify-rs opencode install` — project-level OpenCode integration.
 pub fn opencode_install(project_root: &Path) -> Result<()> {
     let agents_md = project_root.join("AGENTS.md");
     append_section(&agents_md, AGENTS_MD_SECTION, AGENTS_MD_MARKER)?;
@@ -270,7 +270,7 @@ pub fn opencode_install(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `graphify opencode uninstall`
+/// `graphify-rs opencode uninstall`
 pub fn opencode_uninstall(project_root: &Path) -> Result<()> {
     let agents_md = project_root.join("AGENTS.md");
     remove_section(&agents_md, AGENTS_MD_MARKER)?;
@@ -426,7 +426,7 @@ fn write_claude_settings_hook(path: &Path) -> Result<()> {
         "matcher": "Glob|Grep",
         "hooks": [{
             "type": "command",
-            "command": "[ -f graphify-out/graph.json ] && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"graphify: Knowledge graph exists. Read graphify-out/GRAPH_REPORT.md for god nodes and community structure before searching raw files.\"}}' || true"
+            "command": "[ -f graphify-out/graph.json ] && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"graphify-rs: Knowledge graph exists. Read graphify-out/GRAPH_REPORT.md for god nodes and community structure before searching raw files.\"}}' || true"
         }]
     });
 
@@ -494,7 +494,7 @@ fn write_codex_hooks(path: &Path) -> Result<()> {
                 "matcher": "Bash",
                 "hooks": [{
                     "type": "command",
-                    "command": "[ -f graphify-out/graph.json ] && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"systemMessage\":\"graphify: Knowledge graph exists. Read graphify-out/GRAPH_REPORT.md for god nodes and community structure before searching raw files.\"}}' || true"
+                    "command": "[ -f graphify-out/graph.json ] && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"systemMessage\":\"graphify-rs: Knowledge graph exists. Read graphify-out/GRAPH_REPORT.md for god nodes and community structure before searching raw files.\"}}' || true"
                 }]
             }]
         }
@@ -511,16 +511,16 @@ fn write_opencode_plugin(path: &Path) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
 
-    let plugin_content = r#"// graphify plugin for OpenCode
+    let plugin_content = r#"// graphify-rs plugin for OpenCode
 module.exports = {
-    name: "graphify",
+    name: "graphify-rs",
     description: "Knowledge graph integration",
     hooks: {
         preToolUse: async (ctx) => {
             const fs = require("fs");
             if (fs.existsSync("graphify-out/graph.json")) {
                 return {
-                    prefix: "[graphify] Knowledge graph available. Read graphify-out/GRAPH_REPORT.md for architecture overview."
+                    prefix: "[graphify-rs] Knowledge graph available. Read graphify-out/GRAPH_REPORT.md for architecture overview."
                 };
             }
         }

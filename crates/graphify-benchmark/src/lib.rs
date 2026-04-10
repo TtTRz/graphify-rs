@@ -214,7 +214,7 @@ pub fn run_benchmark(
 
 /// Print a human-readable benchmark report.
 pub fn print_benchmark(result: &BenchmarkResult) {
-    println!("=== graphify Benchmark ===");
+    println!("=== graphify-rs Benchmark ===");
     println!();
     println!(
         "Graph: {} nodes, {} edges, {} communities",
