@@ -63,8 +63,8 @@ pub fn export_obsidian(
         content.push_str("---\n\n");
 
         // --- Connections ---
-        if let Some(neighbours) = edges_for.get(node.id.as_str()) {
-            if !neighbours.is_empty() {
+        if let Some(neighbours) = edges_for.get(node.id.as_str())
+            && !neighbours.is_empty() {
                 content.push_str("## Connections\n\n");
                 for &(neighbor_id, relation) in neighbours {
                     let link_label = graph
@@ -74,7 +74,6 @@ pub fn export_obsidian(
                     writeln!(content, "- [[{}]] ({})", link_label, relation).unwrap();
                 }
             }
-        }
 
         fs::write(&filepath, &content)?;
     }

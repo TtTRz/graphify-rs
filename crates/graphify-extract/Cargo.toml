@@ -3,6 +3,7 @@ name = "graphify-extract"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "AST and semantic extraction engine for graphify"
 
 [dependencies]

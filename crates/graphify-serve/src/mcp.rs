@@ -294,8 +294,8 @@ fn handle_get_community(graph: &KnowledgeGraph, args: &Value) -> Value {
 
     let mut members: Vec<Value> = Vec::new();
     for node_id in graph.node_ids() {
-        if let Some(node) = graph.get_node(&node_id) {
-            if node.community == Some(community_id) {
+        if let Some(node) = graph.get_node(&node_id)
+            && node.community == Some(community_id) {
                 members.push(json!({
                     "id": node.id,
                     "label": node.label,
@@ -304,7 +304,6 @@ fn handle_get_community(graph: &KnowledgeGraph, args: &Value) -> Value {
                     "degree": graph.degree(&node_id),
                 }));
             }
-        }
     }
 
     if members.is_empty() {

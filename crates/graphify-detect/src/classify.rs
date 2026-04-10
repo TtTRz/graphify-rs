@@ -109,11 +109,10 @@ fn extension_lower(path: &Path) -> Option<String> {
 /// Check whether the path lives inside an Xcode asset catalog.
 fn is_inside_xcode_asset(path: &Path) -> bool {
     for ancestor in path.ancestors() {
-        if let Some(name) = ancestor.file_name().and_then(|n| n.to_str()) {
-            if name.ends_with(".imageset") || name.ends_with(".xcassets") {
+        if let Some(name) = ancestor.file_name().and_then(|n| n.to_str())
+            && (name.ends_with(".imageset") || name.ends_with(".xcassets")) {
                 return true;
             }
-        }
     }
     false
 }
@@ -139,14 +138,13 @@ fn looks_like_paper(path: &Path) -> bool {
 
     let mut hits = 0usize;
     for pattern in PAPER_SIGNALS {
-        if let Ok(re) = RegexBuilder::new(pattern).case_insensitive(true).build() {
-            if re.is_match(peek) {
+        if let Ok(re) = RegexBuilder::new(pattern).case_insensitive(true).build()
+            && re.is_match(peek) {
                 hits += 1;
                 if hits >= PAPER_SIGNAL_THRESHOLD {
                     return true;
                 }
             }
-        }
     }
     false
 }

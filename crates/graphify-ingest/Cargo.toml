@@ -3,6 +3,7 @@ name = "graphify-ingest"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "URL fetching and content ingestion for graphify"
 
 [dependencies]

@@ -261,11 +261,10 @@ fn extract_json_block(text: &str) -> &str {
         }
     }
     // Try to find { ... } directly
-    if let Some(start) = text.find('{') {
-        if let Some(end) = text.rfind('}') {
+    if let Some(start) = text.find('{')
+        && let Some(end) = text.rfind('}') {
             return &text[start..=end];
         }
-    }
     text.trim()
 }
 

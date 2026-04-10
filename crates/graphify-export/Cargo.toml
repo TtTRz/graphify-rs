@@ -3,6 +3,7 @@ name = "graphify-export"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Multi-format export (JSON, HTML, SVG, GraphML, Cypher) for graphify"
 
 [dependencies]

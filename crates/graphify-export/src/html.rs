@@ -554,12 +554,11 @@ fn generate_overview(
     for edge in graph.edges() {
         let src_cid = node_community.get(edge.source.as_str()).copied();
         let tgt_cid = node_community.get(edge.target.as_str()).copied();
-        if let (Some(sc), Some(tc)) = (src_cid, tgt_cid) {
-            if sc != tc {
+        if let (Some(sc), Some(tc)) = (src_cid, tgt_cid)
+            && sc != tc {
                 let key = if sc < tc { (sc, tc) } else { (tc, sc) };
                 *cross_edges.entry(key).or_default() += 1;
             }
-        }
     }
 
     let mut vis_edges = String::from("[");
@@ -764,11 +763,10 @@ fn generate_community_page(
             } else {
                 continue;
             };
-            if let Some(&other_cid) = node_community.get(other.as_str()) {
-                if other_cid != cid {
+            if let Some(&other_cid) = node_community.get(other.as_str())
+                && other_cid != cid {
                     *external_links.entry(other_cid).or_default() += 1;
                 }
-            }
         }
     }
 

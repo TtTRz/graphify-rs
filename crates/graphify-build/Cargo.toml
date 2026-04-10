@@ -3,6 +3,7 @@ name = "graphify-build"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Graph assembly and deduplication for graphify"
 
 [dependencies]

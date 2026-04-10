@@ -114,25 +114,23 @@ fn simulate_query(graph: &KnowledgeGraph, question: &str) -> usize {
     let mut seen = HashSet::new();
 
     for node_id in &top_nodes {
-        if seen.insert(node_id.clone()) {
-            if let Some(node) = graph.get_node(node_id) {
+        if seen.insert(node_id.clone())
+            && let Some(node) = graph.get_node(node_id) {
                 context_parts.push(format!(
                     "{} [{}] (type: {:?}, file: {})",
                     node.label, node.id, node.node_type, node.source_file
                 ));
             }
-        }
 
         // Add 1-hop neighbors
         for neighbor in graph.neighbor_ids(node_id) {
-            if seen.insert(neighbor.clone()) {
-                if let Some(node) = graph.get_node(&neighbor) {
+            if seen.insert(neighbor.clone())
+                && let Some(node) = graph.get_node(&neighbor) {
                     context_parts.push(format!(
                         "  -> {} [{}] (type: {:?})",
                         node.label, node.id, node.node_type
                     ));
                 }
-            }
         }
     }
 

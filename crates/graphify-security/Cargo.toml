@@ -3,6 +3,7 @@ name = "graphify-security"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "URL, path, and label validation for graphify"
 
 [dependencies]

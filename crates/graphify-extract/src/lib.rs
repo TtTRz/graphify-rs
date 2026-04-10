@@ -271,8 +271,8 @@ fn resolve_cross_file_imports(result: &mut ExtractionResult) {
         }
         let path = Path::new(&node.source_file);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if ext == "go" {
-            if let Some(dir) = path
+        if ext == "go"
+            && let Some(dir) = path
                 .parent()
                 .and_then(|d| d.file_name())
                 .and_then(|d| d.to_str())
@@ -282,7 +282,6 @@ fn resolve_cross_file_imports(result: &mut ExtractionResult) {
                     .or_default()
                     .push((node.label.clone(), node.id.clone(), node.node_type.clone()));
             }
-        }
     }
 
     // Step 3: For each file, collect its own entity IDs (the entities defined in that file)
@@ -471,11 +470,10 @@ fn resolve_rust_import<'a>(
     let segments: Vec<&str> = import_label.split("::").collect();
 
     // Try the last segment as a module/file stem
-    if let Some(last) = segments.last() {
-        if let Some(entities) = stem_to_entities.get(*last) {
+    if let Some(last) = segments.last()
+        && let Some(entities) = stem_to_entities.get(*last) {
             return entities.iter().collect();
         }
-    }
 
     // Try the second-to-last segment (for `crate::module::Type` patterns)
     if segments.len() >= 2 {

@@ -86,11 +86,10 @@ pub fn save_cached_to<T: Serialize>(
     let cache_path = cache_dir.join(&key);
 
     // Ensure the cache directory exists.
-    if let Some(parent) = cache_path.parent() {
-        if fs::create_dir_all(parent).is_err() {
+    if let Some(parent) = cache_path.parent()
+        && fs::create_dir_all(parent).is_err() {
             return false;
         }
-    }
 
     // Atomic write: serialise → write to .tmp → rename into place.
     let tmp = cache_path.with_extension("tmp");

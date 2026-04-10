@@ -86,14 +86,13 @@ pub fn surprising_connections(
         // Cross-file bonus
         let src_node = graph.get_node(src);
         let tgt_node = graph.get_node(tgt);
-        if let (Some(sn), Some(tn)) = (src_node, tgt_node) {
-            if !sn.source_file.is_empty()
+        if let (Some(sn), Some(tn)) = (src_node, tgt_node)
+            && !sn.source_file.is_empty()
                 && !tn.source_file.is_empty()
                 && sn.source_file != tn.source_file
             {
                 score += 1.0;
             }
-        }
 
         // Confidence bonus: AMBIGUOUS > INFERRED > EXTRACTED
         use graphify_core::confidence::Confidence;
@@ -233,8 +232,8 @@ pub fn suggest_questions(
     // 4. Isolated nodes (degree 0)
     {
         for id in graph.node_ids() {
-            if graph.degree(&id) == 0 && !is_file_node(graph, &id) {
-                if let Some(node) = graph.get_node(&id) {
+            if graph.degree(&id) == 0 && !is_file_node(graph, &id)
+                && let Some(node) = graph.get_node(&id) {
                     let mut q = HashMap::new();
                     q.insert("category".into(), "isolated_node".into());
                     q.insert(
@@ -247,7 +246,6 @@ pub fn suggest_questions(
                     q.insert("node".into(), id.clone());
                     questions.push(q);
                 }
-            }
         }
     }
 
@@ -362,13 +360,11 @@ pub fn graph_diff(
 fn is_file_node(graph: &KnowledgeGraph, node_id: &str) -> bool {
     if let Some(node) = graph.get_node(node_id) {
         // label matches source filename
-        if !node.source_file.is_empty() {
-            if let Some(fname) = std::path::Path::new(&node.source_file).file_name() {
-                if node.label == fname.to_string_lossy() {
+        if !node.source_file.is_empty()
+            && let Some(fname) = std::path::Path::new(&node.source_file).file_name()
+                && node.label == fname.to_string_lossy() {
                     return true;
                 }
-            }
-        }
     }
     false
 }

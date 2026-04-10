@@ -3,6 +3,7 @@ name = "graphify-cache"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "SHA256-based semantic caching for graphify"
 
 [dependencies]

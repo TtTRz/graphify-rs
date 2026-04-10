@@ -80,11 +80,10 @@ impl IgnoreSet {
             }
             // Match against each path segment
             for component in rel.components() {
-                if let std::path::Component::Normal(seg) = component {
-                    if matcher.is_match(seg) {
+                if let std::path::Component::Normal(seg) = component
+                    && matcher.is_match(seg) {
                         return true;
                     }
-                }
             }
         }
         false
