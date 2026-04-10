@@ -15,6 +15,7 @@ pub mod wiki;
 pub use cypher::export_cypher;
 pub use graphml::export_graphml;
 pub use html::export_html;
+pub use html::export_html_split;
 pub use json::export_json;
 pub use obsidian::export_obsidian;
 pub use report::generate_report;

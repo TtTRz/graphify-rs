@@ -768,6 +768,19 @@ fn cmd_build(
         let html_path =
             graphify_export::export_html(&graph, &communities, &community_labels, &output_dir)?;
         info_print!(verb, "  Wrote {}", html_path.display().to_string().dimmed());
+
+        // Also generate split HTML (per-community pages)
+        let split_path = graphify_export::export_html_split(
+            &graph,
+            &communities,
+            &community_labels,
+            &output_dir,
+        )?;
+        info_print!(
+            verb,
+            "  Wrote {}/",
+            split_path.display().to_string().dimmed()
+        );
     }
 
     // Prepare analysis data
