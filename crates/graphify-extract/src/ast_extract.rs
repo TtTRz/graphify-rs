@@ -1557,10 +1557,12 @@ func main() {
         assert!(labels.contains(&"Start"), "missing Start: {labels:?}");
         assert!(labels.contains(&"main"), "missing main: {labels:?}");
 
-        assert!(result
-            .nodes
-            .iter()
-            .any(|n| n.node_type == NodeType::Interface));
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| n.node_type == NodeType::Interface)
+        );
         assert!(result.nodes.iter().any(|n| n.node_type == NodeType::Struct));
 
         // Import nodes

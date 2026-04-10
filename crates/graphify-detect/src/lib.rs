@@ -18,7 +18,7 @@ use thiserror::Error;
 use tracing::{debug, info, warn};
 use walkdir::WalkDir;
 
-pub use classify::{classify_file, DetectedFile, FileType};
+pub use classify::{DetectedFile, FileType, classify_file};
 pub use ignore::load_graphifyignore;
 pub use sensitive::is_sensitive;
 

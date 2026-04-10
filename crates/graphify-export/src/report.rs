@@ -143,13 +143,13 @@ pub fn generate_report(
     writeln!(report, "## 🏘️ Communities").unwrap();
     writeln!(report).unwrap();
     let mut sorted_communities: Vec<_> = communities.iter().collect();
-    sorted_communities.sort_by_key(|(&cid, _)| cid);
-    for (&cid, members) in &sorted_communities {
+    sorted_communities.sort_by_key(|(cid, _)| **cid);
+    for (cid, members) in &sorted_communities {
         let label = community_labels
-            .get(&cid)
+            .get(cid)
             .map(|s| s.as_str())
             .unwrap_or("Unnamed");
-        let cohesion = cohesion_scores.get(&cid).copied().unwrap_or(0.0);
+        let cohesion = cohesion_scores.get(cid).copied().unwrap_or(0.0);
         writeln!(
             report,
             "### Community {} — {} ({} nodes, cohesion: {:.2})",

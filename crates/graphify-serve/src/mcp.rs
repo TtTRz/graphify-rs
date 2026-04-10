@@ -8,10 +8,10 @@ use std::io::{self, BufRead, Write};
 use std::path::Path;
 
 use graphify_core::graph::KnowledgeGraph;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::{debug, error, info};
 
-use crate::{bfs, graph_stats, load_graph, score_nodes, subgraph_to_text, ServeError};
+use crate::{ServeError, bfs, graph_stats, load_graph, score_nodes, subgraph_to_text};
 
 // ---------------------------------------------------------------------------
 // Constants

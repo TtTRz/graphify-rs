@@ -321,17 +321,21 @@ pub fn graph_diff(
     result.insert("removed_nodes".into(), serde_json::json!(removed_nodes));
     result.insert(
         "added_edges".into(),
-        serde_json::json!(added_edges
-            .iter()
-            .map(|(s, t, r)| { serde_json::json!({"source": s, "target": t, "relation": r}) })
-            .collect::<Vec<_>>()),
+        serde_json::json!(
+            added_edges
+                .iter()
+                .map(|(s, t, r)| { serde_json::json!({"source": s, "target": t, "relation": r}) })
+                .collect::<Vec<_>>()
+        ),
     );
     result.insert(
         "removed_edges".into(),
-        serde_json::json!(removed_edges
-            .iter()
-            .map(|(s, t, r)| { serde_json::json!({"source": s, "target": t, "relation": r}) })
-            .collect::<Vec<_>>()),
+        serde_json::json!(
+            removed_edges
+                .iter()
+                .map(|(s, t, r)| { serde_json::json!({"source": s, "target": t, "relation": r}) })
+                .collect::<Vec<_>>()
+        ),
     );
     result.insert(
         "summary".into(),

@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::Path;
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tracing::debug;

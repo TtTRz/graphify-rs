@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use petgraph::stable_graph::{NodeIndex, StableGraph};
 use petgraph::Undirected;
-use serde_json::{json, Value};
+use petgraph::stable_graph::{NodeIndex, StableGraph};
+use serde_json::{Value, json};
 use tracing::warn;
 
 use crate::error::{GraphifyError, Result};

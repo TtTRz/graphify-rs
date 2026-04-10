@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
-use clap_complete::{generate, Shell};
+use clap_complete::{Shell, generate};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashMap;

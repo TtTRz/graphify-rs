@@ -290,10 +290,12 @@ mod tests {
         let result = parse_semantic_response(json, "paper.pdf").unwrap();
         assert_eq!(result.nodes.len(), 3);
         assert_eq!(result.edges.len(), 2);
-        assert!(result
-            .nodes
-            .iter()
-            .all(|n| n.node_type == NodeType::Concept));
+        assert!(
+            result
+                .nodes
+                .iter()
+                .all(|n| n.node_type == NodeType::Concept)
+        );
         assert_eq!(result.edges[0].relation, "is_a");
     }
 

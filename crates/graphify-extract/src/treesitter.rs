@@ -612,7 +612,7 @@ fn handle_rust_impl(
     let impl_target_nid = type_name.as_ref().map(|tn| make_id(&[str_path, tn]));
 
     // Create an "implements" edge if trait impl
-    if let (Some(trait_n), Some(ref target_nid)) = (&trait_name, &impl_target_nid) {
+    if let (Some(trait_n), Some(target_nid)) = (&trait_name, &impl_target_nid) {
         let line = node.start_position().row + 1;
         let trait_nid = make_id(&[str_path, trait_n]);
         edges.push(GraphEdge {
@@ -1105,11 +1105,7 @@ fn get_name(node: Node, source: &[u8], field: &str) -> Option<String> {
     let name_node = node.child_by_field_name(field)?;
     // For C/C++ declarators, unwrap nested declarators to find the identifier
     let text = unwrap_declarator_name(name_node, source);
-    if text.is_empty() {
-        None
-    } else {
-        Some(text)
-    }
+    if text.is_empty() { None } else { Some(text) }
 }
 
 /// Recursively unwrap C/C++ declarators (function_declarator, pointer_declarator, etc.)
@@ -1428,10 +1424,12 @@ func main() {
             "missing main: {labels:?}"
         );
         assert!(result.nodes.iter().any(|n| n.node_type == NodeType::Struct));
-        assert!(result
-            .nodes
-            .iter()
-            .any(|n| n.node_type == NodeType::Interface));
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| n.node_type == NodeType::Interface)
+        );
     }
 
     // ----- Unsupported language returns None -----

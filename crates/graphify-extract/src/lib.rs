@@ -293,7 +293,7 @@ fn resolve_cross_file_imports(result: &mut ExtractionResult) {
                 .entry(edge.source_file.clone())
                 .or_default()
                 .push(edge.source.clone()); // file_id is the source of "defines"
-                                            // Actually we need source_file's entity IDs (the targets of "defines")
+            // Actually we need source_file's entity IDs (the targets of "defines")
         }
     }
     // Rebuild correctly: source_file → [entity_node_id]
@@ -618,12 +618,16 @@ mod tests {
             "expected 2 uses edges, got {}",
             uses_edges.len()
         );
-        assert!(uses_edges
-            .iter()
-            .any(|e| e.source == "app_ctrl" && e.target == "parse_date"));
-        assert!(uses_edges
-            .iter()
-            .any(|e| e.source == "app_ctrl" && e.target == "format_date"));
+        assert!(
+            uses_edges
+                .iter()
+                .any(|e| e.source == "app_ctrl" && e.target == "parse_date")
+        );
+        assert!(
+            uses_edges
+                .iter()
+                .any(|e| e.source == "app_ctrl" && e.target == "format_date")
+        );
 
         // All uses edges should be Inferred with weight 0.8
         for edge in &uses_edges {
@@ -704,12 +708,16 @@ mod tests {
             "expected 2 uses edges, got {}",
             uses_edges.len()
         );
-        assert!(uses_edges
-            .iter()
-            .any(|e| e.source == "server" && e.target == "parse_config"));
-        assert!(uses_edges
-            .iter()
-            .any(|e| e.source == "server" && e.target == "validate"));
+        assert!(
+            uses_edges
+                .iter()
+                .any(|e| e.source == "server" && e.target == "parse_config")
+        );
+        assert!(
+            uses_edges
+                .iter()
+                .any(|e| e.source == "server" && e.target == "validate")
+        );
 
         for edge in &uses_edges {
             assert_eq!(edge.confidence, Confidence::Inferred);
@@ -762,12 +770,16 @@ mod tests {
             "expected 2 uses edges, got {}",
             uses_edges.len()
         );
-        assert!(uses_edges
-            .iter()
-            .any(|e| e.source == "app" && e.target == "config"));
-        assert!(uses_edges
-            .iter()
-            .any(|e| e.source == "app" && e.target == "database"));
+        assert!(
+            uses_edges
+                .iter()
+                .any(|e| e.source == "app" && e.target == "config")
+        );
+        assert!(
+            uses_edges
+                .iter()
+                .any(|e| e.source == "app" && e.target == "database")
+        );
 
         for edge in &uses_edges {
             assert_eq!(edge.confidence, Confidence::Inferred);

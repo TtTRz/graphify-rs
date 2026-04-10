@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::constants::{
     CODE_EXTENSIONS, DOC_EXTENSIONS, IMAGE_EXTENSIONS, OFFICE_EXTENSIONS, PAPER_EXTENSIONS,
-    PAPER_PEEK_CHARS, PAPER_SIGNALS, PAPER_SIGNAL_THRESHOLD,
+    PAPER_PEEK_CHARS, PAPER_SIGNAL_THRESHOLD, PAPER_SIGNALS,
 };
 
 // ---------------------------------------------------------------------------
