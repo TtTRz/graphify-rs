@@ -115,6 +115,53 @@ Walk them through the answer using the graph structure. Each answer should end w
 
 ---
 
+## Keeping the graph current after code changes
+
+**This is critical for agentic workflows.** When you (or the user) modify code files during a session, the knowledge graph becomes stale. You MUST rebuild it to keep answers accurate.
+
+### Rule: After modifying code, rebuild the graph
+
+After you finish a batch of code changes (new files, edited functions, refactored modules), run:
+
+```bash
+graphify-rs build --path . --output graphify-out --no-llm --update
+```
+
+- `--update`: only re-extract changed files (fast, uses SHA256 cache)
+- `--no-llm`: skip Claude API (AST-only rebuild is free and fast, ~2-5s)
+- This updates `graph.json`, `GRAPH_REPORT.md`, and all exports
+
+### When to rebuild
+
+- **After writing/editing code**: rebuild before answering architecture questions about the changed code
+- **After refactoring**: rebuild so community structure reflects the new module boundaries
+- **After adding new files**: rebuild to include them in the graph
+- **NOT after every single edit**: batch changes, then rebuild once. Don't rebuild after a one-line typo fix unless the user asks architecture questions about it.
+
+### Automated alternatives
+
+Instead of manual rebuilds, the user can set up always-on monitoring:
+
+1. **Watch mode** (background process):
+   ```bash
+   graphify-rs watch --path . --output graphify-out
+   ```
+   Auto-rebuilds on file changes with 3s debounce. Best for long coding sessions.
+
+2. **Git hooks** (per-commit):
+   ```bash
+   graphify-rs hook install
+   ```
+   Rebuilds after every `git commit`. No background process needed.
+
+3. **Claude Code integration** (always-on):
+   ```bash
+   graphify-rs claude install
+   ```
+   Writes a PreToolUse hook to `.claude/settings.json` that reminds you to check the graph before searching files, plus a CLAUDE.md rule to rebuild after code changes.
+
+---
+
 ## For /graphify query
 
 ```bash
