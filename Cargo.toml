@@ -1,0 +1,124 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/graphify-core",
+    "crates/graphify-detect",
+    "crates/graphify-extract",
+    "crates/graphify-build",
+    "crates/graphify-cluster",
+    "crates/graphify-analyze",
+    "crates/graphify-export",
+    "crates/graphify-cache",
+    "crates/graphify-security",
+    "crates/graphify-ingest",
+    "crates/graphify-serve",
+    "crates/graphify-watch",
+    "crates/graphify-hooks",
+    "crates/graphify-benchmark",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["graphify contributors"]
+license = "MIT"
+rust-version = "1.75"
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Async
+tokio = { version = "1", features = ["rt-multi-thread", "fs", "net", "io-util", "macros", "sync", "time"] }
+
+# HTTP
+reqwest = { version = "0.12", features = ["json"] }
+
+# Graph
+petgraph = { version = "0.6", features = ["serde-1"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2"
+
+# Regex
+regex = "1"
+
+# SHA256
+sha2 = "0.10"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+
+# Internal crates
+graphify-core = { path = "crates/graphify-core" }
+graphify-detect = { path = "crates/graphify-detect" }
+graphify-extract = { path = "crates/graphify-extract" }
+graphify-build = { path = "crates/graphify-build" }
+graphify-cluster = { path = "crates/graphify-cluster" }
+graphify-analyze = { path = "crates/graphify-analyze" }
+graphify-export = { path = "crates/graphify-export" }
+graphify-cache = { path = "crates/graphify-cache" }
+graphify-security = { path = "crates/graphify-security" }
+graphify-ingest = { path = "crates/graphify-ingest" }
+graphify-serve = { path = "crates/graphify-serve" }
+graphify-watch = { path = "crates/graphify-watch" }
+graphify-hooks = { path = "crates/graphify-hooks" }
+graphify-benchmark = { path = "crates/graphify-benchmark" }
+
+[package]
+name = "graphify"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "AI-powered knowledge graph builder - transform code, docs, papers into queryable graphs"
+
+[[bin]]
+name = "graphify-rs"
+path = "src/main.rs"
+
+[dependencies]
+graphify-core.workspace = true
+graphify-detect.workspace = true
+graphify-extract.workspace = true
+graphify-build.workspace = true
+graphify-cluster.workspace = true
+graphify-analyze.workspace = true
+graphify-export.workspace = true
+graphify-cache.workspace = true
+graphify-security.workspace = true
+graphify-ingest.workspace = true
+graphify-serve.workspace = true
+graphify-watch.workspace = true
+graphify-hooks.workspace = true
+graphify-benchmark.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+dirs = "5"
+indicatif = "0.17"
+colored = "2"
+clap_complete.workspace = true
+toml = "0.8"
+rayon = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[test]]
+name = "test_python_compat"
+path = "tests/integration/test_python_compat.rs"
+
+[[test]]
+name = "test_e2e"
+path = "tests/integration/test_e2e.rs"

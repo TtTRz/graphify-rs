@@ -1,0 +1,14 @@
+[package]
+name = "graphify-analyze"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Graph analysis algorithms for graphify"
+
+[dependencies]
+graphify-core.workspace = true
+petgraph.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+thiserror.workspace = true

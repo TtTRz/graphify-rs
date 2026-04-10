@@ -1,0 +1,19 @@
+[package]
+name = "graphify-detect"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "File discovery and classification for graphify"
+
+[dependencies]
+graphify-core.workspace = true
+regex.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+globset = "0.4"
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"

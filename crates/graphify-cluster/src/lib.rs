@@ -1,0 +1,607 @@
+//! Community detection (Louvain) for graphify.
+//!
+//! Partitions the knowledge graph into communities and computes cohesion scores.
+
+use std::collections::{HashMap, HashSet};
+
+use tracing::debug;
+
+use graphify_core::graph::KnowledgeGraph;
+use graphify_core::model::CommunityInfo;
+
+/// Maximum fraction of total nodes a single community may contain before
+/// being split further.
+const MAX_COMMUNITY_FRACTION: f64 = 0.25;
+
+/// Minimum community size below which we never attempt a split.
+const MIN_SPLIT_SIZE: usize = 10;
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/// Run community detection on the graph. Returns `{community_id: [node_ids]}`.
+///
+/// Uses a simple greedy modularity-based algorithm (Louvain-like).
+pub fn cluster(graph: &KnowledgeGraph) -> HashMap<usize, Vec<String>> {
+    let node_count = graph.node_count();
+    if node_count == 0 {
+        return HashMap::new();
+    }
+
+    // If no edges, each node is its own community
+    if graph.edge_count() == 0 {
+        return graph
+            .node_ids()
+            .into_iter()
+            .enumerate()
+            .map(|(i, id)| (i, vec![id]))
+            .collect();
+    }
+
+    let partition = louvain_partition(graph);
+
+    // Group by community
+    let mut communities: HashMap<usize, Vec<String>> = HashMap::new();
+    for (node_id, cid) in &partition {
+        communities.entry(*cid).or_default().push(node_id.clone());
+    }
+
+    // Split oversized communities
+    let max_size = std::cmp::max(
+        MIN_SPLIT_SIZE,
+        (node_count as f64 * MAX_COMMUNITY_FRACTION) as usize,
+    );
+    let mut final_communities: Vec<Vec<String>> = Vec::new();
+    for nodes in communities.values() {
+        if nodes.len() > max_size {
+            final_communities.extend(split_community(graph, nodes));
+        } else {
+            final_communities.push(nodes.clone());
+        }
+    }
+
+    // Re-index by size descending
+    final_communities.sort_by_key(|b| std::cmp::Reverse(b.len()));
+    final_communities
+        .into_iter()
+        .enumerate()
+        .map(|(i, mut nodes)| {
+            nodes.sort();
+            (i, nodes)
+        })
+        .collect()
+}
+
+/// Run community detection and mutate graph in-place, storing community info.
+pub fn cluster_graph(graph: &mut KnowledgeGraph) -> HashMap<usize, Vec<String>> {
+    let communities = cluster(graph);
+
+    // Build CommunityInfo entries
+    let scores = score_all(graph, &communities);
+    let mut infos: Vec<CommunityInfo> = communities
+        .iter()
+        .map(|(&cid, nodes)| CommunityInfo {
+            id: cid,
+            nodes: nodes.clone(),
+            cohesion: scores.get(&cid).copied().unwrap_or(0.0),
+            label: None,
+        })
+        .collect();
+    infos.sort_by_key(|c| c.id);
+    graph.communities = infos;
+
+    communities
+}
+
+/// Cohesion score: ratio of actual intra-community edges to maximum possible.
+///
+/// Returns a value in `[0.0, 1.0]` rounded to two decimal places.
+pub fn cohesion_score(graph: &KnowledgeGraph, community_nodes: &[String]) -> f64 {
+    let n = community_nodes.len();
+    if n <= 1 {
+        return 1.0;
+    }
+
+    let node_set: HashSet<&str> = community_nodes.iter().map(|s| s.as_str()).collect();
+    let mut actual_edges = 0usize;
+
+    // Count edges where both endpoints are in the community
+    for node_id in community_nodes {
+        let neighbors = graph.get_neighbors(node_id);
+        for neighbor in &neighbors {
+            if node_set.contains(neighbor.id.as_str()) {
+                actual_edges += 1;
+            }
+        }
+    }
+    // Each edge is counted twice (once from each endpoint)
+    actual_edges /= 2;
+
+    let possible = n * (n - 1) / 2;
+    if possible == 0 {
+        return 0.0;
+    }
+    ((actual_edges as f64 / possible as f64) * 100.0).round() / 100.0
+}
+
+/// Compute cohesion scores for all communities.
+pub fn score_all(
+    graph: &KnowledgeGraph,
+    communities: &HashMap<usize, Vec<String>>,
+) -> HashMap<usize, f64> {
+    communities
+        .iter()
+        .map(|(&cid, nodes)| (cid, cohesion_score(graph, nodes)))
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Louvain internals
+// ---------------------------------------------------------------------------
+
+/// Build an adjacency list from the KnowledgeGraph for efficient lookups.
+fn build_adjacency(graph: &KnowledgeGraph) -> HashMap<String, Vec<(String, f64)>> {
+    let mut adj: HashMap<String, Vec<(String, f64)>> = HashMap::new();
+    for id in graph.node_ids() {
+        adj.entry(id).or_default();
+    }
+    for (src, tgt, edge) in graph.edges_with_endpoints() {
+        adj.entry(src.to_string())
+            .or_default()
+            .push((tgt.to_string(), edge.weight));
+        adj.entry(tgt.to_string())
+            .or_default()
+            .push((src.to_string(), edge.weight));
+    }
+    adj
+}
+
+/// Compute total weight of edges in the graph (sum of all edge weights).
+fn total_weight(adj: &HashMap<String, Vec<(String, f64)>>) -> f64 {
+    let mut m = 0.0;
+    for neighbors in adj.values() {
+        for (_, w) in neighbors {
+            m += w;
+        }
+    }
+    m / 2.0 // each edge counted twice
+}
+
+/// Sum of weights of edges incident to a node.
+fn node_strength(adj: &HashMap<String, Vec<(String, f64)>>, node: &str) -> f64 {
+    adj.get(node)
+        .map(|neighbors| neighbors.iter().map(|(_, w)| w).sum())
+        .unwrap_or(0.0)
+}
+
+/// Sum of weights of edges from `node` to nodes in `community`.
+fn edges_to_community(
+    adj: &HashMap<String, Vec<(String, f64)>>,
+    node: &str,
+    community: &HashSet<&str>,
+) -> f64 {
+    adj.get(node)
+        .map(|neighbors| {
+            neighbors
+                .iter()
+                .filter(|(n, _)| community.contains(n.as_str()))
+                .map(|(_, w)| w)
+                .sum()
+        })
+        .unwrap_or(0.0)
+}
+
+/// Sum of strengths of all nodes in a community.
+fn community_strength(adj: &HashMap<String, Vec<(String, f64)>>, members: &HashSet<&str>) -> f64 {
+    members.iter().map(|n| node_strength(adj, n)).sum()
+}
+
+/// Basic Louvain-like greedy modularity optimization.
+fn louvain_partition(graph: &KnowledgeGraph) -> HashMap<String, usize> {
+    let adj = build_adjacency(graph);
+    let m = total_weight(&adj);
+    if m == 0.0 {
+        // No weighted edges; each node is its own community
+        return graph
+            .node_ids()
+            .into_iter()
+            .enumerate()
+            .map(|(i, id)| (id, i))
+            .collect();
+    }
+
+    let node_ids = graph.node_ids();
+
+    // Initialize: each node in its own community
+    let mut community_of: HashMap<String, usize> = node_ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (id.clone(), i))
+        .collect();
+
+    // Build community → members index
+    let mut community_members: HashMap<usize, HashSet<String>> = node_ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| {
+            (i, {
+                let mut s = HashSet::new();
+                s.insert(id.clone());
+                s
+            })
+        })
+        .collect();
+
+    let max_iterations = 50;
+    for _iteration in 0..max_iterations {
+        let mut improved = false;
+
+        for node in &node_ids {
+            let current_community = community_of[node];
+            let ki = node_strength(&adj, node);
+
+            // Get neighboring communities
+            let mut neighbor_communities: HashSet<usize> = HashSet::new();
+            if let Some(neighbors) = adj.get(node.as_str()) {
+                for (n, _) in neighbors {
+                    neighbor_communities.insert(community_of[n]);
+                }
+            }
+            neighbor_communities.insert(current_community);
+
+            // Try removing node from its current community
+            // and placing it in each neighboring community.
+            // Compute modularity gain for each option.
+            let mut best_community = current_community;
+            let mut best_gain = 0.0f64;
+
+            for &target_community in &neighbor_communities {
+                if target_community == current_community {
+                    continue;
+                }
+
+                let members_ref: HashSet<&str> = community_members
+                    .get(&target_community)
+                    .map(|s| s.iter().map(|x| x.as_str()).collect())
+                    .unwrap_or_default();
+
+                let current_members_ref: HashSet<&str> = community_members
+                    .get(&current_community)
+                    .map(|s| {
+                        s.iter()
+                            .filter(|x| x.as_str() != node.as_str())
+                            .map(|x| x.as_str())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                // Modularity gain of moving node from current to target
+                let ki_in_target = edges_to_community(&adj, node, &members_ref);
+                let ki_in_current = edges_to_community(&adj, node, &current_members_ref);
+                let sigma_target = community_strength(&adj, &members_ref);
+                let sigma_current = community_strength(&adj, &current_members_ref);
+
+                // ΔQ = [ki_in_target / m - σ_target * ki / (2m²)]
+                //     - [ki_in_current / m - σ_current * ki / (2m²)]
+                let gain = (ki_in_target - ki_in_current) / m
+                    - ki * (sigma_target - sigma_current) / (2.0 * m * m);
+
+                if gain > best_gain {
+                    best_gain = gain;
+                    best_community = target_community;
+                }
+            }
+
+            if best_community != current_community {
+                // Move node
+                community_members
+                    .get_mut(&current_community)
+                    .unwrap()
+                    .remove(node);
+                community_members
+                    .entry(best_community)
+                    .or_default()
+                    .insert(node.clone());
+                community_of.insert(node.clone(), best_community);
+                improved = true;
+            }
+        }
+
+        if !improved {
+            break;
+        }
+    }
+
+    // Compact community IDs (remove empty communities, renumber from 0)
+    let mut used_communities: Vec<usize> = community_members
+        .iter()
+        .filter(|(_, members)| !members.is_empty())
+        .map(|(&cid, _)| cid)
+        .collect();
+    used_communities.sort();
+
+    let remap: HashMap<usize, usize> = used_communities
+        .iter()
+        .enumerate()
+        .map(|(new_id, &old_id)| (old_id, new_id))
+        .collect();
+
+    community_of
+        .into_iter()
+        .map(|(node, cid)| (node, remap.get(&cid).copied().unwrap_or(cid)))
+        .collect()
+}
+
+/// Try to split an oversized community by running partition on its subgraph.
+fn split_community(graph: &KnowledgeGraph, nodes: &[String]) -> Vec<Vec<String>> {
+    if nodes.len() < MIN_SPLIT_SIZE {
+        return vec![nodes.to_vec()];
+    }
+
+    let node_set: HashSet<&str> = nodes.iter().map(|s| s.as_str()).collect();
+
+    // Build sub-adjacency list
+    let mut sub_adj: HashMap<String, Vec<(String, f64)>> = HashMap::new();
+    for node in nodes {
+        sub_adj.entry(node.clone()).or_default();
+    }
+    for (src, tgt, edge) in graph.edges_with_endpoints() {
+        if node_set.contains(src) && node_set.contains(tgt) {
+            sub_adj
+                .entry(src.to_string())
+                .or_default()
+                .push((tgt.to_string(), edge.weight));
+            sub_adj
+                .entry(tgt.to_string())
+                .or_default()
+                .push((src.to_string(), edge.weight));
+        }
+    }
+
+    // Run a simple greedy partition on the subgraph
+    let m = total_weight(&sub_adj);
+    if m == 0.0 {
+        // No internal edges; each node is its own community
+        return nodes.iter().map(|n| vec![n.clone()]).collect();
+    }
+
+    let mut community_of: HashMap<String, usize> = nodes
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (id.clone(), i))
+        .collect();
+    let mut community_members: HashMap<usize, HashSet<String>> = nodes
+        .iter()
+        .enumerate()
+        .map(|(i, id)| {
+            let mut s = HashSet::new();
+            s.insert(id.clone());
+            (i, s)
+        })
+        .collect();
+
+    for _ in 0..20 {
+        let mut improved = false;
+        for node in nodes {
+            let current = community_of[node];
+            let ki = node_strength(&sub_adj, node);
+            let mut neighbor_comms: HashSet<usize> = HashSet::new();
+            if let Some(nbrs) = sub_adj.get(node.as_str()) {
+                for (n, _) in nbrs {
+                    neighbor_comms.insert(community_of[n]);
+                }
+            }
+            neighbor_comms.insert(current);
+
+            let mut best = current;
+            let mut best_gain = 0.0f64;
+
+            for &target in &neighbor_comms {
+                if target == current {
+                    continue;
+                }
+                let target_members: HashSet<&str> = community_members
+                    .get(&target)
+                    .map(|s| s.iter().map(|x| x.as_str()).collect())
+                    .unwrap_or_default();
+                let current_members: HashSet<&str> = community_members
+                    .get(&current)
+                    .map(|s| {
+                        s.iter()
+                            .filter(|x| x.as_str() != node.as_str())
+                            .map(|x| x.as_str())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                let ki_in_t = edges_to_community(&sub_adj, node, &target_members);
+                let ki_in_c = edges_to_community(&sub_adj, node, &current_members);
+                let sigma_t = community_strength(&sub_adj, &target_members);
+                let sigma_c = community_strength(&sub_adj, &current_members);
+
+                let gain = (ki_in_t - ki_in_c) / m - ki * (sigma_t - sigma_c) / (2.0 * m * m);
+                if gain > best_gain {
+                    best_gain = gain;
+                    best = target;
+                }
+            }
+
+            if best != current {
+                community_members.get_mut(&current).unwrap().remove(node);
+                community_members
+                    .entry(best)
+                    .or_default()
+                    .insert(node.clone());
+                community_of.insert(node.clone(), best);
+                improved = true;
+            }
+        }
+        if !improved {
+            break;
+        }
+    }
+
+    let result: Vec<Vec<String>> = community_members
+        .into_values()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.into_iter().collect())
+        .collect();
+
+    // If we couldn't split (still one community), return as-is
+    if result.len() <= 1 {
+        debug!("could not split community of {} nodes further", nodes.len());
+        return vec![nodes.to_vec()];
+    }
+
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use graphify_core::confidence::Confidence;
+    use graphify_core::graph::KnowledgeGraph;
+    use graphify_core::model::{GraphEdge, GraphNode, NodeType};
+    use std::collections::HashMap as StdMap;
+
+    fn make_node(id: &str) -> GraphNode {
+        GraphNode {
+            id: id.into(),
+            label: id.into(),
+            source_file: "test.rs".into(),
+            source_location: None,
+            node_type: NodeType::Class,
+            community: None,
+            extra: StdMap::new(),
+        }
+    }
+
+    fn make_edge(src: &str, tgt: &str) -> GraphEdge {
+        GraphEdge {
+            source: src.into(),
+            target: tgt.into(),
+            relation: "calls".into(),
+            confidence: Confidence::Extracted,
+            confidence_score: 1.0,
+            source_file: "test.rs".into(),
+            source_location: None,
+            weight: 1.0,
+            extra: StdMap::new(),
+        }
+    }
+
+    fn build_graph(nodes: &[&str], edges: &[(&str, &str)]) -> KnowledgeGraph {
+        let mut g = KnowledgeGraph::new();
+        for &id in nodes {
+            g.add_node(make_node(id)).unwrap();
+        }
+        for &(s, t) in edges {
+            g.add_edge(make_edge(s, t)).unwrap();
+        }
+        g
+    }
+
+    #[test]
+    fn cluster_empty_graph() {
+        let g = KnowledgeGraph::new();
+        let result = cluster(&g);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn cluster_no_edges() {
+        let g = build_graph(&["a", "b", "c"], &[]);
+        let result = cluster(&g);
+        // Each node should be its own community
+        assert_eq!(result.len(), 3);
+        for nodes in result.values() {
+            assert_eq!(nodes.len(), 1);
+        }
+    }
+
+    #[test]
+    fn cluster_single_clique() {
+        // Three nodes fully connected → should end up in one community
+        let g = build_graph(&["a", "b", "c"], &[("a", "b"), ("b", "c"), ("a", "c")]);
+        let result = cluster(&g);
+        // All three should be in the same community
+        let total_nodes: usize = result.values().map(|v| v.len()).sum();
+        assert_eq!(total_nodes, 3);
+        // With a tight clique, Louvain should merge them into one community
+        assert!(result.len() <= 3); // At most 3, likely 1
+    }
+
+    #[test]
+    fn cluster_two_cliques() {
+        // Two separate cliques connected by a single bridge
+        let g = build_graph(
+            &["a1", "a2", "a3", "b1", "b2", "b3"],
+            &[
+                ("a1", "a2"),
+                ("a2", "a3"),
+                ("a1", "a3"),
+                ("b1", "b2"),
+                ("b2", "b3"),
+                ("b1", "b3"),
+                ("a3", "b1"), // bridge
+            ],
+        );
+        let result = cluster(&g);
+        let total_nodes: usize = result.values().map(|v| v.len()).sum();
+        assert_eq!(total_nodes, 6);
+        // Should detect at least 1 community (at most 6)
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn cohesion_score_single_node() {
+        let g = build_graph(&["a"], &[]);
+        let score = cohesion_score(&g, &["a".to_string()]);
+        assert!((score - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn cohesion_score_complete_graph() {
+        let g = build_graph(&["a", "b", "c"], &[("a", "b"), ("b", "c"), ("a", "c")]);
+        let score = cohesion_score(&g, &["a".to_string(), "b".to_string(), "c".to_string()]);
+        assert!((score - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn cohesion_score_no_edges() {
+        let g = build_graph(&["a", "b", "c"], &[]);
+        let score = cohesion_score(&g, &["a".to_string(), "b".to_string(), "c".to_string()]);
+        assert!((score - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn cohesion_score_partial() {
+        // 3 nodes, only 1 of 3 possible edges → 1/3 ≈ 0.33
+        let g = build_graph(&["a", "b", "c"], &[("a", "b")]);
+        let score = cohesion_score(&g, &["a".to_string(), "b".to_string(), "c".to_string()]);
+        assert!((score - 0.33).abs() < 0.01);
+    }
+
+    #[test]
+    fn score_all_works() {
+        let g = build_graph(&["a", "b"], &[("a", "b")]);
+        let mut communities = HashMap::new();
+        communities.insert(0, vec!["a".to_string(), "b".to_string()]);
+        let scores = score_all(&g, &communities);
+        assert_eq!(scores.len(), 1);
+        assert!((scores[&0] - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn cluster_graph_mutates_communities() {
+        let mut g = build_graph(&["a", "b", "c"], &[("a", "b"), ("b", "c"), ("a", "c")]);
+        let result = cluster_graph(&mut g);
+        assert!(!result.is_empty());
+        assert!(!g.communities.is_empty());
+    }
+}

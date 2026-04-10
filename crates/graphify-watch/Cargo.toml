@@ -1,0 +1,25 @@
+[package]
+name = "graphify-watch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "File watching and auto-rebuild for graphify"
+
+[dependencies]
+graphify-core.workspace = true
+graphify-detect.workspace = true
+graphify-extract.workspace = true
+graphify-build.workspace = true
+graphify-cluster.workspace = true
+graphify-analyze.workspace = true
+graphify-export.workspace = true
+graphify-cache.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+serde_json.workspace = true
+notify = "8"
+notify-debouncer-mini = "0.6"
+
+[dev-dependencies]
+tempfile = "3"

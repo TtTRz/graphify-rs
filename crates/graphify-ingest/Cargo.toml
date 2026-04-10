@@ -1,0 +1,22 @@
+[package]
+name = "graphify-ingest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "URL fetching and content ingestion for graphify"
+
+[dependencies]
+graphify-core.workspace = true
+graphify-security.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+regex.workspace = true
+urlencoding = "2"
+
+[dev-dependencies]
+tempfile = "3"
