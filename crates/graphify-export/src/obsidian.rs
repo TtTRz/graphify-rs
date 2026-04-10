@@ -64,16 +64,17 @@ pub fn export_obsidian(
 
         // --- Connections ---
         if let Some(neighbours) = edges_for.get(node.id.as_str())
-            && !neighbours.is_empty() {
-                content.push_str("## Connections\n\n");
-                for &(neighbor_id, relation) in neighbours {
-                    let link_label = graph
-                        .get_node(neighbor_id)
-                        .map(|n| sanitize_filename(&n.label))
-                        .unwrap_or_else(|| sanitize_filename(neighbor_id));
-                    writeln!(content, "- [[{}]] ({})", link_label, relation).unwrap();
-                }
+            && !neighbours.is_empty()
+        {
+            content.push_str("## Connections\n\n");
+            for &(neighbor_id, relation) in neighbours {
+                let link_label = graph
+                    .get_node(neighbor_id)
+                    .map(|n| sanitize_filename(&n.label))
+                    .unwrap_or_else(|| sanitize_filename(neighbor_id));
+                writeln!(content, "- [[{}]] ({})", link_label, relation).unwrap();
             }
+        }
 
         fs::write(&filepath, &content)?;
     }

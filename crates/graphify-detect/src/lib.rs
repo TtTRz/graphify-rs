@@ -252,15 +252,16 @@ pub fn detect_incremental(root: &Path, manifest_path: Option<&str>) -> DetectRes
 fn should_skip_entry(entry: &walkdir::DirEntry, root: &Path, ignore_set: &IgnoreSet) -> bool {
     // Only filter directories here (files are checked individually).
     if entry.file_type().is_dir()
-        && let Some(name) = entry.file_name().to_str() {
-            if is_noise_dir(name) {
-                return true;
-            }
-            // Skip hidden directories (except the root itself).
-            if name.starts_with('.') && entry.path() != root {
-                return true;
-            }
+        && let Some(name) = entry.file_name().to_str()
+    {
+        if is_noise_dir(name) {
+            return true;
         }
+        // Skip hidden directories (except the root itself).
+        if name.starts_with('.') && entry.path() != root {
+            return true;
+        }
+    }
 
     // Check .graphifyignore patterns
     if ignore_set.is_ignored(entry.path(), root) {

@@ -295,15 +295,16 @@ fn handle_get_community(graph: &KnowledgeGraph, args: &Value) -> Value {
     let mut members: Vec<Value> = Vec::new();
     for node_id in graph.node_ids() {
         if let Some(node) = graph.get_node(&node_id)
-            && node.community == Some(community_id) {
-                members.push(json!({
-                    "id": node.id,
-                    "label": node.label,
-                    "node_type": node.node_type,
-                    "source_file": node.source_file,
-                    "degree": graph.degree(&node_id),
-                }));
-            }
+            && node.community == Some(community_id)
+        {
+            members.push(json!({
+                "id": node.id,
+                "label": node.label,
+                "node_type": node.node_type,
+                "source_file": node.source_file,
+                "degree": graph.degree(&node_id),
+            }));
+        }
     }
 
     if members.is_empty() {

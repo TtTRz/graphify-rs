@@ -58,20 +58,20 @@ clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 
 # Internal crates
-graphify-core = { path = "crates/graphify-core", version = "0.1.4" }
-graphify-detect = { path = "crates/graphify-detect", version = "0.1.4" }
-graphify-extract = { path = "crates/graphify-extract", version = "0.1.4" }
-graphify-build = { path = "crates/graphify-build", version = "0.1.4" }
-graphify-cluster = { path = "crates/graphify-cluster", version = "0.1.4" }
-graphify-analyze = { path = "crates/graphify-analyze", version = "0.1.4" }
-graphify-export = { path = "crates/graphify-export", version = "0.1.4" }
-graphify-cache = { path = "crates/graphify-cache", version = "0.1.4" }
-graphify-security = { path = "crates/graphify-security", version = "0.1.4" }
-graphify-ingest = { path = "crates/graphify-ingest", version = "0.1.4" }
-graphify-serve = { path = "crates/graphify-serve", version = "0.1.4" }
-graphify-watch = { path = "crates/graphify-watch", version = "0.1.4" }
-graphify-hooks = { path = "crates/graphify-hooks", version = "0.1.4" }
-graphify-benchmark = { path = "crates/graphify-benchmark", version = "0.1.4" }
+graphify-core = { path = "crates/graphify-core", version = "0.1.5" }
+graphify-detect = { path = "crates/graphify-detect", version = "0.1.5" }
+graphify-extract = { path = "crates/graphify-extract", version = "0.1.5" }
+graphify-build = { path = "crates/graphify-build", version = "0.1.5" }
+graphify-cluster = { path = "crates/graphify-cluster", version = "0.1.5" }
+graphify-analyze = { path = "crates/graphify-analyze", version = "0.1.5" }
+graphify-export = { path = "crates/graphify-export", version = "0.1.5" }
+graphify-cache = { path = "crates/graphify-cache", version = "0.1.5" }
+graphify-security = { path = "crates/graphify-security", version = "0.1.5" }
+graphify-ingest = { path = "crates/graphify-ingest", version = "0.1.5" }
+graphify-serve = { path = "crates/graphify-serve", version = "0.1.5" }
+graphify-watch = { path = "crates/graphify-watch", version = "0.1.5" }
+graphify-hooks = { path = "crates/graphify-hooks", version = "0.1.5" }
+graphify-benchmark = { path = "crates/graphify-benchmark", version = "0.1.5" }
 
 [package]
 name = "graphify-rs"

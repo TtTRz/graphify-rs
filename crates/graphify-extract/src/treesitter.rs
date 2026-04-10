@@ -1057,19 +1057,20 @@ fn extract_go_import(
                 let mut inner = child.walk();
                 for spec in child.children(&mut inner) {
                     if spec.kind() == "import_spec"
-                        && let Some(path_node) = spec.child_by_field_name("path") {
-                            let module = node_text(path_node, source).trim_matches('"').to_string();
-                            let spec_line = spec.start_position().row + 1;
-                            add_import_node(
-                                nodes,
-                                edges,
-                                file_nid,
-                                str_path,
-                                spec_line,
-                                &module,
-                                NodeType::Package,
-                            );
-                        }
+                        && let Some(path_node) = spec.child_by_field_name("path")
+                    {
+                        let module = node_text(path_node, source).trim_matches('"').to_string();
+                        let spec_line = spec.start_position().row + 1;
+                        add_import_node(
+                            nodes,
+                            edges,
+                            file_nid,
+                            str_path,
+                            spec_line,
+                            &module,
+                            NodeType::Package,
+                        );
+                    }
                 }
             }
             "interpreted_string_literal" => {

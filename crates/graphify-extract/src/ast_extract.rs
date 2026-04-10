@@ -121,15 +121,16 @@ fn infer_calls(
             // Check if callee_name appears in caller body as a call (name followed by `(`)
             let pattern = format!(r"\b{}\s*\(", regex::escape(callee_name));
             if let Ok(re) = Regex::new(&pattern)
-                && re.is_match(&body) {
-                    edges.push(make_edge(
-                        caller_id,
-                        callee_id,
-                        "calls",
-                        path,
-                        Confidence::Inferred,
-                    ));
-                }
+                && re.is_match(&body)
+            {
+                edges.push(make_edge(
+                    caller_id,
+                    callee_id,
+                    "calls",
+                    path,
+                    Confidence::Inferred,
+                ));
+            }
         }
     }
     edges
@@ -192,10 +193,11 @@ fn extract_python(path: &Path, source: &str) -> ExtractionResult {
             for line_idx in (0..start_line.saturating_sub(1)).rev() {
                 if let Some(line) = lines.get(line_idx)
                     && let Some(cls_cap) = re_class_lookup.captures(line)
-                        && cls_cap[1].len() < indent {
-                            parent = class_ids.get(&cls_cap[2]).cloned();
-                            break;
-                        }
+                    && cls_cap[1].len() < indent
+                {
+                    parent = class_ids.get(&cls_cap[2]).cloned();
+                    break;
+                }
             }
             parent.unwrap_or_else(|| file_id.clone())
         } else {
@@ -204,7 +206,6 @@ fn extract_python(path: &Path, source: &str) -> ExtractionResult {
 
         // End line: next function at same or lower indent, or end of file
         let end_line = if i + 1 < func_matches.len() {
-            
             source[..func_matches[i + 1].get(0).unwrap().start()]
                 .lines()
                 .count()

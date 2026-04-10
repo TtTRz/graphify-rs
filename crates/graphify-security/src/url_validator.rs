@@ -62,9 +62,10 @@ fn is_private_host(host: &str) -> bool {
 fn is_172_private(host: &str) -> bool {
     if let Some(rest) = host.strip_prefix("172.")
         && let Some(second_octet_str) = rest.split('.').next()
-            && let Ok(second_octet) = second_octet_str.parse::<u8>() {
-                return (16..=31).contains(&second_octet);
-            }
+        && let Ok(second_octet) = second_octet_str.parse::<u8>()
+    {
+        return (16..=31).contains(&second_octet);
+    }
     false
 }
 

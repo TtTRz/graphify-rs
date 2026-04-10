@@ -88,11 +88,11 @@ pub fn surprising_connections(
         let tgt_node = graph.get_node(tgt);
         if let (Some(sn), Some(tn)) = (src_node, tgt_node)
             && !sn.source_file.is_empty()
-                && !tn.source_file.is_empty()
-                && sn.source_file != tn.source_file
-            {
-                score += 1.0;
-            }
+            && !tn.source_file.is_empty()
+            && sn.source_file != tn.source_file
+        {
+            score += 1.0;
+        }
 
         // Confidence bonus: AMBIGUOUS > INFERRED > EXTRACTED
         use graphify_core::confidence::Confidence;
@@ -232,20 +232,22 @@ pub fn suggest_questions(
     // 4. Isolated nodes (degree 0)
     {
         for id in graph.node_ids() {
-            if graph.degree(&id) == 0 && !is_file_node(graph, &id)
-                && let Some(node) = graph.get_node(&id) {
-                    let mut q = HashMap::new();
-                    q.insert("category".into(), "isolated_node".into());
-                    q.insert(
-                        "question".into(),
-                        format!(
-                            "What role does '{}' play? It has no connections in the graph.",
-                            node.label
-                        ),
-                    );
-                    q.insert("node".into(), id.clone());
-                    questions.push(q);
-                }
+            if graph.degree(&id) == 0
+                && !is_file_node(graph, &id)
+                && let Some(node) = graph.get_node(&id)
+            {
+                let mut q = HashMap::new();
+                q.insert("category".into(), "isolated_node".into());
+                q.insert(
+                    "question".into(),
+                    format!(
+                        "What role does '{}' play? It has no connections in the graph.",
+                        node.label
+                    ),
+                );
+                q.insert("node".into(), id.clone());
+                questions.push(q);
+            }
         }
     }
 
@@ -362,9 +364,10 @@ fn is_file_node(graph: &KnowledgeGraph, node_id: &str) -> bool {
         // label matches source filename
         if !node.source_file.is_empty()
             && let Some(fname) = std::path::Path::new(&node.source_file).file_name()
-                && node.label == fname.to_string_lossy() {
-                    return true;
-                }
+            && node.label == fname.to_string_lossy()
+        {
+            return true;
+        }
     }
     false
 }
