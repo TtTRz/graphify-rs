@@ -1,0 +1,15 @@
+# graphify-rs configuration
+# These values serve as defaults and can be overridden by CLI flags.
+
+# Output directory for graph files
+# output = "graphify-out"
+
+# Disable LLM-based semantic extraction
+# no_llm = false
+
+# Only process code files (skip docs/papers)
+# code_only = false
+
+# Export formats (comma-separated). Available: json,html,graphml,cypher,svg,wiki,obsidian,report
+# Leave empty or omit for all formats.
+# formats = ["json", "html", "report"]

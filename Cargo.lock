@@ -515,39 +515,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "graphify"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "clap_complete",
- "colored",
- "dirs",
- "graphify-analyze",
- "graphify-benchmark",
- "graphify-build",
- "graphify-cache",
- "graphify-cluster",
- "graphify-core",
- "graphify-detect",
- "graphify-export",
- "graphify-extract",
- "graphify-hooks",
- "graphify-ingest",
- "graphify-security",
- "graphify-serve",
- "graphify-watch",
- "indicatif",
- "rayon",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "toml",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "graphify-analyze"
 version = "0.1.0"
 dependencies = [
@@ -700,6 +667,39 @@ dependencies = [
  "tokio",
  "tracing",
  "urlencoding",
+]
+
+[[package]]
+name = "graphify-rs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "clap_complete",
+ "colored",
+ "dirs",
+ "graphify-analyze",
+ "graphify-benchmark",
+ "graphify-build",
+ "graphify-cache",
+ "graphify-cluster",
+ "graphify-core",
+ "graphify-detect",
+ "graphify-export",
+ "graphify-extract",
+ "graphify-hooks",
+ "graphify-ingest",
+ "graphify-security",
+ "graphify-serve",
+ "graphify-watch",
+ "indicatif",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml",
+ "tracing-subscriber",
 ]
 
 [[package]]

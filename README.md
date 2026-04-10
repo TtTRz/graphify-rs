@@ -33,48 +33,100 @@ graphify-rs build
 open graphify-out/graph.html
 ```
 
-## Usage
+## CLI Usage
+
+### Build
 
 ```bash
-# Build
+graphify-rs build                               # build current directory
 graphify-rs build --path . --output graphify-out
-graphify-rs build --format json,html,report    # select export formats
-graphify-rs build --code-only                   # skip docs/papers
-graphify-rs build --update                      # incremental rebuild
-graphify-rs build --no-llm                      # skip Claude API
+graphify-rs build --format json,html,report      # select export formats
+graphify-rs build --code-only                    # skip docs/papers
+graphify-rs build --update                       # incremental rebuild
+graphify-rs build --no-llm                       # skip Claude API
+```
 
-# Global flags
-graphify-rs -q build                            # quiet mode
-graphify-rs -v build                            # verbose/debug mode
-graphify-rs -j 4 build                          # limit parallel jobs
+### Query & Analyze
 
-# Query & analyze
+```bash
 graphify-rs query "how does authentication work?"
+graphify-rs query "error handling" --dfs --budget 3000
 graphify-rs diff old/graph.json new/graph.json
 graphify-rs stats graphify-out/graph.json
-
-# MCP server (Claude Code integration)
-graphify-rs serve --graph graphify-out/graph.json
-
-# Watch & auto-rebuild
-graphify-rs watch --path . --output graphify-out
-
-# Ingest URL content
-graphify-rs ingest https://arxiv.org/abs/2301.00001
-
-# Git hooks
-graphify-rs hook install
-
-# Platform integrations
-graphify-rs claude install
-graphify-rs codex install
-
-# Shell completions
-graphify-rs completions bash > ~/.bash_completion.d/graphify-rs
-
-# Config file
-graphify-rs init                                # creates graphify.toml
 ```
+
+### Watch & Serve
+
+```bash
+graphify-rs watch --path . --output graphify-out  # auto-rebuild on changes
+graphify-rs serve --graph graphify-out/graph.json  # start MCP server
+graphify-rs ingest https://arxiv.org/abs/2301.00001
+```
+
+### Platform Integrations & Hooks
+
+```bash
+graphify-rs claude install    # Claude Code
+graphify-rs codex install     # Codex
+graphify-rs hook install      # Git pre-commit hook
+```
+
+### Global Flags
+
+```bash
+graphify-rs -q build          # quiet mode
+graphify-rs -v build          # verbose/debug mode
+graphify-rs -j 4 build        # limit parallel jobs
+```
+
+### Utilities
+
+```bash
+graphify-rs completions bash > ~/.bash_completion.d/graphify-rs
+graphify-rs completions zsh > ~/.zfunc/_graphify-rs
+graphify-rs init              # creates graphify.toml
+```
+
+## Agent Usage (Skill)
+
+graphify-rs can be used as an AI coding agent skill. After installing the integration, your agent (Claude Code, Codex, etc.) automatically gets access to the knowledge graph.
+
+### Setup
+
+```bash
+# Install skill for your platform
+graphify-rs claude install    # writes to .claude/settings.json + CLAUDE.md
+graphify-rs codex install     # writes to .codex/hooks.json
+
+# Build the graph (agent can also do this)
+graphify-rs build
+```
+
+### How Agents Use It
+
+Once installed, the agent will:
+
+1. **Before answering architecture questions** — check if `graphify-out/graph.json` exists
+2. **If it exists** — read `graphify-out/GRAPH_REPORT.md` for project overview
+3. **For specific questions** — run `graphify-rs query "<question>"` to get relevant subgraph context
+4. **For ongoing work** — the MCP server (`graphify-rs serve`) provides 7 tools the agent can call directly
+
+### MCP Server Integration
+
+Add to your Claude Code MCP config:
+
+```json
+{
+  "mcpServers": {
+    "graphify": {
+      "command": "graphify-rs",
+      "args": ["serve", "--graph", "graphify-out/graph.json"]
+    }
+  }
+}
+```
+
+The agent can then call tools like `query_graph`, `get_node`, `get_neighbors`, `god_nodes`, etc. directly.
 
 ## Configuration
 
@@ -143,6 +195,10 @@ When running `graphify-rs serve`, 7 tools are available over JSON-RPC 2.0 (stdio
 |----------------------|----------------|
 | Python, JavaScript, TypeScript, Rust, Go | PHP, Swift, Kotlin, Scala, Dart |
 | Java, C, C++, Ruby, C# | Lua, Haskell, Elixir, Shell/Bash, R |
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style, and PR guidelines.
 
 ## License
 

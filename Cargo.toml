@@ -20,7 +20,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-authors = ["graphify contributors"]
+authors = ["TtTRz <romc1224@gmail.com>"]
 license = "MIT"
 rust-version = "1.75"
 
@@ -73,12 +73,26 @@ graphify-hooks = { path = "crates/graphify-hooks" }
 graphify-benchmark = { path = "crates/graphify-benchmark" }
 
 [package]
-name = "graphify"
+name = "graphify-rs"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 description = "AI-powered knowledge graph builder - transform code, docs, papers into queryable graphs"
+repository = "https://github.com/TtTRz/graphify-rs"
+homepage = "https://github.com/TtTRz/graphify-rs"
+readme = "README.md"
+keywords = ["knowledge-graph", "code-analysis", "ast", "tree-sitter", "mcp"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = [
+    ".github/",
+    "tests/",
+    "graphify-out/",
+    "graphify.toml",
+    "skill.md",
+    "README_CN.md",
+    "AUDIT_*.md",
+]
 
 [[bin]]
 name = "graphify-rs"

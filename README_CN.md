@@ -33,48 +33,100 @@ graphify-rs build
 open graphify-out/graph.html
 ```
 
-## 使用方法
+## CLI 用法
+
+### 构建
 
 ```bash
-# 构建
+graphify-rs build                               # 构建当前目录
 graphify-rs build --path . --output graphify-out
-graphify-rs build --format json,html,report    # 选择导出格式
-graphify-rs build --code-only                   # 仅处理代码文件
-graphify-rs build --update                      # 增量重建
-graphify-rs build --no-llm                      # 跳过 Claude API
+graphify-rs build --format json,html,report      # 选择导出格式
+graphify-rs build --code-only                    # 仅处理代码文件
+graphify-rs build --update                       # 增量重建
+graphify-rs build --no-llm                       # 跳过 Claude API
+```
 
-# 全局参数
-graphify-rs -q build                            # 安静模式
-graphify-rs -v build                            # 详细/调试模式
-graphify-rs -j 4 build                          # 限制并行任务数
+### 查询与分析
 
-# 查询与分析
+```bash
 graphify-rs query "认证是如何工作的"
+graphify-rs query "错误处理" --dfs --budget 3000
 graphify-rs diff old/graph.json new/graph.json
 graphify-rs stats graphify-out/graph.json
-
-# MCP 服务器（Claude Code 集成）
-graphify-rs serve --graph graphify-out/graph.json
-
-# 文件监控与自动重建
-graphify-rs watch --path . --output graphify-out
-
-# 抓取 URL 内容
-graphify-rs ingest https://arxiv.org/abs/2301.00001
-
-# Git 钩子
-graphify-rs hook install
-
-# 平台集成
-graphify-rs claude install
-graphify-rs codex install
-
-# Shell 补全
-graphify-rs completions bash > ~/.bash_completion.d/graphify-rs
-
-# 配置文件
-graphify-rs init                                # 生成 graphify.toml
 ```
+
+### 监控与服务
+
+```bash
+graphify-rs watch --path . --output graphify-out  # 文件变更自动重建
+graphify-rs serve --graph graphify-out/graph.json  # 启动 MCP 服务器
+graphify-rs ingest https://arxiv.org/abs/2301.00001
+```
+
+### 平台集成与钩子
+
+```bash
+graphify-rs claude install    # Claude Code
+graphify-rs codex install     # Codex
+graphify-rs hook install      # Git pre-commit 钩子
+```
+
+### 全局参数
+
+```bash
+graphify-rs -q build          # 安静模式
+graphify-rs -v build          # 详细/调试模式
+graphify-rs -j 4 build        # 限制并行任务数
+```
+
+### 实用工具
+
+```bash
+graphify-rs completions bash > ~/.bash_completion.d/graphify-rs
+graphify-rs completions zsh > ~/.zfunc/_graphify-rs
+graphify-rs init              # 生成 graphify.toml
+```
+
+## Agent 用法（Skill）
+
+graphify-rs 可以作为 AI 编码 Agent 的技能使用。安装集成后，你的 Agent（Claude Code、Codex 等）自动获得知识图谱访问能力。
+
+### 安装
+
+```bash
+# 为你的平台安装 skill
+graphify-rs claude install    # 写入 .claude/settings.json + CLAUDE.md
+graphify-rs codex install     # 写入 .codex/hooks.json
+
+# 构建图谱（Agent 也可以自动执行）
+graphify-rs build
+```
+
+### Agent 如何使用
+
+安装后，Agent 会：
+
+1. **回答架构问题前** — 检查 `graphify-out/graph.json` 是否存在
+2. **如果存在** — 先读取 `graphify-out/GRAPH_REPORT.md` 了解项目概览
+3. **针对具体问题** — 运行 `graphify-rs query "<问题>"` 获取相关子图上下文
+4. **持续工作中** — MCP 服务器（`graphify-rs serve`）提供 7 个工具供 Agent 直接调用
+
+### MCP 服务器集成
+
+添加到 Claude Code 的 MCP 配置：
+
+```json
+{
+  "mcpServers": {
+    "graphify": {
+      "command": "graphify-rs",
+      "args": ["serve", "--graph", "graphify-out/graph.json"]
+    }
+  }
+}
+```
+
+Agent 可以直接调用 `query_graph`、`get_node`、`get_neighbors`、`god_nodes` 等工具。
 
 ## 配置文件
 
@@ -143,6 +195,10 @@ CLI 参数始终覆盖配置文件中的值。
 |-------------------|---------|
 | Python, JavaScript, TypeScript, Rust, Go | PHP, Swift, Kotlin, Scala, Dart |
 | Java, C, C++, Ruby, C# | Lua, Haskell, Elixir, Shell/Bash, R |
+
+## 参与贡献
+
+详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 许可证
 
