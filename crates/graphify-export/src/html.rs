@@ -405,18 +405,20 @@ body {{ background: #0f0f1a; color: #e0e0e0; font-family: 'Segoe UI', system-ui,
         }}
     }});
 
-    // Search
+    // Search (debounced, batch update)
     var searchInput = document.getElementById('search');
+    var searchTimer = null;
     searchInput.addEventListener('input', function() {{
-        var term = this.value.toLowerCase();
-        if (!term) {{
-            nodes.forEach(function(n) {{ nodes.update({{ id: n.id, hidden: false }}); }});
-            return;
-        }}
-        nodes.forEach(function(n) {{
-            var match = n.label.toLowerCase().includes(term) || n.id.toLowerCase().includes(term);
-            nodes.update({{ id: n.id, hidden: !match }});
-        }});
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(function() {{
+            var term = searchInput.value.toLowerCase();
+            var updates = [];
+            nodes.forEach(function(n) {{
+                var match = !term || n.label.toLowerCase().includes(term) || n.id.toLowerCase().includes(term);
+                if (n.hidden !== !match) {{ updates.push({{ id: n.id, hidden: !match }}); }}
+            }});
+            if (updates.length > 0) {{ nodes.update(updates); }}
+        }}, 200);
     }});
 
     function escapeHtml(s) {{
@@ -867,9 +869,19 @@ body {{ background: #0f0f1a; color: #e0e0e0; font-family: 'Segoe UI', system-ui,
             }}
         }}
     }});
-    document.getElementById('search').addEventListener('input', function() {{
-        var term = this.value.toLowerCase();
-        nodes.forEach(function(n) {{ nodes.update({{ id: n.id, hidden: term && !n.label.toLowerCase().includes(term) }}); }});
+    var searchEl = document.getElementById('search');
+    var sTimer = null;
+    searchEl.addEventListener('input', function() {{
+        clearTimeout(sTimer);
+        sTimer = setTimeout(function() {{
+            var term = searchEl.value.toLowerCase();
+            var updates = [];
+            nodes.forEach(function(n) {{
+                var h = term && !n.label.toLowerCase().includes(term);
+                if (n.hidden !== h) {{ updates.push({{ id: n.id, hidden: h }}); }}
+            }});
+            if (updates.length > 0) {{ nodes.update(updates); }}
+        }}, 200);
     }});
 }})();
 </script>
