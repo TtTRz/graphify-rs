@@ -151,7 +151,7 @@ CLI 参数始终覆盖配置文件中的值。
 | `graphify-detect` | 文件发现、分类、.graphifyignore、敏感文件过滤 |
 | `graphify-extract` | AST 提取（tree-sitter + 正则）、Claude API 语义提取 |
 | `graphify-build` | 图组装、去重 |
-| `graphify-cluster` | 社区检测（Louvain）、凝聚力评分 |
+| `graphify-cluster` | 社区检测（Leiden）、凝聚力评分 |
 | `graphify-analyze` | 高连接节点、跨社区惊奇连接、建议问题、图差异 |
 | `graphify-export` | JSON, HTML, SVG, GraphML, Cypher, Wiki, 报告, Obsidian |
 | `graphify-cache` | SHA256 内容哈希缓存，原子写入 |

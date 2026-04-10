@@ -151,7 +151,7 @@ CLI flags always override config file values.
 | `graphify-detect` | File discovery, classification, .graphifyignore, sensitive file filtering |
 | `graphify-extract` | AST extraction (tree-sitter + regex), Claude API semantic extraction |
 | `graphify-build` | Graph assembly, deduplication |
-| `graphify-cluster` | Community detection (Louvain), cohesion scoring |
+| `graphify-cluster` | Community detection (Leiden), cohesion scoring |
 | `graphify-analyze` | God nodes, surprising connections, suggested questions, graph diff |
 | `graphify-export` | JSON, HTML, SVG, GraphML, Cypher, Wiki, Report, Obsidian |
 | `graphify-cache` | SHA256 content-hash caching with atomic writes |
