@@ -4,6 +4,9 @@ use std::path::Path;
 
 use crate::skill::SKILL_CONTENT;
 
+/// Current package version for staleness checks.
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 // ── Platform configs ──
 
 struct PlatformConfig {
@@ -87,6 +90,7 @@ This project has a graphify knowledge graph at graphify-out/.
 Rules:
 - Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
 - If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
+- After modifying code files in this session, run `graphify-rs build .` to keep the graph current
 "#;
 
 const CLAUDE_MD_MARKER: &str = "## graphify";
@@ -100,11 +104,40 @@ This project has a graphify knowledge graph at graphify-out/.
 Rules:
 - Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
 - If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
+- After modifying code files in this session, run `graphify-rs build .` to keep the graph current
 "#;
 
 const AGENTS_MD_MARKER: &str = "## graphify";
 
 // ── Public API ──
+
+/// Check all known skill install locations for stale versions.
+/// Call this on startup (before executing any subcommand).
+pub fn check_skill_versions() {
+    let home = match home_dir() {
+        Ok(h) => h,
+        Err(_) => return,
+    };
+    for (_, config) in PLATFORMS {
+        let version_file = home
+            .join(config.skill_dst)
+            .parent()
+            .map(|p| p.join(".graphify_version"))
+            .unwrap_or_default();
+        if version_file.exists() {
+            if let Ok(installed) = fs::read_to_string(&version_file) {
+                let installed = installed.trim();
+                if !installed.is_empty() && installed != VERSION {
+                    eprintln!(
+                        "  warning: skill is from graphify {}, package is {}. Run 'graphify-rs install' to update.",
+                        installed, VERSION
+                    );
+                    return; // Only warn once
+                }
+            }
+        }
+    }
+}
 
 /// Install graphify skill file for a given platform (global install).
 pub fn install_skill(platform: &str) -> Result<()> {
@@ -134,6 +167,12 @@ pub fn install_skill(platform: &str) -> Result<()> {
     fs::write(&skill_path, SKILL_CONTENT)
         .with_context(|| format!("Failed to write skill file to {}", skill_path.display()))?;
     println!("  Wrote skill file to {}", skill_path.display());
+
+    // Write version stamp for staleness detection
+    if let Some(parent) = skill_path.parent() {
+        let version_file = parent.join(".graphify_version");
+        let _ = fs::write(&version_file, VERSION);
+    }
 
     // Register in CLAUDE.md if needed
     if config.register_claude_md {
@@ -387,7 +426,7 @@ fn write_claude_settings_hook(path: &Path) -> Result<()> {
         "matcher": "Glob|Grep",
         "hooks": [{
             "type": "command",
-            "command": "[ -f graphify-out/graph.json ] && echo '{\"hookSpecificOutput\":{\"prefix\":\"[graphify] Knowledge graph available. Read graphify-out/GRAPH_REPORT.md for architecture overview.\"}}' || true"
+            "command": "[ -f graphify-out/graph.json ] && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"graphify: Knowledge graph exists. Read graphify-out/GRAPH_REPORT.md for god nodes and community structure before searching raw files.\"}}' || true"
         }]
     });
 
@@ -450,11 +489,15 @@ fn write_codex_hooks(path: &Path) -> Result<()> {
     }
 
     let hooks = serde_json::json!({
-        "hooks": [{
-            "event": "pre_tool_use",
-            "matcher": "file_read|file_search",
-            "command": "[ -f graphify-out/graph.json ] && echo '[graphify] Knowledge graph available. Read graphify-out/GRAPH_REPORT.md first.' || true"
-        }]
+        "hooks": {
+            "PreToolUse": [{
+                "matcher": "Bash",
+                "hooks": [{
+                    "type": "command",
+                    "command": "[ -f graphify-out/graph.json ] && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"systemMessage\":\"graphify: Knowledge graph exists. Read graphify-out/GRAPH_REPORT.md for god nodes and community structure before searching raw files.\"}}' || true"
+                }]
+            }]
+        }
     });
 
     let output = serde_json::to_string_pretty(&hooks)?;

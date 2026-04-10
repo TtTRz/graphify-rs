@@ -236,6 +236,9 @@ macro_rules! verbose_print {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Check skill version staleness on every invocation
+    install::check_skill_versions();
+
     let verb = Verbosity::from_flags(cli.quiet, cli.verbose);
 
     // Configure tracing based on verbosity
