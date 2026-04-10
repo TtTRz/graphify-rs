@@ -163,7 +163,11 @@ fn build_user_prompt(content: &str, file_type: &str) -> String {
     // Truncate very long content
     let max_chars = 100_000;
     let truncated = if content.len() > max_chars {
-        &content[..max_chars]
+        let mut end = max_chars;
+        while end > 0 && !content.is_char_boundary(end) {
+            end -= 1;
+        }
+        &content[..end]
     } else {
         content
     };

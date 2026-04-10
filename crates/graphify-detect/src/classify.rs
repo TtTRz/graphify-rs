@@ -127,7 +127,12 @@ fn looks_like_paper(path: &Path) -> bool {
     };
 
     let peek: &str = if content.len() > PAPER_PEEK_CHARS {
-        &content[..PAPER_PEEK_CHARS]
+        // Find a valid char boundary at or before PAPER_PEEK_CHARS
+        let mut end = PAPER_PEEK_CHARS;
+        while end > 0 && !content.is_char_boundary(end) {
+            end -= 1;
+        }
+        &content[..end]
     } else {
         &content
     };
