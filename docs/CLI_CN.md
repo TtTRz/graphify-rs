@@ -2,6 +2,25 @@
 
 `graphify-rs` 是一个 AI 驱动的知识图谱构建工具，能够将代码、文档、论文和图片转化为可查询的交互式知识图谱。
 
+## 目录
+
+- [全局参数](#全局参数)
+- [命令](#命令)
+  - [build](#graphify-rs-build) — 构建知识图谱
+  - [query](#graphify-rs-query) — 查询图谱
+  - [diff](#graphify-rs-diff) — 比较图谱快照
+  - [stats](#graphify-rs-stats) — 图谱统计
+  - [watch](#graphify-rs-watch) — 文件变更自动重建
+  - [serve](#graphify-rs-serve) — 启动 MCP 服务器（15 个工具）
+  - [ingest](#graphify-rs-ingest) — 抓取 URL 内容
+  - [hook](#graphify-rs-hook) — Git 钩子管理
+  - [install](#graphify-rs-install) — 安装 AI 助手技能
+  - [init](#graphify-rs-init) — 创建配置文件
+  - [completions](#graphify-rs-completions) — Shell 补全
+  - [benchmark](#graphify-rs-benchmark) — Token 效率测试
+- [配置文件](#配置文件-graphifytoml)
+- [智能体集成](#智能体集成)
+
 ## 全局参数
 
 以下参数可用于**任何**子命令。
@@ -178,7 +197,7 @@ graphify-rs watch --path src --output my-graph
 
 ### `graphify-rs serve`
 
-启动 MCP（Model Context Protocol）服务器，通过 JSON-RPC 2.0（stdio）提供服务。提供 11 个 AI 智能体可直接调用的工具。
+启动 MCP（Model Context Protocol）服务器，通过 JSON-RPC 2.0（stdio）提供服务。提供 15 个 AI 智能体可直接调用的工具。
 
 #### 参数
 
@@ -201,6 +220,10 @@ graphify-rs watch --path src --output my-graph
 | `weighted_path` | 基于边权重的 Dijkstra 最短路径（1/weight 距离） |
 | `community_bridges` | 查找 Top-N 跨社区桥节点（按桥接比率排序） |
 | `graph_diff` | 比较两个图谱快照，返回新增/删除的节点和边 |
+| `pagerank` | 计算 PageRank 重要性分数（识别结构性关键节点） |
+| `detect_cycles` | 使用 Tarjan SCC 算法检测依赖循环 |
+| `smart_summary` | 多层级图摘要（详细 / 社区级 / 架构级） |
+| `find_similar` | 通过图嵌入查找结构相似的节点对 |
 
 #### 示例
 

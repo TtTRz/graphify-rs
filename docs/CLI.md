@@ -2,6 +2,25 @@
 
 `graphify-rs` is an AI-powered knowledge graph builder that transforms code, docs, papers, and images into queryable, interactive knowledge graphs.
 
+## Table of Contents
+
+- [Global Flags](#global-flags)
+- [Commands](#commands)
+  - [build](#graphify-rs-build) — Build knowledge graph
+  - [query](#graphify-rs-query) — Query the graph
+  - [diff](#graphify-rs-diff) — Compare two graph snapshots
+  - [stats](#graphify-rs-stats) — Show graph statistics
+  - [watch](#graphify-rs-watch) — Auto-rebuild on file changes
+  - [serve](#graphify-rs-serve) — Start MCP server (15 tools)
+  - [ingest](#graphify-rs-ingest) — Fetch URL content
+  - [hook](#graphify-rs-hook) — Git hook management
+  - [install](#graphify-rs-install) — Install skill for AI agents
+  - [init](#graphify-rs-init) — Create config file
+  - [completions](#graphify-rs-completions) — Shell completions
+  - [benchmark](#graphify-rs-benchmark) — Token efficiency
+- [Configuration](#configuration-graphifytoml)
+- [Agent Integration](#agent-integration)
+
 ## Global Flags
 
 These flags can be used with **any** subcommand.
@@ -178,7 +197,7 @@ graphify-rs watch --path src --output my-graph
 
 ### `graphify-rs serve`
 
-Start the MCP (Model Context Protocol) server over JSON-RPC 2.0 (stdio). Provides 11 tools that AI agents can call directly.
+Start the MCP (Model Context Protocol) server over JSON-RPC 2.0 (stdio). Provides 15 tools that AI agents can call directly.
 
 #### Parameters
 
@@ -201,6 +220,10 @@ Start the MCP (Model Context Protocol) server over JSON-RPC 2.0 (stdio). Provide
 | `weighted_path` | Dijkstra shortest path using edge weights (1/weight distance) |
 | `community_bridges` | Find top-N cross-community bridge nodes by bridge ratio |
 | `graph_diff` | Compare two graph snapshots and return added/removed nodes and edges |
+| `pagerank` | Compute PageRank importance scores (identifies structurally critical nodes) |
+| `detect_cycles` | Detect dependency cycles using Tarjan's SCC algorithm |
+| `smart_summary` | Multi-level graph summary (detailed / community / architecture) |
+| `find_similar` | Find structurally similar node pairs via graph embeddings |
 
 #### Examples
 

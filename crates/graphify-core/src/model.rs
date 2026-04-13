@@ -156,6 +156,46 @@ pub struct BridgeNode {
     pub communities_touched: Vec<usize>,
 }
 
+/// PageRank importance score for a node.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PageRankNode {
+    pub id: String,
+    pub label: String,
+    pub score: f64,
+    pub degree: usize,
+}
+
+/// A dependency cycle detected in the graph.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DependencyCycle {
+    pub nodes: Vec<String>,
+    pub edges: Vec<(String, String)>,
+    /// Shorter cycles are more severe (1.0 / len).
+    pub severity: f64,
+}
+
+/// A node with temporal risk metrics from git history.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemporalNode {
+    pub id: String,
+    pub label: String,
+    pub last_modified: String,
+    pub change_count: usize,
+    pub age_days: u64,
+    pub churn_rate: f64,
+    pub risk_score: f64,
+}
+
+/// A pair of structurally similar nodes found via graph embedding.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimilarPair {
+    pub node_a: String,
+    pub node_b: String,
+    pub similarity: f64,
+    pub label_a: String,
+    pub label_b: String,
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

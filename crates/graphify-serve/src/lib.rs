@@ -207,6 +207,195 @@ pub fn subgraph_to_text(
     output
 }
 
+// ---------------------------------------------------------------------------
+// Smart graph summarization
+// ---------------------------------------------------------------------------
+
+/// Abstraction level for graph summaries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SummaryLevel {
+    /// Full detail: all nodes and edges within budget.
+    Detailed,
+    /// Community representatives + cross-community edges.
+    Community,
+    /// Directory-level super-nodes with aggregated dependencies.
+    Architecture,
+}
+
+/// Generate a multi-level graph summary within a token budget.
+///
+/// - `Detailed`: Equivalent to `subgraph_to_text` on the full graph.
+/// - `Community`: One representative node per community (highest degree) + cross-community edges.
+/// - `Architecture`: Groups nodes by directory into super-nodes, merges edges.
+pub fn smart_summary(
+    graph: &KnowledgeGraph,
+    communities: &HashMap<usize, Vec<String>>,
+    level: SummaryLevel,
+    token_budget: usize,
+) -> String {
+    match level {
+        SummaryLevel::Detailed => {
+            let all_nodes = graph.node_ids();
+            let all_edges: Vec<(String, String)> = graph
+                .edges_with_endpoints()
+                .iter()
+                .map(|(s, t, _)| (s.to_string(), t.to_string()))
+                .collect();
+            subgraph_to_text(graph, &all_nodes, &all_edges, token_budget)
+        }
+        SummaryLevel::Community => community_level_summary(graph, communities, token_budget),
+        SummaryLevel::Architecture => architecture_level_summary(graph, token_budget),
+    }
+}
+
+/// Community-level summary: one representative per community + cross-community edges.
+fn community_level_summary(
+    graph: &KnowledgeGraph,
+    communities: &HashMap<usize, Vec<String>>,
+    token_budget: usize,
+) -> String {
+    let char_budget = token_budget * 4;
+    let mut output = String::with_capacity(char_budget.min(64 * 1024));
+
+    // Pick representative (highest degree) for each community
+    let mut representatives: HashMap<usize, (&str, usize)> = HashMap::new();
+    for (&cid, members) in communities {
+        let best = members
+            .iter()
+            .map(|id| (id.as_str(), graph.degree(id)))
+            .max_by_key(|(_, d)| *d)
+            .unwrap_or(("", 0));
+        representatives.insert(cid, best);
+    }
+
+    output.push_str(&format!(
+        "=== Architecture Summary ({} communities, {} total nodes) ===\n\n",
+        communities.len(),
+        graph.node_count()
+    ));
+
+    // Node→community reverse map
+    let mut node_cid: HashMap<&str, usize> = HashMap::new();
+    for (&cid, members) in communities {
+        for m in members {
+            node_cid.insert(m.as_str(), cid);
+        }
+    }
+
+    // Communities
+    output.push_str("## Communities\n\n");
+    let mut sorted_cids: Vec<usize> = communities.keys().copied().collect();
+    sorted_cids.sort();
+    for cid in &sorted_cids {
+        if output.len() >= char_budget {
+            output.push_str("\n... (truncated)\n");
+            break;
+        }
+        let members = &communities[cid];
+        let (rep_id, rep_deg) = representatives[cid];
+        let rep_label = graph
+            .get_node(rep_id)
+            .map(|n| n.label.as_str())
+            .unwrap_or(rep_id);
+        output.push_str(&format!(
+            "- Community {} ({} nodes): representative **{}** (degree {})\n",
+            cid,
+            members.len(),
+            rep_label,
+            rep_deg
+        ));
+    }
+
+    // Cross-community edges
+    output.push_str("\n## Cross-Community Dependencies\n\n");
+    let mut cross_edges: HashMap<(usize, usize), usize> = HashMap::new();
+    for (src, tgt, _) in graph.edges_with_endpoints() {
+        let sc = node_cid.get(src).copied().unwrap_or(usize::MAX);
+        let tc = node_cid.get(tgt).copied().unwrap_or(usize::MAX);
+        if sc != tc && sc != usize::MAX && tc != usize::MAX {
+            let key = if sc < tc { (sc, tc) } else { (tc, sc) };
+            *cross_edges.entry(key).or_default() += 1;
+        }
+    }
+    let mut sorted_cross: Vec<_> = cross_edges.into_iter().collect();
+    sorted_cross.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+    for ((c1, c2), count) in sorted_cross.iter().take(20) {
+        if output.len() >= char_budget {
+            break;
+        }
+        output.push_str(&format!(
+            "- Community {} ↔ Community {}: {} edges\n",
+            c1, c2, count
+        ));
+    }
+
+    output
+}
+
+/// Architecture-level summary: group by directory, aggregate edges.
+fn architecture_level_summary(graph: &KnowledgeGraph, token_budget: usize) -> String {
+    let char_budget = token_budget * 4;
+    let mut output = String::with_capacity(char_budget.min(64 * 1024));
+
+    // Group nodes by directory
+    let mut dir_nodes: HashMap<String, Vec<&str>> = HashMap::new();
+    for node in graph.nodes() {
+        let dir = std::path::Path::new(&node.source_file)
+            .parent()
+            .and_then(|p| p.to_str())
+            .unwrap_or(".")
+            .to_string();
+        dir_nodes.entry(dir).or_default().push(&node.id);
+    }
+
+    // Node→dir mapping
+    let mut node_dir: HashMap<&str, &str> = HashMap::new();
+    for (dir, nodes) in &dir_nodes {
+        for &nid in nodes {
+            node_dir.insert(nid, dir.as_str());
+        }
+    }
+
+    output.push_str(&format!(
+        "=== Architecture Overview ({} packages/directories) ===\n\n",
+        dir_nodes.len()
+    ));
+
+    // Directory summaries
+    output.push_str("## Packages\n\n");
+    let mut sorted_dirs: Vec<_> = dir_nodes.iter().collect();
+    sorted_dirs.sort_by_key(|(_, nodes)| std::cmp::Reverse(nodes.len()));
+    for (dir, nodes) in sorted_dirs.iter().take(30) {
+        if output.len() >= char_budget {
+            output.push_str("\n... (truncated)\n");
+            break;
+        }
+        output.push_str(&format!("- **{}** ({} entities)\n", dir, nodes.len()));
+    }
+
+    // Inter-directory dependencies
+    output.push_str("\n## Dependencies\n\n");
+    let mut dir_edges: HashMap<(&str, &str), usize> = HashMap::new();
+    for (src, tgt, _) in graph.edges_with_endpoints() {
+        let sd = node_dir.get(src).copied().unwrap_or("?");
+        let td = node_dir.get(tgt).copied().unwrap_or("?");
+        if sd != td {
+            let key = if sd < td { (sd, td) } else { (td, sd) };
+            *dir_edges.entry(key).or_default() += 1;
+        }
+    }
+    let mut sorted_deps: Vec<_> = dir_edges.into_iter().collect();
+    sorted_deps.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+    for ((d1, d2), count) in sorted_deps.iter().take(20) {
+        if output.len() >= char_budget {
+            break;
+        }
+        output.push_str(&format!("- {} → {}: {} edges\n", d1, d2, count));
+    }
+
+    output
+}
+
 /// Load a knowledge graph from a JSON file.
 pub fn load_graph(graph_path: &Path) -> Result<KnowledgeGraph, ServeError> {
     let content = std::fs::read_to_string(graph_path)?;

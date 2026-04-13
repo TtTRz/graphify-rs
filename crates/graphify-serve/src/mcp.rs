@@ -206,6 +206,63 @@ fn tool_definitions() -> Value {
                 },
                 "required": ["other_graph"]
             }
+        },
+        {
+            "name": "pagerank",
+            "description": "Compute PageRank importance scores. Unlike degree-based ranking, PageRank identifies nodes that are important due to being connected to other important nodes.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "top_n": {
+                        "type": "number",
+                        "description": "Number of top nodes to return (default: 10)"
+                    }
+                }
+            }
+        },
+        {
+            "name": "detect_cycles",
+            "description": "Detect dependency cycles in the graph using Tarjan's algorithm. Finds circular dependencies (A imports B imports C imports A) that indicate architectural debt.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "max_cycles": {
+                        "type": "number",
+                        "description": "Maximum number of cycles to return (default: 10)"
+                    }
+                }
+            }
+        },
+        {
+            "name": "smart_summary",
+            "description": "Generate a multi-level graph summary. Level 'detailed' shows all nodes, 'community' shows one representative per community, 'architecture' groups by directory.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "level": {
+                        "type": "string",
+                        "description": "Summary level: detailed, community, or architecture (default: community)",
+                        "enum": ["detailed", "community", "architecture"]
+                    },
+                    "budget": {
+                        "type": "number",
+                        "description": "Token budget for summary (default: 2000)"
+                    }
+                }
+            }
+        },
+        {
+            "name": "find_similar",
+            "description": "Find structurally similar node pairs using graph embeddings. Identifies nodes with similar connectivity patterns that may be redundant or candidates for refactoring.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "top_n": {
+                        "type": "number",
+                        "description": "Number of similar pairs to return (default: 10)"
+                    }
+                }
+            }
         }
     ])
 }
@@ -666,6 +723,54 @@ fn handle_graph_diff(graph: &KnowledgeGraph, args: &Value) -> Value {
     tool_result_text(&serde_json::to_string_pretty(&diff).unwrap_or_default())
 }
 
+fn handle_pagerank(graph: &KnowledgeGraph, args: &Value) -> Value {
+    let top_n = args["top_n"].as_u64().unwrap_or(10) as usize;
+    let results = graphify_analyze::pagerank(graph, top_n, 0.85, 20);
+    tool_result_text(&serde_json::to_string_pretty(&results).unwrap_or_default())
+}
+
+fn handle_detect_cycles(graph: &KnowledgeGraph, args: &Value) -> Value {
+    let max_cycles = args["max_cycles"].as_u64().unwrap_or(10) as usize;
+    let cycles = graphify_analyze::detect_cycles(graph, max_cycles);
+    if cycles.is_empty() {
+        tool_result_text("No dependency cycles detected.")
+    } else {
+        tool_result_text(&serde_json::to_string_pretty(&cycles).unwrap_or_default())
+    }
+}
+
+fn handle_smart_summary(graph: &KnowledgeGraph, args: &Value) -> Value {
+    let level_str = args["level"].as_str().unwrap_or("community");
+    let budget = args["budget"].as_u64().unwrap_or(2000) as usize;
+
+    let level = match level_str {
+        "detailed" => crate::SummaryLevel::Detailed,
+        "architecture" => crate::SummaryLevel::Architecture,
+        _ => crate::SummaryLevel::Community,
+    };
+
+    // Build communities map from graph node.community field
+    let mut communities: HashMap<usize, Vec<String>> = HashMap::new();
+    for node in graph.nodes() {
+        let cid = node.community.unwrap_or(0);
+        communities.entry(cid).or_default().push(node.id.clone());
+    }
+
+    let summary = crate::smart_summary(graph, &communities, level, budget);
+    tool_result_text(&summary)
+}
+
+fn handle_find_similar(graph: &KnowledgeGraph, args: &Value) -> Value {
+    let top_n = args["top_n"].as_u64().unwrap_or(10) as usize;
+    let embeddings = graphify_analyze::embedding::compute_embeddings(graph, 64, 10, 40);
+    let pairs = graphify_analyze::embedding::find_similar(graph, &embeddings, top_n);
+    if pairs.is_empty() {
+        tool_result_text("No structurally similar node pairs found.")
+    } else {
+        tool_result_text(&serde_json::to_string_pretty(&pairs).unwrap_or_default())
+    }
+}
+
 fn dispatch_tools_call(graph: &KnowledgeGraph, request: &Value) -> Value {
     let id = &request["id"];
     let tool_name = request["params"]["name"].as_str().unwrap_or("");
@@ -685,6 +790,10 @@ fn dispatch_tools_call(graph: &KnowledgeGraph, request: &Value) -> Value {
         "weighted_path" => handle_weighted_path(graph, args),
         "community_bridges" => handle_community_bridges(graph, args),
         "graph_diff" => handle_graph_diff(graph, args),
+        "pagerank" => handle_pagerank(graph, args),
+        "detect_cycles" => handle_detect_cycles(graph, args),
+        "smart_summary" => handle_smart_summary(graph, args),
+        "find_similar" => handle_find_similar(graph, args),
         _ => tool_result_error(&format!("Unknown tool: {tool_name}")),
     };
 
@@ -873,7 +982,7 @@ mod tests {
         let req = json!({"jsonrpc": "2.0", "method": "tools/list", "id": 2});
         let resp = dispatch(&g, &req).unwrap();
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 11);
+        assert_eq!(tools.len(), 15);
 
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"query_graph"));

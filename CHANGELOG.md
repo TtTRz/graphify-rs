@@ -8,10 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.0] - 2026-04-13
 
 ### Added
-- **4 new MCP tools** — `find_all_paths` (DFS path enumeration), `weighted_path` (Dijkstra with 1/weight distance), `community_bridges` (cross-community bridge nodes), `graph_diff` (compare two graph snapshots). Total MCP tools: 7 → 11
+- **8 new MCP tools** — `find_all_paths`, `weighted_path`, `community_bridges`, `graph_diff`, `pagerank`, `detect_cycles`, `smart_summary`, `find_similar`. Total MCP tools: 7 → 15
+- **PageRank algorithm** — power iteration with configurable damping (0.85) and convergence detection; identifies structurally critical nodes beyond simple degree ranking
+- **Dependency cycle detection** — Tarjan's SCC algorithm finds circular dependencies (imports/uses/calls); severity scored by cycle length
+- **Smart graph summarization** — three abstraction levels for LLM token budgets: `Detailed` (full graph), `Community` (one representative per community + cross-community edges), `Architecture` (directory-level super-nodes with aggregated dependencies)
+- **Graph embedding + similarity** — Node2Vec random walks + Skip-gram SGD learns 64-dim node embeddings; cosine similarity finds structurally similar node pairs (redundancy/refactoring candidates)
+- **Temporal risk analysis** — git blame integration correlates change frequency × connectivity to identify high-risk nodes (`temporal.rs`)
+- **Incremental community detection** — `cluster_incremental()` re-clusters only affected communities when files change; falls back to full Leiden when >50% communities affected
 - **Weighted graph analysis** — `confidence_to_weight()` maps EXTRACTED→1.0, INFERRED→0.7, AMBIGUOUS→0.3; `BridgeNode` model for bridge analysis
 - **Cross-file import resolution for all 21 languages** — was only Python/JS/Rust/Go; now includes Java, C#, C/C++, Kotlin, PHP, Dart, Scala, Swift (language-specific resolvers for dot imports, backslash imports, C includes, Dart packages)
-- **84 extraction tests** covering all 21 supported languages, organized in `tests/` directory per Rust conventions
+- **378 tests** covering all 21 supported languages, organized in `tests/` directory per Rust conventions
 - **`--max-viz-nodes` flag** — configurable HTML visualization node limit (default 2000), allows larger projects to show more context
 
 ### Changed

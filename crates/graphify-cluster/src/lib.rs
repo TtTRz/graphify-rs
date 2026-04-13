@@ -653,6 +653,134 @@ fn split_community(graph: &KnowledgeGraph, nodes: &[String]) -> Vec<Vec<String>>
 }
 
 // ---------------------------------------------------------------------------
+// Incremental community detection
+// ---------------------------------------------------------------------------
+
+/// Incrementally re-cluster only the communities affected by changed files.
+///
+/// Instead of re-running Leiden on the entire graph, this:
+/// 1. Identifies nodes belonging to `changed_files`
+/// 2. Finds which communities are affected (contain changed nodes or their neighbors)
+/// 3. Re-runs Leiden only on the affected subgraph
+/// 4. Merges with unchanged communities
+///
+/// Falls back to full `cluster()` if > 50% of communities are affected.
+pub fn cluster_incremental(
+    graph: &KnowledgeGraph,
+    prev_communities: &HashMap<usize, Vec<String>>,
+    changed_files: &[String],
+) -> HashMap<usize, Vec<String>> {
+    if prev_communities.is_empty() || changed_files.is_empty() {
+        return cluster(graph);
+    }
+
+    let changed_set: HashSet<&str> = changed_files.iter().map(|s| s.as_str()).collect();
+
+    // Find affected node IDs (nodes whose source_file is in changed_files)
+    let affected_nodes: HashSet<String> = graph
+        .nodes()
+        .iter()
+        .filter(|n| changed_set.contains(n.source_file.as_str()))
+        .map(|n| n.id.clone())
+        .collect();
+
+    if affected_nodes.is_empty() {
+        return prev_communities.clone();
+    }
+
+    // Build node→community reverse map
+    let node_to_cid: HashMap<&str, usize> = prev_communities
+        .iter()
+        .flat_map(|(&cid, nodes)| nodes.iter().map(move |n| (n.as_str(), cid)))
+        .collect();
+
+    // Find affected communities: those containing affected nodes or their neighbors
+    let mut affected_cids: HashSet<usize> = HashSet::new();
+    for node_id in &affected_nodes {
+        if let Some(&cid) = node_to_cid.get(node_id.as_str()) {
+            affected_cids.insert(cid);
+        }
+        // Also include neighbor communities
+        for neighbor in graph.get_neighbors(node_id) {
+            if let Some(&cid) = node_to_cid.get(neighbor.id.as_str()) {
+                affected_cids.insert(cid);
+            }
+        }
+    }
+
+    // If too many communities affected, just re-cluster everything
+    if affected_cids.len() * 2 > prev_communities.len() {
+        debug!(
+            "incremental: {}% communities affected, falling back to full cluster",
+            affected_cids.len() * 100 / prev_communities.len().max(1)
+        );
+        return cluster(graph);
+    }
+
+    debug!(
+        "incremental: re-clustering {} of {} communities ({} affected nodes)",
+        affected_cids.len(),
+        prev_communities.len(),
+        affected_nodes.len()
+    );
+
+    // Collect all nodes in affected communities
+    let affected_community_nodes: Vec<String> = affected_cids
+        .iter()
+        .flat_map(|cid| prev_communities.get(cid).cloned().unwrap_or_default())
+        .collect();
+
+    // Also include new nodes not in any previous community
+    let all_prev_nodes: HashSet<&str> = prev_communities
+        .values()
+        .flat_map(|v| v.iter().map(|s| s.as_str()))
+        .collect();
+    let new_nodes: Vec<String> = graph
+        .node_ids()
+        .into_iter()
+        .filter(|id| !all_prev_nodes.contains(id.as_str()))
+        .collect();
+
+    let mut recluster_nodes: Vec<String> = affected_community_nodes;
+    recluster_nodes.extend(new_nodes);
+
+    // Re-cluster the affected subgraph
+    let sub_communities = split_community(graph, &recluster_nodes);
+
+    // Merge: unchanged communities + re-clustered ones
+    let mut result: HashMap<usize, Vec<String>> = HashMap::new();
+    let mut next_cid = 0usize;
+
+    // Keep unchanged communities
+    for (&cid, nodes) in prev_communities {
+        if !affected_cids.contains(&cid) {
+            result.insert(next_cid, nodes.clone());
+            next_cid += 1;
+        }
+    }
+
+    // Add re-clustered communities
+    for nodes in sub_communities {
+        if !nodes.is_empty() {
+            result.insert(next_cid, nodes);
+            next_cid += 1;
+        }
+    }
+
+    // Re-index by size descending
+    let mut final_vec: Vec<Vec<String>> = result.into_values().collect();
+    final_vec.sort_by_key(|b| std::cmp::Reverse(b.len()));
+    final_vec
+        .into_iter()
+        .enumerate()
+        .map(|(i, mut nodes)| {
+            nodes.sort();
+            (i, nodes)
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

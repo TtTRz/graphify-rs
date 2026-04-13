@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use tracing::debug;
 
 use graphify_core::graph::KnowledgeGraph;
-use graphify_core::model::{BridgeNode, GodNode, Surprise};
+use graphify_core::model::{BridgeNode, DependencyCycle, GodNode, PageRankNode, Surprise};
 
 // ---------------------------------------------------------------------------
 // God nodes
@@ -535,6 +535,296 @@ fn compute_cohesion(graph: &KnowledgeGraph, community_nodes: &[String]) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
+// PageRank
+// ---------------------------------------------------------------------------
+
+/// Compute PageRank importance scores for all nodes.
+///
+/// Returns the top `top_n` nodes sorted by PageRank score descending.
+/// Uses the power iteration method with configurable damping factor (default 0.85).
+pub fn pagerank(
+    graph: &KnowledgeGraph,
+    top_n: usize,
+    damping: f64,
+    max_iterations: usize,
+) -> Vec<PageRankNode> {
+    let n = graph.node_count();
+    if n == 0 {
+        return Vec::new();
+    }
+
+    let ids = graph.node_ids();
+    let id_to_idx: HashMap<&str, usize> = ids
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.as_str(), i))
+        .collect();
+
+    // Build adjacency + out-degree (undirected graph: treat all edges as bidirectional)
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (src, tgt, _) in graph.edges_with_endpoints() {
+        if let (Some(&si), Some(&ti)) = (id_to_idx.get(src), id_to_idx.get(tgt)) {
+            adj[si].push(ti);
+            adj[ti].push(si);
+        }
+    }
+
+    let out_degree: Vec<usize> = adj.iter().map(|neighbors| neighbors.len()).collect();
+    let init = 1.0 / n as f64;
+    let mut rank = vec![init; n];
+    let mut next_rank = vec![0.0f64; n];
+
+    for _ in 0..max_iterations {
+        let teleport = (1.0 - damping) / n as f64;
+
+        // Dangling node mass (nodes with no outgoing edges)
+        let dangling_sum: f64 = rank
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| out_degree[*i] == 0)
+            .map(|(_, r)| r)
+            .sum();
+
+        for v in 0..n {
+            let mut sum = 0.0;
+            for &u in &adj[v] {
+                if out_degree[u] > 0 {
+                    sum += rank[u] / out_degree[u] as f64;
+                }
+            }
+            next_rank[v] = teleport + damping * (sum + dangling_sum / n as f64);
+        }
+
+        // Check convergence
+        let delta: f64 = rank
+            .iter()
+            .zip(next_rank.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        std::mem::swap(&mut rank, &mut next_rank);
+        if delta < 1e-6 {
+            break;
+        }
+    }
+
+    // Build result
+    let mut results: Vec<PageRankNode> = ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| {
+            let node = graph.get_node(id);
+            PageRankNode {
+                id: id.clone(),
+                label: node.map(|n| n.label.clone()).unwrap_or_default(),
+                score: rank[i],
+                degree: out_degree[i],
+            }
+        })
+        .collect();
+
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    results.truncate(top_n);
+    results
+}
+
+// ---------------------------------------------------------------------------
+// Dependency cycle detection
+// ---------------------------------------------------------------------------
+
+/// Detect dependency cycles using Tarjan's algorithm for strongly connected components.
+///
+/// Only considers directional edges (imports, uses, calls) to find true dependency cycles.
+/// Returns cycles sorted by severity (shorter cycles = more severe).
+pub fn detect_cycles(graph: &KnowledgeGraph, max_cycles: usize) -> Vec<DependencyCycle> {
+    let directional = ["imports", "uses", "calls", "includes"];
+
+    let ids = graph.node_ids();
+    let id_to_idx: HashMap<&str, usize> = ids
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.as_str(), i))
+        .collect();
+    let n = ids.len();
+
+    // Build directed adjacency list
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (src, tgt, edge) in graph.edges_with_endpoints() {
+        if directional.contains(&edge.relation.as_str()) {
+            if let (Some(&si), Some(&ti)) = (id_to_idx.get(src), id_to_idx.get(tgt)) {
+                adj[si].push(ti);
+            }
+        }
+    }
+
+    // Tarjan's SCC
+    let sccs = tarjan_scc(&adj, n);
+
+    // For each SCC with size > 1, extract cycle
+    let mut cycles: Vec<DependencyCycle> = Vec::new();
+    for scc in &sccs {
+        if scc.len() <= 1 || cycles.len() >= max_cycles {
+            continue;
+        }
+
+        // Find a simple cycle within this SCC using DFS
+        let scc_set: HashSet<usize> = scc.iter().copied().collect();
+        if let Some(cycle_indices) = find_cycle_in_scc(&adj, scc, &scc_set) {
+            let nodes: Vec<String> = cycle_indices.iter().map(|&i| ids[i].clone()).collect();
+            let edges: Vec<(String, String)> = cycle_indices
+                .windows(2)
+                .map(|w| (ids[w[0]].clone(), ids[w[1]].clone()))
+                .chain(std::iter::once((
+                    ids[*cycle_indices.last().unwrap()].clone(),
+                    ids[cycle_indices[0]].clone(),
+                )))
+                .collect();
+            let severity = 1.0 / nodes.len() as f64;
+            cycles.push(DependencyCycle {
+                nodes,
+                edges,
+                severity,
+            });
+        }
+    }
+
+    cycles.sort_by(|a, b| {
+        b.severity
+            .partial_cmp(&a.severity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    cycles.truncate(max_cycles);
+    cycles
+}
+
+/// Tarjan's algorithm for finding strongly connected components.
+fn tarjan_scc(adj: &[Vec<usize>], n: usize) -> Vec<Vec<usize>> {
+    let mut index_counter = 0usize;
+    let mut stack: Vec<usize> = Vec::new();
+    let mut on_stack = vec![false; n];
+    let mut index = vec![usize::MAX; n];
+    let mut lowlink = vec![0usize; n];
+    let mut result: Vec<Vec<usize>> = Vec::new();
+
+    fn strongconnect(
+        v: usize,
+        adj: &[Vec<usize>],
+        index_counter: &mut usize,
+        stack: &mut Vec<usize>,
+        on_stack: &mut [bool],
+        index: &mut [usize],
+        lowlink: &mut [usize],
+        result: &mut Vec<Vec<usize>>,
+    ) {
+        index[v] = *index_counter;
+        lowlink[v] = *index_counter;
+        *index_counter += 1;
+        stack.push(v);
+        on_stack[v] = true;
+
+        for &w in &adj[v] {
+            if index[w] == usize::MAX {
+                strongconnect(
+                    w,
+                    adj,
+                    index_counter,
+                    stack,
+                    on_stack,
+                    index,
+                    lowlink,
+                    result,
+                );
+                lowlink[v] = lowlink[v].min(lowlink[w]);
+            } else if on_stack[w] {
+                lowlink[v] = lowlink[v].min(index[w]);
+            }
+        }
+
+        if lowlink[v] == index[v] {
+            let mut component = Vec::new();
+            while let Some(w) = stack.pop() {
+                on_stack[w] = false;
+                component.push(w);
+                if w == v {
+                    break;
+                }
+            }
+            result.push(component);
+        }
+    }
+
+    for v in 0..n {
+        if index[v] == usize::MAX {
+            strongconnect(
+                v,
+                adj,
+                &mut index_counter,
+                &mut stack,
+                &mut on_stack,
+                &mut index,
+                &mut lowlink,
+                &mut result,
+            );
+        }
+    }
+
+    result
+}
+
+/// Find a simple cycle within a strongly connected component.
+fn find_cycle_in_scc(
+    adj: &[Vec<usize>],
+    scc: &[usize],
+    scc_set: &HashSet<usize>,
+) -> Option<Vec<usize>> {
+    if scc.is_empty() {
+        return None;
+    }
+    let start = scc[0];
+    let mut visited = HashSet::new();
+    let mut path = Vec::new();
+
+    fn dfs_cycle(
+        node: usize,
+        start: usize,
+        adj: &[Vec<usize>],
+        scc_set: &HashSet<usize>,
+        visited: &mut HashSet<usize>,
+        path: &mut Vec<usize>,
+    ) -> bool {
+        path.push(node);
+        visited.insert(node);
+
+        for &next in &adj[node] {
+            if !scc_set.contains(&next) {
+                continue;
+            }
+            if next == start && path.len() > 1 {
+                return true; // Found cycle back to start
+            }
+            if !visited.contains(&next) && dfs_cycle(next, start, adj, scc_set, visited, path) {
+                return true;
+            }
+        }
+
+        path.pop();
+        false
+    }
+
+    if dfs_cycle(start, start, adj, scc_set, &mut visited, &mut path) {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+pub mod embedding;
+pub mod temporal;
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -543,6 +833,7 @@ mod tests {
     use super::*;
     use graphify_core::confidence::Confidence;
     use graphify_core::graph::KnowledgeGraph;
+    use graphify_core::id::make_id;
     use graphify_core::model::{GraphEdge, GraphNode, NodeType};
     use std::collections::HashMap as StdHashMap;
 
@@ -887,5 +1178,78 @@ mod tests {
 
         let bridges = community_bridges(&g, &communities, 10);
         assert!(bridges.is_empty(), "no bridges in single community");
+    }
+
+    // ----- PageRank tests -----
+
+    #[test]
+    fn pagerank_empty_graph() {
+        let g = KnowledgeGraph::new();
+        let result = pagerank(&g, 10, 0.85, 20);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn pagerank_star_topology() {
+        // Center node connected to 5 leaves — center should rank highest
+        let mut nodes = vec![simple_node("center")];
+        let mut edges = vec![];
+        for i in 0..5 {
+            let id = format!("leaf{i}");
+            nodes.push(simple_node(&id));
+            edges.push(simple_edge("center", &id));
+        }
+        let g = build_graph(&nodes, &edges);
+        let result = pagerank(&g, 10, 0.85, 20);
+        assert!(!result.is_empty());
+        assert_eq!(result[0].id, "center");
+        assert!(result[0].score > result[1].score);
+    }
+
+    #[test]
+    fn pagerank_returns_top_n() {
+        let nodes: Vec<_> = (0..20).map(|i| simple_node(&format!("n{i}"))).collect();
+        let edges: Vec<_> = (0..19)
+            .map(|i| simple_edge(&format!("n{i}"), &format!("n{}", i + 1)))
+            .collect();
+        let g = build_graph(&nodes, &edges);
+        let result = pagerank(&g, 5, 0.85, 20);
+        assert_eq!(result.len(), 5);
+    }
+
+    // ----- Cycle detection tests -----
+
+    #[test]
+    fn detect_cycles_no_cycles() {
+        // Tree structure: no cycles
+        let g = build_graph(
+            &[simple_node("a"), simple_node("b"), simple_node("c")],
+            &[simple_edge("a", "b"), simple_edge("b", "c")],
+        );
+        let cycles = detect_cycles(&g, 10);
+        assert!(cycles.is_empty(), "tree should have no cycles");
+    }
+
+    #[test]
+    fn detect_cycles_finds_triangle() {
+        // a → b → c → a (using "calls" edges)
+        let g = build_graph(
+            &[simple_node("a"), simple_node("b"), simple_node("c")],
+            &[
+                simple_edge("a", "b"),
+                simple_edge("b", "c"),
+                simple_edge("c", "a"),
+            ],
+        );
+        let cycles = detect_cycles(&g, 10);
+        assert!(!cycles.is_empty(), "triangle should be detected as a cycle");
+        assert!(cycles[0].nodes.len() >= 3);
+        assert!((cycles[0].severity - 1.0 / 3.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn detect_cycles_empty_graph() {
+        let g = KnowledgeGraph::new();
+        assert!(detect_cycles(&g, 10).is_empty());
     }
 }

@@ -208,13 +208,13 @@ Code changes trigger AST re-extraction + rebuild automatically (no LLM needed). 
 
 ## For MCP server
 
-Start a stdio MCP server exposing 11 query tools:
+Start a stdio MCP server exposing 15 query tools:
 
 ```bash
 graphify-rs serve --graph graphify-out/graph.json
 ```
 
-Tools: `query_graph`, `get_node`, `get_neighbors`, `get_community`, `god_nodes`, `graph_stats`, `shortest_path`, `find_all_paths`, `weighted_path`, `community_bridges`, `graph_diff`.
+Tools: `query_graph`, `get_node`, `get_neighbors`, `get_community`, `god_nodes`, `graph_stats`, `shortest_path`, `find_all_paths`, `weighted_path`, `community_bridges`, `graph_diff`, `pagerank`, `detect_cycles`, `smart_summary`, `find_similar`.
 
 To configure in Claude Desktop, add to `claude_desktop_config.json`:
 ```json
