@@ -1703,4 +1703,38 @@ public class Calculator {
             "expected >=2 imports, got {import_count}"
         );
     }
+
+    // ----- Dart -----
+
+    #[test]
+    fn ts_dart_extracts_class_and_methods() {
+        let source = br#"
+import 'dart:async';
+import 'package:flutter/material.dart';
+
+enum Status { active, inactive }
+
+void main() {
+  print('hello');
+}
+"#;
+        let result = try_extract(Path::new("user_service.dart"), source, "dart").unwrap();
+        let labels: Vec<&str> = result.nodes.iter().map(|n| n.label.as_str()).collect();
+        assert!(
+            labels.iter().any(|l| l.contains("main")),
+            "missing main: {labels:?}"
+        );
+        assert!(result.nodes.iter().any(|n| n.node_type == NodeType::File));
+
+        let import_edges: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|e| e.relation == "imports")
+            .collect();
+        assert!(
+            import_edges.len() >= 2,
+            "expected >= 2 import edges, got {}",
+            import_edges.len()
+        );
+    }
 }

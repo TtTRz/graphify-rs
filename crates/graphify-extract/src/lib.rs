@@ -1454,4 +1454,110 @@ mod tests {
             uses_edges.len()
         );
     }
+
+    // ===== Scala cross-file resolution =====
+
+    #[test]
+    fn scala_cross_file_creates_uses_edges() {
+        let mut result = ExtractionResult {
+            nodes: vec![
+                make_test_node("file_main", "Main", "src/Main.scala", NodeType::File),
+                make_test_node("main_fn", "main", "src/Main.scala", NodeType::Function),
+                make_test_node(
+                    "import_calc",
+                    "import com.example.Calculator",
+                    "src/Main.scala",
+                    NodeType::Module,
+                ),
+                make_test_node(
+                    "file_calc",
+                    "Calculator",
+                    "src/Calculator.scala",
+                    NodeType::File,
+                ),
+                make_test_node(
+                    "calc_class",
+                    "Calculator",
+                    "src/Calculator.scala",
+                    NodeType::Class,
+                ),
+            ],
+            edges: vec![
+                make_test_edge("file_main", "main_fn", "defines", "src/Main.scala"),
+                make_test_edge("file_main", "import_calc", "imports", "src/Main.scala"),
+                make_test_edge("file_calc", "calc_class", "defines", "src/Calculator.scala"),
+            ],
+            hyperedges: vec![],
+        };
+
+        resolve_cross_file_imports(&mut result);
+
+        let uses_edges: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|e| e.relation == "uses")
+            .collect();
+        assert!(
+            !uses_edges.is_empty(),
+            "Scala cross-file should create uses edges"
+        );
+        assert!(
+            uses_edges
+                .iter()
+                .any(|e| e.source == "main_fn" && e.target == "calc_class")
+        );
+    }
+
+    // ===== Swift cross-file resolution =====
+
+    #[test]
+    fn swift_cross_file_creates_uses_edges() {
+        let mut result = ExtractionResult {
+            nodes: vec![
+                make_test_node("file_app", "App", "src/App.swift", NodeType::File),
+                make_test_node("app_fn", "run", "src/App.swift", NodeType::Function),
+                make_test_node(
+                    "import_mgr",
+                    "import UserManager",
+                    "src/App.swift",
+                    NodeType::Module,
+                ),
+                make_test_node(
+                    "file_mgr",
+                    "UserManager",
+                    "src/UserManager.swift",
+                    NodeType::File,
+                ),
+                make_test_node(
+                    "mgr_class",
+                    "UserManager",
+                    "src/UserManager.swift",
+                    NodeType::Class,
+                ),
+            ],
+            edges: vec![
+                make_test_edge("file_app", "app_fn", "defines", "src/App.swift"),
+                make_test_edge("file_app", "import_mgr", "imports", "src/App.swift"),
+                make_test_edge("file_mgr", "mgr_class", "defines", "src/UserManager.swift"),
+            ],
+            hyperedges: vec![],
+        };
+
+        resolve_cross_file_imports(&mut result);
+
+        let uses_edges: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|e| e.relation == "uses")
+            .collect();
+        assert!(
+            !uses_edges.is_empty(),
+            "Swift cross-file should create uses edges"
+        );
+        assert!(
+            uses_edges
+                .iter()
+                .any(|e| e.source == "app_fn" && e.target == "mgr_class")
+        );
+    }
 }

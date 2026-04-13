@@ -1767,4 +1767,263 @@ public class Calculator
         );
         assert!(labels.contains(&"Add"), "missing Add: {labels:?}");
     }
+
+    // ----- Scala -----
+
+    #[test]
+    fn scala_extracts_class_and_functions() {
+        let source = r#"
+import scala.collection.mutable
+
+class Calculator {
+  def add(a: Int, b: Int): Int = a + b
+  def subtract(a: Int, b: Int): Int = a - b
+}
+
+object Main {
+  def main(args: Array[String]): Unit = {
+    val calc = new Calculator()
+    println(calc.add(1, 2))
+  }
+}
+
+trait Printable {
+  def print(): Unit
+}
+"#;
+        let result = extract_file(Path::new("Main.scala"), source, "scala");
+        let labels: Vec<&str> = result.nodes.iter().map(|n| n.label.as_str()).collect();
+        assert!(
+            labels.contains(&"Calculator"),
+            "missing Calculator: {labels:?}"
+        );
+        assert!(labels.contains(&"add"), "missing add: {labels:?}");
+        assert!(labels.contains(&"main"), "missing main: {labels:?}");
+    }
+
+    // ----- PHP -----
+
+    #[test]
+    fn php_extracts_class_and_functions() {
+        let source = r#"<?php
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+
+class User extends Model {
+    public function getName(): string {
+        return $this->name;
+    }
+
+    public function setName(string $name): void {
+        $this->name = $name;
+    }
+}
+
+function helper(): void {
+    echo "hello";
+}
+"#;
+        let result = extract_file(Path::new("User.php"), source, "php");
+        let labels: Vec<&str> = result.nodes.iter().map(|n| n.label.as_str()).collect();
+        assert!(labels.contains(&"User"), "missing User: {labels:?}");
+        assert!(labels.contains(&"getName"), "missing getName: {labels:?}");
+        assert!(labels.contains(&"helper"), "missing helper: {labels:?}");
+    }
+
+    // ----- Swift -----
+
+    #[test]
+    fn swift_extracts_class_and_functions() {
+        let source = r#"
+import Foundation
+
+class UserManager {
+    func fetchUser(id: Int) -> String {
+        return "User \(id)"
+    }
+
+    func deleteUser(id: Int) {
+        print("Deleting \(id)")
+    }
+}
+
+struct Config {
+    let apiUrl: String
+    let timeout: Int
+}
+
+func main() {
+    let mgr = UserManager()
+    mgr.fetchUser(id: 1)
+}
+"#;
+        let result = extract_file(Path::new("UserManager.swift"), source, "swift");
+        let labels: Vec<&str> = result.nodes.iter().map(|n| n.label.as_str()).collect();
+        assert!(
+            labels.contains(&"UserManager"),
+            "missing UserManager: {labels:?}"
+        );
+        assert!(
+            labels.contains(&"fetchUser"),
+            "missing fetchUser: {labels:?}"
+        );
+        assert!(labels.contains(&"main"), "missing main: {labels:?}");
+    }
+
+    // ----- Lua -----
+
+    #[test]
+    fn lua_extracts_functions() {
+        let source = r#"
+function greet(name)
+    print("Hello " .. name)
+end
+
+function calculate(a, b)
+    return a + b
+end
+"#;
+        let result = extract_file(Path::new("module.lua"), source, "lua");
+        let labels: Vec<&str> = result.nodes.iter().map(|n| n.label.as_str()).collect();
+        assert!(labels.contains(&"greet"), "missing greet: {labels:?}");
+        assert!(
+            labels.contains(&"calculate"),
+            "missing calculate: {labels:?}"
+        );
+    }
+
+    // ----- Zig -----
+
+    #[test]
+    fn zig_extracts_functions() {
+        let source = r#"
+const std = @import("std");
+
+pub fn add(a: i32, b: i32) i32 {
+    return a + b;
+}
+
+fn helper() void {
+    std.debug.print("hello", .{});
+}
+
+pub const Config = struct {
+    port: u16,
+    host: []const u8,
+};
+"#;
+        let result = extract_file(Path::new("main.zig"), source, "zig");
+        let labels: Vec<&str> = result.nodes.iter().map(|n| n.label.as_str()).collect();
+        assert!(labels.contains(&"add"), "missing add: {labels:?}");
+        assert!(labels.contains(&"helper"), "missing helper: {labels:?}");
+    }
+
+    // ----- PowerShell -----
+
+    #[test]
+    fn powershell_extracts_class() {
+        let source = r#"
+class Logger {
+    [string]$Path
+}
+
+class UserService {
+    [void] Process() {
+        Write-Host "processing"
+    }
+}
+"#;
+        let result = extract_file(Path::new("utils.ps1"), source, "powershell");
+        let labels: Vec<&str> = result.nodes.iter().map(|n| n.label.as_str()).collect();
+        assert!(labels.contains(&"Logger"), "missing Logger: {labels:?}");
+        assert!(
+            labels.contains(&"UserService"),
+            "missing UserService: {labels:?}"
+        );
+    }
+
+    // ----- Elixir -----
+
+    #[test]
+    fn elixir_extracts_functions() {
+        let source = r#"
+defmodule MyApp.Calculator do
+  use GenServer
+
+  def add(a, b) do
+    a + b
+  end
+
+  def subtract(a, b) do
+    a - b
+  end
+
+  defp internal_helper do
+    :ok
+  end
+end
+"#;
+        let result = extract_file(Path::new("calculator.ex"), source, "elixir");
+        let labels: Vec<&str> = result.nodes.iter().map(|n| n.label.as_str()).collect();
+        assert!(labels.contains(&"add"), "missing add: {labels:?}");
+        assert!(labels.contains(&"subtract"), "missing subtract: {labels:?}");
+    }
+
+    // ----- Objective-C -----
+
+    #[test]
+    fn objc_extracts_at_least_file_node() {
+        let source = r#"
+#import <Foundation/Foundation.h>
+
+@interface UserManager : NSObject
+- (NSString *)fetchUser:(NSInteger)userId;
+@end
+
+@implementation UserManager
+
+- (NSString *)fetchUser:(NSInteger)userId {
+    return @"User";
+}
+
+@end
+"#;
+        let result = extract_file(Path::new("UserManager.m"), source, "objc");
+        assert!(
+            !result.nodes.is_empty(),
+            "should extract at least file node"
+        );
+        assert!(result.nodes.iter().any(|n| n.node_type == NodeType::File));
+    }
+
+    // ----- Julia -----
+
+    #[test]
+    fn julia_extracts_functions() {
+        let source = r#"
+using LinearAlgebra
+import Statistics
+
+function greet(name::String)
+    println("Hello $name")
+end
+
+function calculate(a::Int, b::Int)::Int
+    return a + b
+end
+
+struct Config
+    host::String
+    port::Int
+end
+"#;
+        let result = extract_file(Path::new("app.jl"), source, "julia");
+        let labels: Vec<&str> = result.nodes.iter().map(|n| n.label.as_str()).collect();
+        assert!(labels.contains(&"greet"), "missing greet: {labels:?}");
+        assert!(
+            labels.contains(&"calculate"),
+            "missing calculate: {labels:?}"
+        );
+    }
 }
