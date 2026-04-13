@@ -90,7 +90,6 @@ exclude = [
     "tests/",
     "graphify-out/",
     "graphify.toml",
-    "skill.md",
     "README_CN.md",
     "AUDIT_*.md",
 ]

@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **God Nodes degree=0** — report showed degree 0 for all god nodes due to JSON field name mismatch (`"edges"` → `"degree"`)
 - **God Nodes missing community** — `"community"` field was not included in JSON passed to report generator
+- **File name too long (os error 63)** — Obsidian/Wiki export used node labels/IDs as filenames without length limit; added `truncate_to_bytes()` utility (240-byte cap) to `graphify-core`, applied in `obsidian.rs` and `wiki.rs`
 - **Clippy warnings** — fixed 25 `collapsible_if` + 1 `let_and_return` across 14 files using Rust 2024 let-chains
 
 ## [0.2.0] - 2026-04-10

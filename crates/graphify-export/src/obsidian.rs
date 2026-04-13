@@ -84,8 +84,12 @@ pub fn export_obsidian(
 }
 
 /// Sanitize a label for use as both a filename and a `[[wikilink]]` target.
+///
+/// Truncates to [`graphify_core::MAX_FILENAME_BYTES`] to avoid "File name too long"
+/// (ENAMETOOLONG / os error 63) on macOS and other systems with a 255-byte limit.
 fn sanitize_filename(s: &str) -> String {
-    s.chars()
+    let sanitized: String = s
+        .chars()
         .map(|c| {
             if c.is_alphanumeric() || c == '_' || c == '-' || c == ' ' {
                 c
@@ -93,7 +97,8 @@ fn sanitize_filename(s: &str) -> String {
                 '_'
             }
         })
-        .collect()
+        .collect();
+    graphify_core::truncate_to_bytes(&sanitized, graphify_core::MAX_FILENAME_BYTES).to_string()
 }
 
 #[cfg(test)]

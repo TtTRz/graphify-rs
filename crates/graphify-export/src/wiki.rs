@@ -209,7 +209,8 @@ fn node_filename(id: &str) -> String {
             }
         })
         .collect();
-    format!("{}.md", safe)
+    let truncated = graphify_core::truncate_to_bytes(&safe, graphify_core::MAX_FILENAME_BYTES);
+    format!("{}.md", truncated)
 }
 
 #[cfg(test)]
