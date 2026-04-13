@@ -11,10 +11,10 @@ A Rust rewrite of [graphify](https://github.com/safishamsi/graphify) — an AI-p
 | Area | Python (original) | Rust (this repo) |
 |------|-------------------|-------------------|
 | Performance | ~204ms, ~48MB RAM | ~24ms, ~1MB RAM (8.5x faster, 48x less memory) |
-| AST parsing | Regex only | 10 languages native tree-sitter + regex fallback |
+| AST parsing | Regex only | 11 languages native tree-sitter + regex fallback |
 | Semantic extraction | Sequential | Concurrent with configurable parallelism (`-j`) |
 | MCP server | Not included | 7 tools over JSON-RPC 2.0 stdio |
-| Export formats | 7 | 8 (+ Obsidian vault) |
+| Export formats | 7 | 9 (+ Obsidian vault, split HTML per community) |
 | CLI | Basic | 21 subcommands, `--quiet`/`--verbose`, shell completions |
 | Progress | No feedback | Progress bars for large projects |
 | Config | CLI only | `graphify.toml` project-level defaults |
@@ -25,10 +25,25 @@ A Rust rewrite of [graphify](https://github.com/safishamsi/graphify) — an AI-p
 
 Output format is **fully compatible** — `graph.json` uses the same NetworkX `node_link_data` schema, so Python tools can read Rust output and vice versa.
 
+## Installation
+
+### From crates.io
+
+```bash
+cargo install graphify-rs
+```
+
+### From source
+
+```bash
+git clone https://github.com/TtTRz/graphify-rs.git
+cd graphify-rs
+cargo install --path .
+```
+
 ## Quick Start
 
 ```bash
-cargo install --path .
 graphify-rs build
 open graphify-out/graph.html
 ```
@@ -167,7 +182,8 @@ CLI flags always override config file values.
 | File | Description |
 |------|-------------|
 | `graph.json` | NetworkX-compatible node_link_data JSON |
-| `graph.html` | Interactive vis.js visualization (dark theme) |
+| `graph.html` | Interactive vis.js visualization (dark theme, auto-pruning for large graphs) |
+| `html/` | Per-community HTML pages with overview navigation |
 | `GRAPH_REPORT.md` | Analysis report: communities, god nodes, surprises |
 | `graph.svg` | Static graph visualization |
 | `graph.graphml` | For graph editors (yEd, Gephi) |
@@ -189,12 +205,12 @@ When running `graphify-rs serve`, 7 tools are available over JSON-RPC 2.0 (stdio
 | `graph_stats` | Overall graph statistics |
 | `shortest_path` | Find shortest path between two nodes |
 
-## Supported Languages
+## Supported Languages (21)
 
 | Native (tree-sitter) | Regex Fallback |
 |----------------------|----------------|
-| Python, JavaScript, TypeScript, Rust, Go | PHP, Swift, Kotlin, Scala, Dart |
-| Java, C, C++, Ruby, C# | Lua, Haskell, Elixir, Shell/Bash, R |
+| Python, JavaScript, TypeScript, Rust, Go, Java | Kotlin, Scala, PHP, Swift, Lua |
+| C, C++, Ruby, C#, Dart | Zig, PowerShell, Elixir, Obj-C, Julia |
 
 ## Contributing
 
