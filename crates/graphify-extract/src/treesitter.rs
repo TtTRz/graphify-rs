@@ -170,6 +170,34 @@ fn csharp_config() -> TsConfig {
     }
 }
 
+fn dart_config() -> TsConfig {
+    TsConfig {
+        class_types: [
+            "class_definition",
+            "enum_declaration",
+            "mixin_declaration",
+            "extension_declaration",
+        ]
+        .into_iter()
+        .collect(),
+        function_types: [
+            "function_signature",
+            "method_signature",
+            "function_body",
+        ]
+        .into_iter()
+        .collect(),
+        import_types: ["import_or_export"].into_iter().collect(),
+        call_types: ["method_invocation", "function_expression_invocation"]
+            .into_iter()
+            .collect(),
+        name_field: "name",
+        class_name_field: None,
+        body_field: "body",
+        call_function_field: "function",
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Public entry point
 // ═══════════════════════════════════════════════════════════════════════════
@@ -191,6 +219,7 @@ pub fn try_extract(path: &Path, source: &[u8], lang: &str) -> Option<ExtractionR
         "cpp" => (tree_sitter_cpp::LANGUAGE.into(), cpp_config()),
         "ruby" => (tree_sitter_ruby::LANGUAGE.into(), ruby_config()),
         "csharp" => (tree_sitter_c_sharp::LANGUAGE.into(), csharp_config()),
+        "dart" => (tree_sitter_dart::LANGUAGE.into(), dart_config()),
         _ => return None,
     };
     extract_with_treesitter(path, source, language, &config, lang)

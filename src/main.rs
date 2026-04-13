@@ -735,17 +735,52 @@ fn cmd_build(
     let communities = graphify_cluster::cluster(&graph);
     let cohesion = graphify_cluster::score_all(&graph, &communities);
 
-    let community_labels: HashMap<usize, String> = communities
-        .iter()
-        .map(|(cid, nodes)| {
-            let label = nodes
-                .first()
-                .and_then(|id| graph.get_node(id))
-                .map(|n| n.label.clone())
-                .unwrap_or_else(|| format!("Community {}", cid));
-            (*cid, label)
-        })
-        .collect();
+    let community_labels: HashMap<usize, String> = {
+        let mut used_labels: std::collections::HashSet<String> = std::collections::HashSet::new();
+        communities
+            .iter()
+            .map(|(cid, nodes)| {
+                // Pick the most descriptive label: prefer non-generic names,
+                // skip "lib", "super::*", import-like labels, etc.
+                let generic = ["lib", "super::*", "main", "mod", "tests"];
+                let best = nodes
+                    .iter()
+                    .filter_map(|id| graph.get_node(id))
+                    .filter(|n| {
+                        !generic.contains(&n.label.as_str())
+                            && !n.label.starts_with("std::")
+                            && !n.label.starts_with("serde::")
+                            && !n.label.contains("::")
+                    })
+                    // Prefer functions/structs over file nodes
+                    .max_by_key(|n| match n.node_type {
+                        graphify_core::model::NodeType::Function => 3,
+                        graphify_core::model::NodeType::Class
+                        | graphify_core::model::NodeType::Struct => 3,
+                        graphify_core::model::NodeType::Module => 1,
+                        graphify_core::model::NodeType::File => 0,
+                        _ => 2,
+                    })
+                    .map(|n| n.label.clone())
+                    .unwrap_or_else(|| {
+                        // Fallback: use first node's label
+                        nodes
+                            .first()
+                            .and_then(|id| graph.get_node(id))
+                            .map(|n| n.label.clone())
+                            .unwrap_or_else(|| format!("Community {}", cid))
+                    });
+                // Deduplicate: if label already used, append community id
+                let label = if used_labels.contains(&best) {
+                    format!("{} ({})", best, cid)
+                } else {
+                    used_labels.insert(best.clone());
+                    best
+                };
+                (*cid, label)
+            })
+            .collect()
+    };
 
     info_print!(
         verb,
@@ -794,7 +829,7 @@ fn cmd_build(
     });
     let god_json: Vec<serde_json::Value> = god_list
         .iter()
-        .map(|g| serde_json::json!({"label": g.label, "edges": g.degree}))
+        .map(|g| serde_json::json!({"label": g.label, "degree": g.degree, "community": g.community}))
         .collect();
     let surprise_json: Vec<serde_json::Value> = surprise_list
         .iter()

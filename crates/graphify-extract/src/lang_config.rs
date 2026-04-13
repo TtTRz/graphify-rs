@@ -407,6 +407,36 @@ pub fn julia_config() -> LanguageConfig {
     }
 }
 
+pub fn dart_config() -> LanguageConfig {
+    LanguageConfig {
+        name: "dart",
+        ts_crate: "tree_sitter_dart",
+        class_types: hs(&[
+            "class_definition",
+            "enum_declaration",
+            "mixin_declaration",
+            "extension_declaration",
+        ]),
+        function_types: hs(&[
+            "function_signature",
+            "method_signature",
+            "function_body",
+            "method_definition",
+        ]),
+        import_types: hs(&["import_or_export"]),
+        call_types: hs(&["method_invocation", "function_expression_invocation"]),
+        name_field: "name",
+        body_field: "body",
+        call_function_field: "function",
+        function_boundary_types: hs(&[
+            "method_definition",
+            "function_signature",
+            "class_definition",
+        ]),
+        function_label_parens: false,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Lookup
 // ---------------------------------------------------------------------------
@@ -434,6 +464,7 @@ pub fn config_for_language(lang: &str) -> Option<LanguageConfig> {
         "elixir" => Some(elixir_config()),
         "objc" => Some(objc_config()),
         "julia" => Some(julia_config()),
+        "dart" => Some(dart_config()),
         _ => None,
     }
 }
@@ -447,7 +478,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_20_languages_have_configs() {
+    fn all_21_languages_have_configs() {
         let languages = [
             "python",
             "javascript",
@@ -469,6 +500,7 @@ mod tests {
             "elixir",
             "objc",
             "julia",
+            "dart",
         ];
         for lang in languages {
             assert!(
@@ -476,7 +508,7 @@ mod tests {
                 "missing config for {lang}"
             );
         }
-        assert_eq!(languages.len(), 20);
+        assert_eq!(languages.len(), 21);
     }
 
     #[test]

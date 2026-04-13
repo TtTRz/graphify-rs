@@ -58,6 +58,7 @@ pub const DISPATCH: &[(&str, &str)] = &[
     (".m", "objc"),
     (".mm", "objc"),
     (".jl", "julia"),
+    (".dart", "dart"),
 ];
 
 /// Build a hashmap for fast extension lookup.

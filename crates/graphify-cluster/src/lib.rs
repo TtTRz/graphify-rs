@@ -19,6 +19,14 @@ const MAX_COMMUNITY_FRACTION: f64 = 0.25;
 /// Minimum community size below which we never attempt a split.
 const MIN_SPLIT_SIZE: usize = 10;
 
+/// Minimum community size — communities smaller than this get merged into
+/// their most-connected neighbor.
+const MIN_COMMUNITY_SIZE: usize = 5;
+
+/// Resolution parameter for modularity. Lower = fewer, larger communities.
+/// Default Leiden uses 1.0; we use a lower value to avoid over-fragmentation.
+const RESOLUTION: f64 = 0.3;
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -51,6 +59,10 @@ pub fn cluster(graph: &KnowledgeGraph) -> HashMap<usize, Vec<String>> {
     for (node_id, cid) in &partition {
         communities.entry(*cid).or_default().push(node_id.clone());
     }
+
+    // Merge tiny communities into their most-connected neighbor
+    let adj = build_adjacency(graph);
+    merge_small_communities(&mut communities, &adj);
 
     // Split oversized communities
     let max_size = std::cmp::max(
@@ -315,7 +327,7 @@ fn louvain_phase(
                 let sigma_current = community_strength(adj, &current_members_ref);
 
                 let gain = (ki_in_target - ki_in_current) / m
-                    - ki * (sigma_target - sigma_current) / (2.0 * m * m);
+                    - RESOLUTION * ki * (sigma_target - sigma_current) / (2.0 * m * m);
 
                 if gain > best_gain {
                     best_gain = gain;
@@ -514,6 +526,54 @@ fn compact_ids(community_of: &mut HashMap<String, usize>) {
         .collect();
     for cid in community_of.values_mut() {
         *cid = remap[cid];
+    }
+}
+
+/// Merge communities smaller than `MIN_COMMUNITY_SIZE` into their
+/// most-connected neighboring community.
+fn merge_small_communities(
+    communities: &mut HashMap<usize, Vec<String>>,
+    adj: &HashMap<String, Vec<(String, f64)>>,
+) {
+    loop {
+        // Build node → community reverse map each iteration
+        let node_to_cid: HashMap<String, usize> = communities
+            .iter()
+            .flat_map(|(&cid, nodes)| nodes.iter().map(move |n| (n.clone(), cid)))
+            .collect();
+
+        // Find one small community to merge
+        let merge = communities
+            .iter()
+            .filter(|(_, nodes)| nodes.len() < MIN_COMMUNITY_SIZE)
+            .find_map(|(&small_cid, nodes)| {
+                // Count edges to each neighboring community
+                let mut neighbor_edges: HashMap<usize, f64> = HashMap::new();
+                for node in nodes {
+                    if let Some(neighbors) = adj.get(node.as_str()) {
+                        for (neighbor, weight) in neighbors {
+                            if let Some(&ncid) = node_to_cid.get(neighbor.as_str()) {
+                                if ncid != small_cid {
+                                    *neighbor_edges.entry(ncid).or_default() += weight;
+                                }
+                            }
+                        }
+                    }
+                }
+                // Best target
+                neighbor_edges
+                    .iter()
+                    .max_by(|a, b| a.1.total_cmp(b.1))
+                    .map(|(&best_cid, _)| (small_cid, best_cid))
+            });
+
+        match merge {
+            Some((small_cid, best_cid)) => {
+                let nodes = communities.remove(&small_cid).unwrap_or_default();
+                communities.entry(best_cid).or_default().extend(nodes);
+            }
+            None => break, // No more small communities to merge
+        }
     }
 }
 
