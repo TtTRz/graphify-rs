@@ -75,6 +75,14 @@ impl KnowledgeGraph {
             .and_then(|&idx| self.graph.node_weight(idx))
     }
 
+    /// Get a mutable reference to a node by its string ID.
+    pub fn get_node_mut(&mut self, id: &str) -> Option<&mut GraphNode> {
+        self.index_map
+            .get(id)
+            .copied()
+            .and_then(|idx| self.graph.node_weight_mut(idx))
+    }
+
     pub fn get_neighbors(&self, id: &str) -> Vec<&GraphNode> {
         let Some(&idx) = self.index_map.get(id) else {
             return Vec::new();
@@ -322,5 +330,21 @@ mod tests {
     fn default_impl() {
         let kg = KnowledgeGraph::default();
         assert_eq!(kg.node_count(), 0);
+    }
+
+    #[test]
+    fn get_node_mut_updates_community() {
+        let mut kg = KnowledgeGraph::new();
+        kg.add_node(make_node("a")).unwrap();
+        assert!(kg.get_node("a").unwrap().community.is_none());
+
+        kg.get_node_mut("a").unwrap().community = Some(42);
+        assert_eq!(kg.get_node("a").unwrap().community, Some(42));
+    }
+
+    #[test]
+    fn get_node_mut_missing_returns_none() {
+        let mut kg = KnowledgeGraph::new();
+        assert!(kg.get_node_mut("nope").is_none());
     }
 }

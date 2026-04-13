@@ -144,6 +144,18 @@ pub struct AnalysisResult {
     pub questions: Vec<String>,
 }
 
+/// A node that bridges multiple communities.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BridgeNode {
+    pub id: String,
+    pub label: String,
+    pub total_edges: usize,
+    pub cross_community_edges: usize,
+    /// Ratio of cross-community edges to total edges (0.0–1.0).
+    pub bridge_ratio: f64,
+    pub communities_touched: Vec<usize>,
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

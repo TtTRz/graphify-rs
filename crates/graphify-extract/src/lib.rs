@@ -190,6 +190,8 @@ pub fn extract(paths: &[PathBuf]) -> ExtractionResult {
 
 /// Resolve Python `import` / `from ... import` edges to actual module/function
 /// nodes discovered across files.
+///
+/// Also handles `from x import *` by expanding to all entities in module x.
 fn resolve_python_imports(result: &mut ExtractionResult) {
     // Build a lookup from node label → node id
     let label_to_id: HashMap<String, String> = result
@@ -198,16 +200,77 @@ fn resolve_python_imports(result: &mut ExtractionResult) {
         .map(|n| (n.label.clone(), n.id.clone()))
         .collect();
 
+    // Build module stem → [entity_id] for star import expansion
+    let mut stem_to_entity_ids: HashMap<String, Vec<String>> = HashMap::new();
+    let defined_targets: HashSet<String> = result
+        .edges
+        .iter()
+        .filter(|e| e.relation == "defines")
+        .map(|e| e.target.clone())
+        .collect();
+    for node in &result.nodes {
+        if !defined_targets.contains(&node.id) {
+            continue;
+        }
+        let stem = std::path::Path::new(&node.source_file)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        stem_to_entity_ids
+            .entry(stem)
+            .or_default()
+            .push(node.id.clone());
+    }
+
+    // Collect star import edges for expansion
+    let mut star_expansions: Vec<GraphEdge> = Vec::new();
+
     // For every edge with relation "imports", try to resolve the target
     for edge in &mut result.edges {
         if edge.relation == "imports" {
-            // target is currently a raw import name – see if we have a matching node
-            if let Some(resolved_id) = label_to_id.get(&edge.target) {
-                edge.target = resolved_id.clone();
-                edge.confidence = graphify_core::confidence::Confidence::Extracted;
+            // Check for star import: target label contains "*"
+            let import_label = result
+                .nodes
+                .iter()
+                .find(|n| n.id == edge.target)
+                .map(|n| n.label.as_str())
+                .unwrap_or("");
+
+            if import_label.contains('*') {
+                // `from module import *` — expand to all entities in module
+                let module_name = import_label.trim_end_matches(".*").trim_end_matches(" *");
+                if let Some(entity_ids) = stem_to_entity_ids.get(module_name) {
+                    for target_id in entity_ids {
+                        star_expansions.push(GraphEdge {
+                            source: edge.source.clone(),
+                            target: target_id.clone(),
+                            relation: "uses".to_string(),
+                            confidence: Confidence::Inferred,
+                            confidence_score: 0.7,
+                            source_file: edge.source_file.clone(),
+                            source_location: None,
+                            weight: 0.7,
+                            extra: Default::default(),
+                        });
+                    }
+                }
+            } else {
+                // Regular import — resolve by label
+                if let Some(resolved_id) = label_to_id.get(&edge.target) {
+                    edge.target = resolved_id.clone();
+                    edge.confidence = graphify_core::confidence::Confidence::Extracted;
+                }
             }
-            // Otherwise, leave target as-is (unresolved external import)
         }
+    }
+
+    if !star_expansions.is_empty() {
+        debug!(
+            "python star import expansion: created {} uses edges",
+            star_expansions.len()
+        );
+        result.edges.extend(star_expansions);
     }
 }
 
@@ -337,12 +400,41 @@ fn resolve_cross_file_imports(result: &mut ExtractionResult) {
 
         let target_entities = match ext {
             // JS/TS: import labels are like "module/Name" or just "Name"
-            // The module part of the path maps to a file stem
             "js" | "jsx" | "ts" | "tsx" => resolve_jsts_import(import_label, &stem_to_entities),
-            // Go: import labels are like "fmt" or "net/http" – last segment is the package name
+            // Go: import labels are like "fmt" or "net/http"
             "go" => resolve_go_import(import_label, &stem_to_entities, &go_pkg_to_entities),
             // Rust: import labels are like "std::collections" or "crate::model"
             "rs" => resolve_rust_import(import_label, &stem_to_entities),
+            // Java: import labels are like "java.util.List"
+            "java" => resolve_dot_import(import_label, &stem_to_entities),
+            // C#: using labels are like "System.Collections.Generic"
+            "cs" => resolve_dot_import(import_label, &stem_to_entities),
+            // C/C++: include labels are like "stdio.h" or "myheader.h"
+            "c" | "h" | "cpp" | "cc" | "cxx" | "hpp" => {
+                resolve_c_include(import_label, &stem_to_entities)
+            }
+            // Kotlin: raw "import com.example.Foo"
+            "kt" | "kts" => {
+                let cleaned = import_label.strip_prefix("import ").unwrap_or(import_label);
+                resolve_dot_import(cleaned.trim(), &stem_to_entities)
+            }
+            // PHP: labels are like "use App\Models\User"
+            "php" => {
+                let cleaned = import_label.strip_prefix("use ").unwrap_or(import_label);
+                resolve_backslash_import(cleaned.trim(), &stem_to_entities)
+            }
+            // Dart: raw "import 'package:foo/bar.dart'"
+            "dart" => resolve_dart_import(import_label, &stem_to_entities),
+            // Scala: raw "import scala.collection.mutable"
+            "scala" => {
+                let cleaned = import_label.strip_prefix("import ").unwrap_or(import_label);
+                resolve_dot_import(cleaned.trim(), &stem_to_entities)
+            }
+            // Swift: raw "import Foundation"
+            "swift" => {
+                let cleaned = import_label.strip_prefix("import ").unwrap_or(import_label);
+                resolve_dot_import(cleaned.trim(), &stem_to_entities)
+            }
             _ => continue,
         };
 
@@ -399,7 +491,8 @@ fn resolve_cross_file_imports(result: &mut ExtractionResult) {
 /// - `"DefaultName"` (default import, label is the local binding name)
 /// - `"./relative/path"` module path
 ///
-/// We try to match the module part (or the last path segment) to a file stem.
+/// Also handles barrel exports: if import points to a directory, tries to
+/// resolve via `index` file (index.js/index.ts).
 fn resolve_jsts_import<'a>(
     import_label: &str,
     stem_to_entities: &'a HashMap<String, Vec<(String, String, NodeType)>>,
@@ -432,6 +525,15 @@ fn resolve_jsts_import<'a>(
         return entities.iter().collect();
     }
 
+    // Barrel export: if the last segment matches a directory, check for "index" file
+    // This handles `import { Foo } from './components'` → resolves to components/index.ts
+    if let Some(entities) = stem_to_entities.get("index") {
+        // Only use index if the import looks like a directory path
+        if import_label.contains('/') || import_label.starts_with('.') {
+            return entities.iter().collect();
+        }
+    }
+
     Vec::new()
 }
 
@@ -439,13 +541,17 @@ fn resolve_jsts_import<'a>(
 ///
 /// Go import labels are like `"fmt"`, `"net/http"`, or `"myproject/pkg/utils"`.
 /// The last path segment is the package name.
+/// Also handles dot imports (`import . "pkg"`) which bring all entities into scope.
 fn resolve_go_import<'a>(
     import_label: &str,
     stem_to_entities: &'a HashMap<String, Vec<(String, String, NodeType)>>,
     go_pkg_to_entities: &'a HashMap<String, Vec<(String, String, NodeType)>>,
 ) -> Vec<&'a (String, String, NodeType)> {
+    // Handle dot import: strip leading "." prefix
+    let label = import_label.trim_start_matches(". ");
+
     // Extract the last path segment as the package name
-    let pkg_name = import_label.rsplit('/').next().unwrap_or(import_label);
+    let pkg_name = label.rsplit('/').next().unwrap_or(label);
 
     // Try matching against Go package directory names
     if let Some(entities) = go_pkg_to_entities.get(pkg_name) {
@@ -463,12 +569,17 @@ fn resolve_go_import<'a>(
 /// Resolve a Rust `use` import to target entities.
 ///
 /// Rust import labels are like `"std::collections"`, `"crate::model"`, or `"super::utils"`.
-/// We try to match the last segment of the path to a file stem / module name.
+/// Handles `pub use` re-exports: if import label starts with `pub use`, resolves
+/// transitively through the re-exporting module to the original definition.
 fn resolve_rust_import<'a>(
     import_label: &str,
     stem_to_entities: &'a HashMap<String, Vec<(String, String, NodeType)>>,
 ) -> Vec<&'a (String, String, NodeType)> {
-    let segments: Vec<&str> = import_label.split("::").collect();
+    // Strip `pub use ` prefix if present (re-export)
+    let label = import_label
+        .strip_prefix("pub use ")
+        .unwrap_or(import_label);
+    let segments: Vec<&str> = label.split("::").collect();
 
     // Try the last segment as a module/file stem
     if let Some(last) = segments.last()
@@ -493,6 +604,126 @@ fn resolve_rust_import<'a>(
             // If no exact match, return all entities from the module
             return entities.iter().collect();
         }
+    }
+
+    Vec::new()
+}
+
+/// Resolve a dot-separated import (Java, C#, Kotlin, Scala, Swift).
+///
+/// Import labels like `"java.util.List"` or `"System.Collections.Generic"`.
+/// Tries the last segment as a type name, then second-to-last as module stem.
+fn resolve_dot_import<'a>(
+    import_label: &str,
+    stem_to_entities: &'a HashMap<String, Vec<(String, String, NodeType)>>,
+) -> Vec<&'a (String, String, NodeType)> {
+    let segments: Vec<&str> = import_label.split('.').collect();
+
+    // Try the last segment as a type/entity name matching a file stem
+    if let Some(last) = segments.last()
+        && let Some(entities) = stem_to_entities.get(*last)
+    {
+        return entities.iter().collect();
+    }
+
+    // Try second-to-last as module, filter to last segment
+    if segments.len() >= 2 {
+        let module = segments[segments.len() - 2];
+        if let Some(entities) = stem_to_entities.get(module) {
+            let last = segments.last().unwrap();
+            let filtered: Vec<_> = entities
+                .iter()
+                .filter(|(label, _, _)| label == last)
+                .collect();
+            if !filtered.is_empty() {
+                return filtered;
+            }
+            return entities.iter().collect();
+        }
+    }
+
+    Vec::new()
+}
+
+/// Resolve a C/C++ `#include` to target entities.
+///
+/// Include labels are like `"stdio.h"` or `"myheader.h"`.
+/// Strips the extension and matches the stem to file entities.
+fn resolve_c_include<'a>(
+    import_label: &str,
+    stem_to_entities: &'a HashMap<String, Vec<(String, String, NodeType)>>,
+) -> Vec<&'a (String, String, NodeType)> {
+    // Strip angle brackets and quotes
+    let label = import_label
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .trim_start_matches('"')
+        .trim_end_matches('"');
+
+    // Strip extension (.h, .hpp, etc.)
+    let stem = std::path::Path::new(label)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(label);
+
+    if let Some(entities) = stem_to_entities.get(stem) {
+        return entities.iter().collect();
+    }
+
+    Vec::new()
+}
+
+/// Resolve a PHP backslash-separated import.
+///
+/// Labels like `"App\Models\User"` → try "User" as stem, then "Models".
+fn resolve_backslash_import<'a>(
+    import_label: &str,
+    stem_to_entities: &'a HashMap<String, Vec<(String, String, NodeType)>>,
+) -> Vec<&'a (String, String, NodeType)> {
+    let segments: Vec<&str> = import_label.split('\\').collect();
+
+    // Try the last segment as entity name
+    if let Some(last) = segments.last()
+        && let Some(entities) = stem_to_entities.get(*last)
+    {
+        return entities.iter().collect();
+    }
+
+    // Try second-to-last as module
+    if segments.len() >= 2 {
+        let module = segments[segments.len() - 2];
+        if let Some(entities) = stem_to_entities.get(module) {
+            return entities.iter().collect();
+        }
+    }
+
+    Vec::new()
+}
+
+/// Resolve a Dart import.
+///
+/// Labels like `"import 'package:foo/bar.dart'"` or `"import 'bar.dart'"`.
+/// Extracts the file stem from the path.
+fn resolve_dart_import<'a>(
+    import_label: &str,
+    stem_to_entities: &'a HashMap<String, Vec<(String, String, NodeType)>>,
+) -> Vec<&'a (String, String, NodeType)> {
+    // Strip "import " prefix and quotes
+    let label = import_label
+        .strip_prefix("import ")
+        .unwrap_or(import_label)
+        .trim_matches('\'')
+        .trim_matches('"');
+
+    // Strip "package:" prefix and extract last path segment
+    let path_part = label.strip_prefix("package:").unwrap_or(label);
+    let last_segment = path_part.rsplit('/').next().unwrap_or(path_part);
+
+    // Strip .dart extension
+    let stem = last_segment.strip_suffix(".dart").unwrap_or(last_segment);
+
+    if let Some(entities) = stem_to_entities.get(stem) {
+        return entities.iter().collect();
     }
 
     Vec::new()
@@ -921,5 +1152,306 @@ mod tests {
 
         // The import edge target should resolve to the node ID "my_class"
         assert_eq!(result.edges[0].target, "my_class");
+    }
+
+    // ===== Java cross-file resolution =====
+
+    #[test]
+    fn java_cross_file_creates_uses_edges() {
+        let mut result = ExtractionResult {
+            nodes: vec![
+                make_test_node("file_app", "App", "src/App.java", NodeType::File),
+                make_test_node("app_class", "App", "src/App.java", NodeType::Class),
+                make_test_node(
+                    "import_util",
+                    "com.example.Util",
+                    "src/App.java",
+                    NodeType::Module,
+                ),
+                make_test_node("file_util", "Util", "src/Util.java", NodeType::File),
+                make_test_node("util_class", "Util", "src/Util.java", NodeType::Class),
+            ],
+            edges: vec![
+                make_test_edge("file_app", "app_class", "defines", "src/App.java"),
+                make_test_edge("file_app", "import_util", "imports", "src/App.java"),
+                make_test_edge("file_util", "util_class", "defines", "src/Util.java"),
+            ],
+            hyperedges: vec![],
+        };
+
+        resolve_cross_file_imports(&mut result);
+
+        let uses_edges: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|e| e.relation == "uses")
+            .collect();
+        assert!(
+            !uses_edges.is_empty(),
+            "Java cross-file should create uses edges"
+        );
+        assert!(
+            uses_edges
+                .iter()
+                .any(|e| e.source == "app_class" && e.target == "util_class")
+        );
+    }
+
+    // ===== C/C++ cross-file resolution =====
+
+    #[test]
+    fn c_include_creates_uses_edges() {
+        let mut result = ExtractionResult {
+            nodes: vec![
+                make_test_node("file_main", "main", "src/main.c", NodeType::File),
+                make_test_node("main_fn", "main", "src/main.c", NodeType::Function),
+                make_test_node("import_utils", "utils.h", "src/main.c", NodeType::Module),
+                make_test_node("file_utils", "utils", "src/utils.c", NodeType::File),
+                make_test_node("helper_fn", "helper", "src/utils.c", NodeType::Function),
+            ],
+            edges: vec![
+                make_test_edge("file_main", "main_fn", "defines", "src/main.c"),
+                make_test_edge("file_main", "import_utils", "imports", "src/main.c"),
+                make_test_edge("file_utils", "helper_fn", "defines", "src/utils.c"),
+            ],
+            hyperedges: vec![],
+        };
+
+        resolve_cross_file_imports(&mut result);
+
+        let uses_edges: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|e| e.relation == "uses")
+            .collect();
+        assert!(!uses_edges.is_empty(), "C include should create uses edges");
+        assert!(
+            uses_edges
+                .iter()
+                .any(|e| e.source == "main_fn" && e.target == "helper_fn")
+        );
+    }
+
+    // ===== C# cross-file resolution =====
+
+    #[test]
+    fn csharp_using_creates_uses_edges() {
+        let mut result = ExtractionResult {
+            nodes: vec![
+                make_test_node("file_prog", "Program", "src/Program.cs", NodeType::File),
+                make_test_node("prog_class", "Program", "src/Program.cs", NodeType::Class),
+                make_test_node(
+                    "import_svc",
+                    "MyApp.Services.UserService",
+                    "src/Program.cs",
+                    NodeType::Module,
+                ),
+                make_test_node(
+                    "file_svc",
+                    "UserService",
+                    "src/UserService.cs",
+                    NodeType::File,
+                ),
+                make_test_node(
+                    "svc_class",
+                    "UserService",
+                    "src/UserService.cs",
+                    NodeType::Class,
+                ),
+            ],
+            edges: vec![
+                make_test_edge("file_prog", "prog_class", "defines", "src/Program.cs"),
+                make_test_edge("file_prog", "import_svc", "imports", "src/Program.cs"),
+                make_test_edge("file_svc", "svc_class", "defines", "src/UserService.cs"),
+            ],
+            hyperedges: vec![],
+        };
+
+        resolve_cross_file_imports(&mut result);
+
+        let uses_edges: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|e| e.relation == "uses")
+            .collect();
+        assert!(!uses_edges.is_empty(), "C# using should create uses edges");
+        assert!(
+            uses_edges
+                .iter()
+                .any(|e| e.source == "prog_class" && e.target == "svc_class")
+        );
+    }
+
+    // ===== PHP cross-file resolution =====
+
+    #[test]
+    fn php_use_creates_uses_edges() {
+        let mut result = ExtractionResult {
+            nodes: vec![
+                make_test_node(
+                    "file_ctrl",
+                    "Controller",
+                    "src/Controller.php",
+                    NodeType::File,
+                ),
+                make_test_node(
+                    "ctrl_class",
+                    "Controller",
+                    "src/Controller.php",
+                    NodeType::Class,
+                ),
+                make_test_node(
+                    "import_user",
+                    r"use App\Models\User",
+                    "src/Controller.php",
+                    NodeType::Module,
+                ),
+                make_test_node("file_user", "User", "src/User.php", NodeType::File),
+                make_test_node("user_class", "User", "src/User.php", NodeType::Class),
+            ],
+            edges: vec![
+                make_test_edge("file_ctrl", "ctrl_class", "defines", "src/Controller.php"),
+                make_test_edge("file_ctrl", "import_user", "imports", "src/Controller.php"),
+                make_test_edge("file_user", "user_class", "defines", "src/User.php"),
+            ],
+            hyperedges: vec![],
+        };
+
+        resolve_cross_file_imports(&mut result);
+
+        let uses_edges: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|e| e.relation == "uses")
+            .collect();
+        assert!(!uses_edges.is_empty(), "PHP use should create uses edges");
+        assert!(
+            uses_edges
+                .iter()
+                .any(|e| e.source == "ctrl_class" && e.target == "user_class")
+        );
+    }
+
+    // ===== Dart cross-file resolution =====
+
+    #[test]
+    fn dart_import_creates_uses_edges() {
+        let mut result = ExtractionResult {
+            nodes: vec![
+                make_test_node("file_main", "main", "lib/main.dart", NodeType::File),
+                make_test_node("main_fn", "main", "lib/main.dart", NodeType::Function),
+                make_test_node(
+                    "import_utils",
+                    "import 'package:myapp/utils.dart'",
+                    "lib/main.dart",
+                    NodeType::Module,
+                ),
+                make_test_node("file_utils", "utils", "lib/utils.dart", NodeType::File),
+                make_test_node("helper_fn", "helper", "lib/utils.dart", NodeType::Function),
+            ],
+            edges: vec![
+                make_test_edge("file_main", "main_fn", "defines", "lib/main.dart"),
+                make_test_edge("file_main", "import_utils", "imports", "lib/main.dart"),
+                make_test_edge("file_utils", "helper_fn", "defines", "lib/utils.dart"),
+            ],
+            hyperedges: vec![],
+        };
+
+        resolve_cross_file_imports(&mut result);
+
+        let uses_edges: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|e| e.relation == "uses")
+            .collect();
+        assert!(
+            !uses_edges.is_empty(),
+            "Dart import should create uses edges"
+        );
+        assert!(
+            uses_edges
+                .iter()
+                .any(|e| e.source == "main_fn" && e.target == "helper_fn")
+        );
+    }
+
+    // ===== Kotlin cross-file resolution =====
+
+    #[test]
+    fn kotlin_import_creates_uses_edges() {
+        let mut result = ExtractionResult {
+            nodes: vec![
+                make_test_node("file_main", "Main", "src/Main.kt", NodeType::File),
+                make_test_node("main_fn", "main", "src/Main.kt", NodeType::Function),
+                make_test_node(
+                    "import_repo",
+                    "import com.example.UserRepo",
+                    "src/Main.kt",
+                    NodeType::Module,
+                ),
+                make_test_node("file_repo", "UserRepo", "src/UserRepo.kt", NodeType::File),
+                make_test_node("repo_class", "UserRepo", "src/UserRepo.kt", NodeType::Class),
+            ],
+            edges: vec![
+                make_test_edge("file_main", "main_fn", "defines", "src/Main.kt"),
+                make_test_edge("file_main", "import_repo", "imports", "src/Main.kt"),
+                make_test_edge("file_repo", "repo_class", "defines", "src/UserRepo.kt"),
+            ],
+            hyperedges: vec![],
+        };
+
+        resolve_cross_file_imports(&mut result);
+
+        let uses_edges: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|e| e.relation == "uses")
+            .collect();
+        assert!(
+            !uses_edges.is_empty(),
+            "Kotlin import should create uses edges"
+        );
+        assert!(
+            uses_edges
+                .iter()
+                .any(|e| e.source == "main_fn" && e.target == "repo_class")
+        );
+    }
+
+    // ===== Python star import expansion =====
+
+    #[test]
+    fn python_star_import_expands_to_entities() {
+        let mut result = ExtractionResult {
+            nodes: vec![
+                make_test_node("file_app", "app", "src/app.py", NodeType::File),
+                make_test_node("app_fn", "run", "src/app.py", NodeType::Function),
+                make_test_node("import_star", "utils.*", "src/app.py", NodeType::Module),
+                make_test_node("file_utils", "utils", "src/utils.py", NodeType::File),
+                make_test_node("helper1", "helper1", "src/utils.py", NodeType::Function),
+                make_test_node("helper2", "helper2", "src/utils.py", NodeType::Function),
+            ],
+            edges: vec![
+                make_test_edge("file_app", "app_fn", "defines", "src/app.py"),
+                make_test_edge("file_app", "import_star", "imports", "src/app.py"),
+                make_test_edge("file_utils", "helper1", "defines", "src/utils.py"),
+                make_test_edge("file_utils", "helper2", "defines", "src/utils.py"),
+            ],
+            hyperedges: vec![],
+        };
+
+        resolve_python_imports(&mut result);
+
+        let uses_edges: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|e| e.relation == "uses")
+            .collect();
+        assert_eq!(
+            uses_edges.len(),
+            2,
+            "star import should expand to 2 uses edges, got {}",
+            uses_edges.len()
+        );
     }
 }

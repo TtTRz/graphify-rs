@@ -666,7 +666,10 @@ fn cmd_build(
                     let key_clone = key.clone();
                     let sem_clone = sem.clone();
                     let handle = rt.spawn(async move {
-                        let _permit = sem_clone.acquire().await.unwrap();
+                        let _permit = sem_clone
+                            .acquire()
+                            .await
+                            .map_err(|e| anyhow::anyhow!("semaphore closed: {e}"))?;
                         graphify_extract::semantic::extract_semantic(
                             &doc_p, &content, file_type, &key_clone,
                         )
@@ -722,7 +725,7 @@ fn cmd_build(
 
     // ── Step 3: Build graph ──
     info_print!(verb, "  {} graph...", "Building".cyan());
-    let graph = graphify_build::build(&extractions).context("Failed to build graph")?;
+    let mut graph = graphify_build::build(&extractions).context("Failed to build graph")?;
     info_print!(
         verb,
         "  Graph: {} nodes, {} edges",
@@ -734,6 +737,15 @@ fn cmd_build(
     info_print!(verb, "  {} communities...", "Detecting".cyan());
     let communities = graphify_cluster::cluster(&graph);
     let cohesion = graphify_cluster::score_all(&graph, &communities);
+
+    // Write community assignments back into graph nodes
+    for (&cid, members) in &communities {
+        for nid in members {
+            if let Some(node) = graph.get_node_mut(nid) {
+                node.community = Some(cid);
+            }
+        }
+    }
 
     let community_labels: HashMap<usize, String> = {
         let mut used_labels: std::collections::HashSet<String> = std::collections::HashSet::new();

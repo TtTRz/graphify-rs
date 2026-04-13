@@ -255,6 +255,174 @@ pub async fn start_server(graph_path: &Path) -> Result<(), ServeError> {
 }
 
 // ---------------------------------------------------------------------------
+// Advanced graph algorithms
+// ---------------------------------------------------------------------------
+
+/// Find all simple paths between `source` and `target` up to `max_length` edges.
+///
+/// Returns a vec of paths, each path being a vec of node IDs.
+/// Limits to at most 50 paths to prevent combinatorial explosion.
+pub fn all_simple_paths(
+    graph: &KnowledgeGraph,
+    source: &str,
+    target: &str,
+    max_length: usize,
+) -> Vec<Vec<String>> {
+    const MAX_PATHS: usize = 50;
+    let mut result: Vec<Vec<String>> = Vec::new();
+    let mut stack: Vec<(String, Vec<String>)> = Vec::new();
+
+    if graph.get_node(source).is_none() || graph.get_node(target).is_none() {
+        return result;
+    }
+
+    stack.push((source.to_string(), vec![source.to_string()]));
+
+    while let Some((current, path)) = stack.pop() {
+        if result.len() >= MAX_PATHS {
+            break;
+        }
+        if current == target && path.len() > 1 {
+            result.push(path);
+            continue;
+        }
+        if path.len() > max_length + 1 {
+            continue;
+        }
+
+        for neighbor_id in graph.neighbor_ids(&current) {
+            if !path.contains(&neighbor_id) {
+                let mut new_path = path.clone();
+                new_path.push(neighbor_id.clone());
+                stack.push((neighbor_id, new_path));
+            }
+        }
+    }
+
+    result.sort_by_key(|p| p.len());
+    result
+}
+
+/// Edge detail in a weighted path: (from_id, to_id, cost, relation).
+pub type EdgeDetail = (String, String, f64, String);
+
+/// Dijkstra shortest path using edge weights.
+///
+/// Cost = 1.0 / edge.weight (higher weight = shorter distance).
+/// Optionally filters edges below `min_confidence` score.
+/// Returns `(path, total_cost, edge_details)` or None if no path exists.
+pub fn dijkstra_path(
+    graph: &KnowledgeGraph,
+    source: &str,
+    target: &str,
+    min_confidence: f64,
+) -> Option<(Vec<String>, f64, Vec<EdgeDetail>)> {
+    use std::cmp::Ordering;
+    use std::collections::BinaryHeap;
+
+    if graph.get_node(source).is_none() || graph.get_node(target).is_none() {
+        return None;
+    }
+    if source == target {
+        return Some((vec![source.to_string()], 0.0, Vec::new()));
+    }
+
+    // Build adjacency with weights from edges
+    let mut adj: HashMap<String, Vec<(String, f64, String)>> = HashMap::new();
+    for (src, tgt, edge) in graph.edges_with_endpoints() {
+        if edge.confidence_score < min_confidence {
+            continue;
+        }
+        let cost = if edge.weight > 0.0 {
+            1.0 / edge.weight
+        } else {
+            f64::MAX
+        };
+        adj.entry(src.to_string()).or_default().push((
+            tgt.to_string(),
+            cost,
+            edge.relation.clone(),
+        ));
+        adj.entry(tgt.to_string()).or_default().push((
+            src.to_string(),
+            cost,
+            edge.relation.clone(),
+        ));
+    }
+
+    #[derive(PartialEq)]
+    struct State {
+        cost: f64,
+        node: String,
+    }
+    impl Eq for State {}
+    impl PartialOrd for State {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+    impl Ord for State {
+        fn cmp(&self, other: &Self) -> Ordering {
+            other
+                .cost
+                .partial_cmp(&self.cost)
+                .unwrap_or(Ordering::Equal)
+        }
+    }
+
+    let mut dist: HashMap<String, f64> = HashMap::new();
+    let mut prev: HashMap<String, (String, f64, String)> = HashMap::new();
+    let mut heap = BinaryHeap::new();
+
+    dist.insert(source.to_string(), 0.0);
+    heap.push(State {
+        cost: 0.0,
+        node: source.to_string(),
+    });
+
+    while let Some(State { cost, node }) = heap.pop() {
+        if node == target {
+            break;
+        }
+        if cost > *dist.get(&node).unwrap_or(&f64::MAX) {
+            continue;
+        }
+        if let Some(neighbors) = adj.get(&node) {
+            for (next, edge_cost, relation) in neighbors {
+                let new_cost = cost + edge_cost;
+                if new_cost < *dist.get(next).unwrap_or(&f64::MAX) {
+                    dist.insert(next.clone(), new_cost);
+                    prev.insert(next.clone(), (node.clone(), *edge_cost, relation.clone()));
+                    heap.push(State {
+                        cost: new_cost,
+                        node: next.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    // Reconstruct path
+    if !prev.contains_key(target) {
+        return None;
+    }
+
+    let mut path = vec![target.to_string()];
+    let mut edge_details: Vec<(String, String, f64, String)> = Vec::new();
+    let mut current = target.to_string();
+    while let Some((from, cost, relation)) = prev.get(&current) {
+        edge_details.push((from.clone(), current.clone(), *cost, relation.clone()));
+        path.push(from.clone());
+        current = from.clone();
+    }
+    path.reverse();
+    edge_details.reverse();
+
+    let total_cost = *dist.get(target).unwrap_or(&f64::MAX);
+    Some((path, total_cost, edge_details))
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -408,5 +576,121 @@ mod tests {
         let g = make_test_graph();
         let (nodes, _) = bfs(&g, &["auth".to_string(), "cache".to_string()], 1);
         assert!(nodes.len() >= 4);
+    }
+
+    // -- all_simple_paths tests --
+
+    #[test]
+    fn test_all_simple_paths_direct() {
+        let g = make_test_graph();
+        let paths = all_simple_paths(&g, "auth", "user", 4);
+        assert!(!paths.is_empty());
+        // Direct edge exists: auth → user
+        assert!(paths.iter().any(|p| p.len() == 2));
+    }
+
+    #[test]
+    fn test_all_simple_paths_indirect() {
+        let g = make_test_graph();
+        // auth → db has direct path (len 2) and indirect auth → user → db (len 3)
+        let paths = all_simple_paths(&g, "auth", "db", 4);
+        assert!(
+            paths.len() >= 2,
+            "should find multiple paths, got {}",
+            paths.len()
+        );
+    }
+
+    #[test]
+    fn test_all_simple_paths_no_path() {
+        let mut g = KnowledgeGraph::new();
+        g.add_node(make_node("a", "A")).unwrap();
+        g.add_node(make_node("b", "B")).unwrap();
+        // No edge between a and b
+        let paths = all_simple_paths(&g, "a", "b", 4);
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn test_all_simple_paths_nonexistent_node() {
+        let g = make_test_graph();
+        let paths = all_simple_paths(&g, "auth", "nonexistent", 4);
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn test_all_simple_paths_sorted_by_length() {
+        let g = make_test_graph();
+        let paths = all_simple_paths(&g, "auth", "cache", 5);
+        for w in paths.windows(2) {
+            assert!(w[0].len() <= w[1].len(), "paths should be sorted by length");
+        }
+    }
+
+    // -- dijkstra_path tests --
+
+    #[test]
+    fn test_dijkstra_direct_path() {
+        let g = make_test_graph();
+        let result = dijkstra_path(&g, "auth", "user", 0.0);
+        assert!(result.is_some());
+        let (path, cost, edges) = result.unwrap();
+        assert_eq!(path.first().unwrap(), "auth");
+        assert_eq!(path.last().unwrap(), "user");
+        assert!(cost > 0.0);
+        assert!(!edges.is_empty());
+    }
+
+    #[test]
+    fn test_dijkstra_same_node() {
+        let g = make_test_graph();
+        let result = dijkstra_path(&g, "auth", "auth", 0.0);
+        assert!(result.is_some());
+        let (path, cost, _) = result.unwrap();
+        assert_eq!(path.len(), 1);
+        assert!((cost - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_dijkstra_no_path() {
+        let mut g = KnowledgeGraph::new();
+        g.add_node(make_node("a", "A")).unwrap();
+        g.add_node(make_node("b", "B")).unwrap();
+        let result = dijkstra_path(&g, "a", "b", 0.0);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_dijkstra_nonexistent_node() {
+        let g = make_test_graph();
+        assert!(dijkstra_path(&g, "auth", "nonexistent", 0.0).is_none());
+    }
+
+    #[test]
+    fn test_dijkstra_min_confidence_filter() {
+        // Create graph with mixed confidence edges
+        let mut g = KnowledgeGraph::new();
+        g.add_node(make_node("a", "A")).unwrap();
+        g.add_node(make_node("b", "B")).unwrap();
+        g.add_node(make_node("c", "C")).unwrap();
+
+        // a→b: low confidence (0.3), a→c→b: high confidence (1.0)
+        let mut low_edge = make_edge("a", "b");
+        low_edge.confidence_score = 0.3;
+        g.add_edge(low_edge).unwrap();
+
+        let mut high1 = make_edge("a", "c");
+        high1.confidence_score = 1.0;
+        g.add_edge(high1).unwrap();
+
+        let mut high2 = make_edge("c", "b");
+        high2.confidence_score = 1.0;
+        g.add_edge(high2).unwrap();
+
+        // With min_confidence 0.5, should skip a→b and go a→c→b
+        let result = dijkstra_path(&g, "a", "b", 0.5);
+        assert!(result.is_some());
+        let (path, _, _) = result.unwrap();
+        assert_eq!(path.len(), 3, "should go through c, got path: {path:?}");
     }
 }

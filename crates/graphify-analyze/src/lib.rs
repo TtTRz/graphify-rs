@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use tracing::debug;
 
 use graphify_core::graph::KnowledgeGraph;
-use graphify_core::model::{GodNode, Surprise};
+use graphify_core::model::{BridgeNode, GodNode, Surprise};
 
 // ---------------------------------------------------------------------------
 // God nodes
@@ -17,16 +17,27 @@ use graphify_core::model::{GodNode, Surprise};
 /// Find the most-connected nodes, excluding file-level hubs and method stubs.
 ///
 /// Returns up to `top_n` nodes sorted by degree descending.
+/// Generic labels like "lib", "mod", "main" are disambiguated with the crate/module
+/// name extracted from `source_file`.
 pub fn god_nodes(graph: &KnowledgeGraph, top_n: usize) -> Vec<GodNode> {
+    let generic_labels = ["lib", "mod", "main", "index", "init"];
+
     let mut candidates: Vec<GodNode> = graph
         .node_ids()
         .into_iter()
         .filter(|id| !is_file_node(graph, id) && !is_method_stub(graph, id))
         .map(|id| {
             let node = graph.get_node(&id).unwrap();
+            let label = if generic_labels.contains(&node.label.as_str()) {
+                // Extract crate/module name from source_file path
+                // e.g. "crates/graphify-export/src/lib.rs" → "graphify-export::lib"
+                disambiguate_label(&node.label, &node.source_file)
+            } else {
+                node.label.clone()
+            };
             GodNode {
                 id: id.clone(),
-                label: node.label.clone(),
+                label,
                 degree: graph.degree(&id),
                 community: node.community,
             }
@@ -37,6 +48,28 @@ pub fn god_nodes(graph: &KnowledgeGraph, top_n: usize) -> Vec<GodNode> {
     candidates.truncate(top_n);
     debug!("found {} god node candidates", candidates.len());
     candidates
+}
+
+/// Disambiguate a generic label using the source file path.
+///
+/// Extracts the parent directory or crate name to create a unique label.
+/// Examples:
+/// - ("lib", "crates/graphify-export/src/lib.rs") → "graphify-export::lib"
+/// - ("mod", "src/config.rs") → "src::mod"
+/// - ("lib", "src/lib.rs") → "lib"
+fn disambiguate_label(label: &str, source_file: &str) -> String {
+    let parts: Vec<&str> = source_file.split('/').collect();
+    // Try to find crate name: look for the segment before "src/"
+    for (i, &segment) in parts.iter().enumerate() {
+        if segment == "src" && i > 0 {
+            return format!("{}::{}", parts[i - 1], label);
+        }
+    }
+    // Fallback: use parent directory
+    if parts.len() >= 2 {
+        return format!("{}::{}", parts[parts.len() - 2], label);
+    }
+    label.to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -352,6 +385,80 @@ pub fn graph_diff(
     );
 
     result
+}
+
+// ---------------------------------------------------------------------------
+// Community bridges
+// ---------------------------------------------------------------------------
+
+/// Find nodes that bridge multiple communities.
+///
+/// A bridge node has a high ratio of cross-community edges to total edges.
+/// Returns up to `top_n` nodes sorted by bridge ratio descending.
+pub fn community_bridges(
+    graph: &KnowledgeGraph,
+    communities: &HashMap<usize, Vec<String>>,
+    top_n: usize,
+) -> Vec<BridgeNode> {
+    // Build node → community mapping
+    let node_to_community: HashMap<&str, usize> = communities
+        .iter()
+        .flat_map(|(&cid, nodes)| nodes.iter().map(move |n| (n.as_str(), cid)))
+        .collect();
+
+    let mut bridges: Vec<BridgeNode> = graph
+        .node_ids()
+        .into_iter()
+        .filter(|id| !is_file_node(graph, id))
+        .filter_map(|id| {
+            let node = graph.get_node(&id)?;
+            let my_comm = node_to_community.get(id.as_str()).copied()?;
+            let neighbors = graph.neighbor_ids(&id);
+            let total = neighbors.len();
+            if total == 0 {
+                return None;
+            }
+
+            let mut touched: HashSet<usize> = HashSet::new();
+            touched.insert(my_comm);
+            let mut cross = 0usize;
+            for nid in &neighbors {
+                let neighbor_comm = node_to_community
+                    .get(nid.as_str())
+                    .copied()
+                    .unwrap_or(my_comm);
+                if neighbor_comm != my_comm {
+                    cross += 1;
+                    touched.insert(neighbor_comm);
+                }
+            }
+
+            if cross == 0 {
+                return None;
+            }
+
+            let ratio = cross as f64 / total as f64;
+            let mut communities_touched: Vec<usize> = touched.into_iter().collect();
+            communities_touched.sort();
+
+            Some(BridgeNode {
+                id: id.clone(),
+                label: node.label.clone(),
+                total_edges: total,
+                cross_community_edges: cross,
+                bridge_ratio: ratio,
+                communities_touched,
+            })
+        })
+        .collect();
+
+    bridges.sort_by(|a, b| {
+        b.bridge_ratio
+            .partial_cmp(&a.bridge_ratio)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    bridges.truncate(top_n);
+    bridges
 }
 
 // ---------------------------------------------------------------------------
@@ -675,5 +782,110 @@ mod tests {
     fn is_concept_node_no_source() {
         let g = build_graph(&[make_node("c", "SomeConcept", "")], &[]);
         assert!(is_concept_node(&g, "c"));
+    }
+
+    #[test]
+    fn god_nodes_disambiguates_lib_labels() {
+        let mut n1 = make_node("lib1", "lib", "crates/graphify-export/src/lib.rs");
+        n1.node_type = NodeType::Module;
+        let mut n2 = make_node("lib2", "lib", "crates/graphify-analyze/src/lib.rs");
+        n2.node_type = NodeType::Module;
+        let a = simple_node("a");
+        let b = simple_node("b");
+        let c = simple_node("c");
+
+        let g = build_graph(
+            &[n1, n2, a, b, c],
+            &[
+                simple_edge("lib1", "a"),
+                simple_edge("lib1", "b"),
+                simple_edge("lib1", "c"),
+                simple_edge("lib2", "a"),
+                simple_edge("lib2", "b"),
+            ],
+        );
+
+        let gods = god_nodes(&g, 5);
+        let labels: Vec<&str> = gods.iter().map(|g| g.label.as_str()).collect();
+        // Both should be disambiguated with crate name
+        assert!(
+            labels.contains(&"graphify-export::lib"),
+            "missing graphify-export::lib in {labels:?}"
+        );
+        assert!(
+            labels.contains(&"graphify-analyze::lib"),
+            "missing graphify-analyze::lib in {labels:?}"
+        );
+    }
+
+    #[test]
+    fn god_nodes_preserves_non_generic_labels() {
+        let n = make_node("auth", "AuthService", "src/auth.rs");
+        let a = simple_node("a");
+        let b = simple_node("b");
+
+        let g = build_graph(
+            &[n, a, b],
+            &[simple_edge("auth", "a"), simple_edge("auth", "b")],
+        );
+
+        let gods = god_nodes(&g, 5);
+        assert!(gods.iter().any(|g| g.label == "AuthService"));
+    }
+
+    #[test]
+    fn community_bridges_finds_cross_community_nodes() {
+        let mut a = simple_node("a");
+        a.community = Some(0);
+        let mut b = simple_node("b");
+        b.community = Some(0);
+        let mut c = simple_node("c");
+        c.community = Some(1);
+        let mut bridge = simple_node("bridge");
+        bridge.community = Some(0);
+
+        let g = build_graph(
+            &[a, b, c, bridge.clone()],
+            &[
+                simple_edge("bridge", "a"),
+                simple_edge("bridge", "b"),
+                simple_edge("bridge", "c"),
+            ],
+        );
+
+        let communities: HashMap<usize, Vec<String>> = [
+            (0, vec!["a".into(), "b".into(), "bridge".into()]),
+            (1, vec!["c".into()]),
+        ]
+        .into();
+
+        let bridges = community_bridges(&g, &communities, 10);
+        assert!(!bridges.is_empty(), "should find at least one bridge");
+        // "bridge" and "c" are both bridge nodes; "c" has ratio 1.0, "bridge" has 0.33
+        // Just verify "bridge" appears somewhere
+        assert!(
+            bridges.iter().any(|b| b.id == "bridge"),
+            "bridge node should appear in results"
+        );
+        let bridge_entry = bridges.iter().find(|b| b.id == "bridge").unwrap();
+        assert_eq!(bridge_entry.cross_community_edges, 1);
+        assert_eq!(bridge_entry.total_edges, 3);
+        assert!(bridge_entry.communities_touched.contains(&0));
+        assert!(bridge_entry.communities_touched.contains(&1));
+    }
+
+    #[test]
+    fn community_bridges_empty_when_single_community() {
+        let mut a = simple_node("a");
+        a.community = Some(0);
+        let mut b = simple_node("b");
+        b.community = Some(0);
+
+        let g = build_graph(&[a, b], &[simple_edge("a", "b")]);
+
+        let communities: HashMap<usize, Vec<String>> = [(0, vec!["a".into(), "b".into()])].into();
+
+        let bridges = community_bridges(&g, &communities, 10);
+        assert!(bridges.is_empty(), "no bridges in single community");
     }
 }

@@ -132,6 +132,80 @@ fn tool_definitions() -> Value {
                 },
                 "required": ["source", "target"]
             }
+        },
+        {
+            "name": "find_all_paths",
+            "description": "Find all simple paths between two nodes up to a maximum length.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "Source node ID"
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "Target node ID"
+                    },
+                    "max_length": {
+                        "type": "number",
+                        "description": "Maximum path length in edges (default: 4)",
+                        "default": 4
+                    }
+                },
+                "required": ["source", "target"]
+            }
+        },
+        {
+            "name": "weighted_path",
+            "description": "Find the shortest weighted path between two nodes using Dijkstra's algorithm. Higher edge weights mean shorter distance.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "Source node ID"
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "Target node ID"
+                    },
+                    "min_confidence": {
+                        "type": "number",
+                        "description": "Minimum confidence score for edges to consider (default: 0.0)",
+                        "default": 0.0
+                    }
+                },
+                "required": ["source", "target"]
+            }
+        },
+        {
+            "name": "community_bridges",
+            "description": "Find nodes that bridge multiple communities. These nodes connect different parts of the codebase.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "top_n": {
+                        "type": "number",
+                        "description": "Number of top bridge nodes to return (default: 10)",
+                        "default": 10
+                    }
+                }
+            }
+        },
+        {
+            "name": "graph_diff",
+            "description": "Compare the current graph with another graph file. Shows added and removed nodes and edges.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "other_graph": {
+                        "type": "string",
+                        "description": "Path to the other graph.json file to compare against"
+                    }
+                },
+                "required": ["other_graph"]
+            }
         }
     ])
 }
@@ -441,9 +515,156 @@ fn handle_shortest_path(graph: &KnowledgeGraph, args: &Value) -> Value {
     tool_result_text(&serde_json::to_string_pretty(&result).unwrap_or_default())
 }
 
-// ---------------------------------------------------------------------------
-// Request dispatcher
-// ---------------------------------------------------------------------------
+fn handle_find_all_paths(graph: &KnowledgeGraph, args: &Value) -> Value {
+    let source = args["source"].as_str().unwrap_or("");
+    let target = args["target"].as_str().unwrap_or("");
+    let max_length = args["max_length"].as_u64().unwrap_or(4) as usize;
+
+    if source.is_empty() || target.is_empty() {
+        return tool_result_error("Missing required parameters: source and target");
+    }
+    if graph.get_node(source).is_none() {
+        return tool_result_error(&format!("Source node not found: {source}"));
+    }
+    if graph.get_node(target).is_none() {
+        return tool_result_error(&format!("Target node not found: {target}"));
+    }
+
+    let paths = crate::all_simple_paths(graph, source, target, max_length);
+
+    let paths_json: Vec<Value> = paths
+        .iter()
+        .map(|path| {
+            let nodes: Vec<Value> = path
+                .iter()
+                .map(|id| {
+                    let label = graph.get_node(id).map(|n| n.label.as_str()).unwrap_or(id);
+                    json!({"id": id, "label": label})
+                })
+                .collect();
+            json!({
+                "length": path.len() - 1,
+                "nodes": nodes
+            })
+        })
+        .collect();
+
+    let result = json!({
+        "source": source,
+        "target": target,
+        "max_length": max_length,
+        "path_count": paths_json.len(),
+        "paths": paths_json,
+    });
+
+    tool_result_text(&serde_json::to_string_pretty(&result).unwrap_or_default())
+}
+
+fn handle_weighted_path(graph: &KnowledgeGraph, args: &Value) -> Value {
+    let source = args["source"].as_str().unwrap_or("");
+    let target = args["target"].as_str().unwrap_or("");
+    let min_confidence = args["min_confidence"].as_f64().unwrap_or(0.0);
+
+    if source.is_empty() || target.is_empty() {
+        return tool_result_error("Missing required parameters: source and target");
+    }
+    if graph.get_node(source).is_none() {
+        return tool_result_error(&format!("Source node not found: {source}"));
+    }
+    if graph.get_node(target).is_none() {
+        return tool_result_error(&format!("Target node not found: {target}"));
+    }
+
+    match crate::dijkstra_path(graph, source, target, min_confidence) {
+        Some((path, total_cost, edge_details)) => {
+            let path_nodes: Vec<Value> = path
+                .iter()
+                .map(|id| {
+                    let label = graph.get_node(id).map(|n| n.label.as_str()).unwrap_or(id);
+                    json!({"id": id, "label": label})
+                })
+                .collect();
+
+            let edges: Vec<Value> = edge_details
+                .iter()
+                .map(|(from, to, cost, relation)| {
+                    json!({
+                        "from": from,
+                        "to": to,
+                        "cost": cost,
+                        "relation": relation
+                    })
+                })
+                .collect();
+
+            let result = json!({
+                "source": source,
+                "target": target,
+                "min_confidence": min_confidence,
+                "total_cost": total_cost,
+                "path_length": path.len() - 1,
+                "path": path_nodes,
+                "edges": edges,
+            });
+            tool_result_text(&serde_json::to_string_pretty(&result).unwrap_or_default())
+        }
+        None => tool_result_text(&format!(
+            "No path found between {source} and {target} with min_confidence {min_confidence}"
+        )),
+    }
+}
+
+fn handle_community_bridges(graph: &KnowledgeGraph, args: &Value) -> Value {
+    // Build communities from node.community field
+    let mut communities: HashMap<usize, Vec<String>> = HashMap::new();
+    for node_id in graph.node_ids() {
+        if let Some(node) = graph.get_node(&node_id)
+            && let Some(cid) = node.community
+        {
+            communities.entry(cid).or_default().push(node_id);
+        }
+    }
+
+    let top_n = args["top_n"].as_u64().unwrap_or(10) as usize;
+    let bridges = graphify_analyze::community_bridges(graph, &communities, top_n);
+
+    let result: Vec<Value> = bridges
+        .iter()
+        .map(|b| {
+            json!({
+                "id": b.id,
+                "label": b.label,
+                "total_edges": b.total_edges,
+                "cross_community_edges": b.cross_community_edges,
+                "bridge_ratio": format!("{:.2}", b.bridge_ratio),
+                "communities_touched": b.communities_touched,
+            })
+        })
+        .collect();
+
+    let output = json!({
+        "top_n": top_n,
+        "bridge_count": result.len(),
+        "bridges": result,
+    });
+
+    tool_result_text(&serde_json::to_string_pretty(&output).unwrap_or_default())
+}
+
+fn handle_graph_diff(graph: &KnowledgeGraph, args: &Value) -> Value {
+    let other_path = args["other_graph"].as_str().unwrap_or("");
+    if other_path.is_empty() {
+        return tool_result_error("Missing required parameter: other_graph");
+    }
+
+    let other_graph = match crate::load_graph(std::path::Path::new(other_path)) {
+        Ok(g) => g,
+        Err(e) => return tool_result_error(&format!("Failed to load graph: {e}")),
+    };
+
+    let diff = graphify_analyze::graph_diff(graph, &other_graph);
+    tool_result_text(&serde_json::to_string_pretty(&diff).unwrap_or_default())
+}
 
 fn dispatch_tools_call(graph: &KnowledgeGraph, request: &Value) -> Value {
     let id = &request["id"];
@@ -460,6 +681,10 @@ fn dispatch_tools_call(graph: &KnowledgeGraph, request: &Value) -> Value {
         "god_nodes" => handle_god_nodes(graph, args),
         "graph_stats" => handle_graph_stats(graph),
         "shortest_path" => handle_shortest_path(graph, args),
+        "find_all_paths" => handle_find_all_paths(graph, args),
+        "weighted_path" => handle_weighted_path(graph, args),
+        "community_bridges" => handle_community_bridges(graph, args),
+        "graph_diff" => handle_graph_diff(graph, args),
         _ => tool_result_error(&format!("Unknown tool: {tool_name}")),
     };
 
@@ -648,7 +873,7 @@ mod tests {
         let req = json!({"jsonrpc": "2.0", "method": "tools/list", "id": 2});
         let resp = dispatch(&g, &req).unwrap();
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 11);
 
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"query_graph"));
@@ -823,5 +1048,131 @@ mod tests {
         let resp = dispatch(&g, &req).unwrap();
         assert_eq!(resp["id"], 15);
         assert!(resp["result"].is_object());
+    }
+
+    // -- New tool tests --
+
+    #[test]
+    fn test_find_all_paths() {
+        let g = test_graph();
+        let req = json!({
+            "jsonrpc": "2.0", "method": "tools/call", "id": 20,
+            "params": {"name": "find_all_paths", "arguments": {
+                "source": "auth", "target": "db", "max_length": 4
+            }}
+        });
+        let resp = dispatch(&g, &req).unwrap();
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(text).unwrap();
+        assert!(
+            parsed["path_count"].as_u64().unwrap() >= 2,
+            "should find multiple paths"
+        );
+    }
+
+    #[test]
+    fn test_find_all_paths_no_path() {
+        let mut g = KnowledgeGraph::new();
+        g.add_node(make_node("x", "X", None)).unwrap();
+        g.add_node(make_node("y", "Y", None)).unwrap();
+        let req = json!({
+            "jsonrpc": "2.0", "method": "tools/call", "id": 21,
+            "params": {"name": "find_all_paths", "arguments": {
+                "source": "x", "target": "y"
+            }}
+        });
+        let resp = dispatch(&g, &req).unwrap();
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(text).unwrap();
+        assert_eq!(parsed["path_count"].as_u64().unwrap(), 0);
+    }
+
+    #[test]
+    fn test_weighted_path() {
+        let g = test_graph();
+        let req = json!({
+            "jsonrpc": "2.0", "method": "tools/call", "id": 22,
+            "params": {"name": "weighted_path", "arguments": {
+                "source": "auth", "target": "cache"
+            }}
+        });
+        let resp = dispatch(&g, &req).unwrap();
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(text).unwrap();
+        assert!(parsed["path_length"].as_u64().unwrap() >= 1);
+        assert!(parsed["total_cost"].as_f64().unwrap() > 0.0);
+    }
+
+    #[test]
+    fn test_weighted_path_not_found() {
+        let mut g = KnowledgeGraph::new();
+        g.add_node(make_node("x", "X", None)).unwrap();
+        g.add_node(make_node("y", "Y", None)).unwrap();
+        let req = json!({
+            "jsonrpc": "2.0", "method": "tools/call", "id": 23,
+            "params": {"name": "weighted_path", "arguments": {
+                "source": "x", "target": "y"
+            }}
+        });
+        let resp = dispatch(&g, &req).unwrap();
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("No path found"));
+    }
+
+    #[test]
+    fn test_community_bridges() {
+        let g = test_graph();
+        let req = json!({
+            "jsonrpc": "2.0", "method": "tools/call", "id": 24,
+            "params": {"name": "community_bridges", "arguments": {"top_n": 5}}
+        });
+        let resp = dispatch(&g, &req).unwrap();
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(text).unwrap();
+        // test_graph has 2 communities, bridge nodes should exist
+        assert!(parsed["bridges"].as_array().is_some());
+    }
+
+    #[test]
+    fn test_graph_diff_missing_file() {
+        let g = test_graph();
+        let req = json!({
+            "jsonrpc": "2.0", "method": "tools/call", "id": 25,
+            "params": {"name": "graph_diff", "arguments": {
+                "other_graph": "/nonexistent/graph.json"
+            }}
+        });
+        let resp = dispatch(&g, &req).unwrap();
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Failed to load graph"));
+    }
+
+    #[test]
+    fn test_find_all_paths_missing_source() {
+        let g = test_graph();
+        let req = json!({
+            "jsonrpc": "2.0", "method": "tools/call", "id": 26,
+            "params": {"name": "find_all_paths", "arguments": {
+                "source": "nonexistent", "target": "db"
+            }}
+        });
+        let resp = dispatch(&g, &req).unwrap();
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("not found"));
+    }
+
+    #[test]
+    fn test_weighted_path_with_min_confidence() {
+        let g = test_graph();
+        let req = json!({
+            "jsonrpc": "2.0", "method": "tools/call", "id": 27,
+            "params": {"name": "weighted_path", "arguments": {
+                "source": "auth", "target": "db", "min_confidence": 0.5
+            }}
+        });
+        let resp = dispatch(&g, &req).unwrap();
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(text).unwrap();
+        assert!(parsed["path_length"].as_u64().unwrap() >= 1);
     }
 }
