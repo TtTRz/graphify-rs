@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-04-13
+
+### Fixed
+- **File name too long (os error 63)** — Obsidian/Wiki export used node labels/IDs as filenames without length limit, causing crashes on macOS (255-byte limit) when analyzing Dart or other languages with long identifiers. Added `truncate_to_bytes()` utility (240-byte cap) to `graphify-core`, applied in `obsidian.rs` and `wiki.rs`
+
 ## [0.3.0] - 2026-04-13
 
 ### Added
@@ -27,7 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **God Nodes degree=0** — report showed degree 0 for all god nodes due to JSON field name mismatch (`"edges"` → `"degree"`)
 - **God Nodes missing community** — `"community"` field was not included in JSON passed to report generator
-- **File name too long (os error 63)** — Obsidian/Wiki export used node labels/IDs as filenames without length limit; added `truncate_to_bytes()` utility (240-byte cap) to `graphify-core`, applied in `obsidian.rs` and `wiki.rs`
 - **Clippy warnings** — fixed 25 `collapsible_if` + 1 `let_and_return` across 14 files using Rust 2024 let-chains
 
 ## [0.2.0] - 2026-04-10
@@ -79,6 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Git hook integration (post-commit, post-checkout)
 - CLI with 21 subcommands via clap derive
 
+[0.3.1]: https://github.com/TtTRz/graphify-rs/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/TtTRz/graphify-rs/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/TtTRz/graphify-rs/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/TtTRz/graphify-rs/releases/tag/v0.1.0
