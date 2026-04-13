@@ -553,9 +553,10 @@ fn merge_small_communities(
                     if let Some(neighbors) = adj.get(node.as_str()) {
                         for (neighbor, weight) in neighbors {
                             if let Some(&ncid) = node_to_cid.get(neighbor.as_str())
-                                && ncid != small_cid {
-                                    *neighbor_edges.entry(ncid).or_default() += weight;
-                                }
+                                && ncid != small_cid
+                            {
+                                *neighbor_edges.entry(ncid).or_default() += weight;
+                            }
                         }
                     }
                 }

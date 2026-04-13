@@ -180,13 +180,9 @@ fn dart_config() -> TsConfig {
         ]
         .into_iter()
         .collect(),
-        function_types: [
-            "function_signature",
-            "method_signature",
-            "function_body",
-        ]
-        .into_iter()
-        .collect(),
+        function_types: ["function_signature", "method_signature", "function_body"]
+            .into_iter()
+            .collect(),
         import_types: ["import_or_export"].into_iter().collect(),
         call_types: ["method_invocation", "function_expression_invocation"]
             .into_iter()

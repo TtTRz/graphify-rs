@@ -829,7 +829,9 @@ fn cmd_build(
     });
     let god_json: Vec<serde_json::Value> = god_list
         .iter()
-        .map(|g| serde_json::json!({"label": g.label, "degree": g.degree, "community": g.community}))
+        .map(
+            |g| serde_json::json!({"label": g.label, "degree": g.degree, "community": g.community}),
+        )
         .collect();
     let surprise_json: Vec<serde_json::Value> = surprise_list
         .iter()
