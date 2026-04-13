@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-04-13
+
+### Added
+- **SECURITY.md** — responsible vulnerability disclosure process
+- **ARCHITECTURE.md** — detailed 14-crate design, algorithm table, MCP tool reference, dependency graph
+- **Examples** — `examples/build_and_query.rs` (full pipeline) + `examples/custom_graph.rs` (programmatic API)
+- **Criterion benchmarks** — `benches/graphify_bench.rs` with 6 benchmarks (clustering, PageRank, cycles, export, extraction)
+- **CI/downloads/docs.rs badges** — README now shows build status, crate downloads, and docs link
+
+### Changed
+- **README redesigned** — centered header, streamlined sections, Quick Start with `--no-llm` first, performance table, slim architecture overview with links to detailed docs
+- **CONTRIBUTING.md expanded** — architecture overview, test expectations, PR checklist, release process
+- **CLI docs with TOC** — both CLI.md and CLI_CN.md now have table of contents for navigation
+
 ## [0.4.0] - 2026-04-13
 
 ### Added
@@ -109,6 +123,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Git hook integration (post-commit, post-checkout)
 - CLI with 21 subcommands via clap derive
 
+[0.4.1]: https://github.com/TtTRz/graphify-rs/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/TtTRz/graphify-rs/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/TtTRz/graphify-rs/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/TtTRz/graphify-rs/compare/v0.2.0...v0.3.0

@@ -603,7 +603,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-analyze"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "graphify-core",
  "petgraph",
@@ -615,7 +615,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-benchmark"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "graphify-core",
  "serde",
@@ -627,7 +627,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-build"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "graphify-core",
  "petgraph",
@@ -637,7 +637,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-cache"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -649,7 +649,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-cluster"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "graphify-core",
  "petgraph",
@@ -660,7 +660,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "petgraph",
  "serde",
@@ -671,7 +671,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-detect"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "globset",
  "graphify-core",
@@ -686,7 +686,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-export"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "graphify-core",
@@ -700,7 +700,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-extract"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "graphify-cache",
@@ -730,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-hooks"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "graphify-core",
@@ -741,7 +741,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-ingest"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "graphify-core",
@@ -759,7 +759,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-rs"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -793,7 +793,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-security"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "regex",
  "reqwest",
@@ -804,7 +804,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-serve"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "graphify-analyze",
@@ -818,7 +818,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-watch"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "graphify-analyze",
  "graphify-build",
