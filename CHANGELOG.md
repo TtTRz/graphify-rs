@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-13
+
+### Added
+- **4 new MCP tools** — `find_all_paths` (DFS path enumeration), `weighted_path` (Dijkstra with 1/weight distance), `community_bridges` (cross-community bridge nodes), `graph_diff` (compare two graph snapshots). Total MCP tools: 7 → 11
+- **Weighted graph analysis** — `confidence_to_weight()` maps EXTRACTED→1.0, INFERRED→0.7, AMBIGUOUS→0.3; `BridgeNode` model for bridge analysis
+- **Cross-file import resolution for all 21 languages** — was only Python/JS/Rust/Go; now includes Java, C#, C/C++, Kotlin, PHP, Dart, Scala, Swift (language-specific resolvers for dot imports, backslash imports, C includes, Dart packages)
+- **84 extraction tests** covering all 21 supported languages, organized in `tests/` directory per Rust conventions
+- **`--max-viz-nodes` flag** — configurable HTML visualization node limit (default 2000), allows larger projects to show more context
+
+### Changed
+- **Leiden clustering 10-50x faster** — pre-computed `sigma_c` and `ki_cache` with incremental updates; single-pass neighbor aggregation replaces per-community scans; `merge_small_communities()` uses incremental `node_to_cid`
+- **Cross-file import resolution ~100x faster** — `id_to_label` HashMap O(1) lookup replaces O(n) linear scan per import edge; index building consolidated from 6 passes to 2
+- **JSON export streaming** — `write_node_link_json()` writes directly to `BufWriter<File>` via `serde_json::Serializer`, eliminating ~500 MB intermediate `Value` + `String` for large graphs
+- **Parallel file extraction** — `rayon::par_iter` for concurrent AST extraction and cache lookups; ~6x speedup on 8-core machines
+
+### Fixed
+- **God Nodes community column showing "–"** — `cluster()` never wrote back to `node.community`; added `get_node_mut()` and post-clustering community assignment
+- **God Nodes duplicate "lib" labels** — multiple crates with `lib.rs` all showed "lib"; added `disambiguate_label()` to prefix with crate name (e.g., `graphify-export::lib`)
+- **Semaphore unwrap panic** — `sem.acquire().await.unwrap()` replaced with proper error propagation via `map_err()`
+
 ## [0.3.1] - 2026-04-13
 
 ### Fixed
@@ -83,6 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Git hook integration (post-commit, post-checkout)
 - CLI with 21 subcommands via clap derive
 
+[0.4.0]: https://github.com/TtTRz/graphify-rs/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/TtTRz/graphify-rs/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/TtTRz/graphify-rs/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/TtTRz/graphify-rs/compare/v0.1.0...v0.2.0

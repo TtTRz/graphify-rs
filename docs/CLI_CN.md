@@ -37,6 +37,7 @@ graphify-rs -q -j 2 serve               # 静默模式，2 个线程
 | `--code-only` | | `bool` | `false` | 仅处理代码文件，跳过文档和论文。 |
 | `--update` | | `bool` | `false` | 增量重建：仅重新提取自上次构建以来新增/修改的文件。 |
 | `--format <FMT,...>` | | `String`（逗号分隔） | 所有格式 | 要生成的导出格式。可选：`json`、`html`、`graphml`、`cypher`、`svg`、`wiki`、`obsidian`、`report`。 |
+| `--max-viz-nodes <N>` | | `usize` | `2000` | HTML 可视化最大节点数。更大的值显示更多细节但可能拖慢浏览器。 |
 
 #### 示例
 
@@ -177,7 +178,7 @@ graphify-rs watch --path src --output my-graph
 
 ### `graphify-rs serve`
 
-启动 MCP（Model Context Protocol）服务器，通过 JSON-RPC 2.0（stdio）提供服务。提供 7 个 AI 智能体可直接调用的工具。
+启动 MCP（Model Context Protocol）服务器，通过 JSON-RPC 2.0（stdio）提供服务。提供 11 个 AI 智能体可直接调用的工具。
 
 #### 参数
 
@@ -196,6 +197,10 @@ graphify-rs watch --path src --output my-graph
 | `god_nodes` | 查找连接度最高的枢纽节点 |
 | `graph_stats` | 图谱整体统计信息 |
 | `shortest_path` | 查找两个节点之间的最短路径 |
+| `find_all_paths` | 枚举两个节点之间的所有简单路径（DFS，最多 50 条） |
+| `weighted_path` | 基于边权重的 Dijkstra 最短路径（1/weight 距离） |
+| `community_bridges` | 查找 Top-N 跨社区桥节点（按桥接比率排序） |
+| `graph_diff` | 比较两个图谱快照，返回新增/删除的节点和边 |
 
 #### 示例
 

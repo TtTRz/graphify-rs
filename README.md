@@ -35,7 +35,7 @@ It is a Rust rewrite of [graphify](https://github.com/safishamsi/graphify) (Pyth
 | AST parsing | Regex only | 11 languages native tree-sitter + regex fallback |
 | Semantic extraction | Sequential | Concurrent with configurable parallelism (`-j`) |
 | Community detection | Louvain (graspologic) | Leiden (hand-written, with refinement phase) |
-| MCP server | Not included | 7 tools over JSON-RPC 2.0 stdio |
+| MCP server | Not included | 11 tools over JSON-RPC 2.0 stdio |
 | Export formats | 7 | 9 (+ Obsidian vault, split HTML per community) |
 | CLI | Basic | 21 subcommands, `--quiet`/`--verbose`, shell completions |
 | Watch mode | Full rebuild | Incremental (only changed files re-extracted) |
@@ -137,7 +137,7 @@ Each community receives a cohesion score (ratio of actual intra-community edges 
 | `graphify-cache` | SHA256 content-hash caching for incremental rebuilds |
 | `graphify-security` | URL validation (SSRF prevention), path traversal protection, label injection defense |
 | `graphify-ingest` | URL fetching: arXiv abstracts, tweets (oEmbed), PDFs, generic webpages |
-| `graphify-serve` | MCP server with 7 query tools over JSON-RPC 2.0 stdio |
+| `graphify-serve` | MCP server with 11 query tools over JSON-RPC 2.0 stdio |
 | `graphify-watch` | File monitoring with debounce, incremental rebuild on code changes |
 | `graphify-hooks` | Git hook install/uninstall/status (post-commit, post-checkout) |
 | `graphify-benchmark` | Token efficiency measurement (graph tokens vs. raw corpus tokens) |

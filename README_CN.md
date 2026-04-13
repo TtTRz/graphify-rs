@@ -35,7 +35,7 @@ AI 驱动的知识图谱构建工具 — 将代码、文档、论文和图片转
 | AST 解析 | 仅正则 | 11 种语言原生 tree-sitter + 正则回退 |
 | 语义提取 | 串行 | 并发，可配置并行数（`-j`）|
 | 社区检测 | Louvain (graspologic) | Leiden（手写实现，带细化阶段）|
-| MCP 服务器 | 无 | 7 个工具，JSON-RPC 2.0 stdio |
+| MCP 服务器 | 无 | 11 个工具，JSON-RPC 2.0 stdio |
 | 导出格式 | 7 种 | 9 种（+ Obsidian 知识库、按社区拆分 HTML）|
 | CLI | 基础 | 21 个子命令、`--quiet`/`--verbose`、Shell 补全 |
 | Watch 模式 | 全量重建 | 增量重建（仅变更文件重新提取）|
@@ -137,7 +137,7 @@ graphify-rs query "认证是如何工作的？"     # 查询图谱
 | `graphify-cache` | SHA256 内容哈希缓存，支持增量重建 |
 | `graphify-security` | URL 校验（SSRF 防御）、路径遍历防护、标签注入防御 |
 | `graphify-ingest` | URL 抓取：arXiv 摘要、推文（oEmbed）、PDF、通用网页 |
-| `graphify-serve` | MCP 服务器，7 个查询工具，JSON-RPC 2.0 stdio |
+| `graphify-serve` | MCP 服务器，11 个查询工具，JSON-RPC 2.0 stdio |
 | `graphify-watch` | 文件监控 + debounce、代码变更时增量重建 |
 | `graphify-hooks` | Git 钩子安装/卸载/状态（post-commit, post-checkout）|
 | `graphify-benchmark` | Token 效率测量（图谱 token vs 原始语料 token）|

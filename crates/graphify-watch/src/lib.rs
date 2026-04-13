@@ -191,7 +191,7 @@ fn rebuild(
         .map_err(|e| WatchError::Rebuild(format!("create output dir: {e}")))?;
 
     let _ = graphify_export::export_json(&graph, output_dir);
-    let _ = graphify_export::export_html(&graph, &communities, &community_labels, output_dir);
+    let _ = graphify_export::export_html(&graph, &communities, &community_labels, output_dir, None);
     let _ = graphify_export::export_graphml(&graph, output_dir);
     let _ = graphify_export::export_cypher(&graph, output_dir);
     let _ = graphify_export::export_svg(&graph, &communities, output_dir);

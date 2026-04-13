@@ -37,6 +37,7 @@ Build the knowledge graph from files in a directory. This is the main pipeline: 
 | `--code-only` | | `bool` | `false` | Only process code files, skip docs and papers. |
 | `--update` | | `bool` | `false` | Incremental rebuild: only re-extract new/modified files since last build. |
 | `--format <FMT,...>` | | `String` (comma-separated) | all formats | Export formats to generate. Available: `json`, `html`, `graphml`, `cypher`, `svg`, `wiki`, `obsidian`, `report`. |
+| `--max-viz-nodes <N>` | | `usize` | `2000` | Maximum nodes in HTML visualization. Larger values show more detail but may slow the browser. |
 
 #### Examples
 
@@ -177,7 +178,7 @@ graphify-rs watch --path src --output my-graph
 
 ### `graphify-rs serve`
 
-Start the MCP (Model Context Protocol) server over JSON-RPC 2.0 (stdio). Provides 7 tools that AI agents can call directly.
+Start the MCP (Model Context Protocol) server over JSON-RPC 2.0 (stdio). Provides 11 tools that AI agents can call directly.
 
 #### Parameters
 
@@ -196,6 +197,10 @@ Start the MCP (Model Context Protocol) server over JSON-RPC 2.0 (stdio). Provide
 | `god_nodes` | Find the most-connected hub nodes |
 | `graph_stats` | Overall graph statistics |
 | `shortest_path` | Find shortest path between two nodes |
+| `find_all_paths` | Enumerate all simple paths between two nodes (DFS, max 50) |
+| `weighted_path` | Dijkstra shortest path using edge weights (1/weight distance) |
+| `community_bridges` | Find top-N cross-community bridge nodes by bridge ratio |
+| `graph_diff` | Compare two graph snapshots and return added/removed nodes and edges |
 
 #### Examples
 

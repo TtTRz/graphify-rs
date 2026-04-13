@@ -279,6 +279,22 @@ fn louvain_phase(
             .insert(node.clone());
     }
 
+    // Pre-compute node strengths (ki) — avoids repeated O(deg) recalculation
+    let ki_cache: HashMap<&str, f64> = adj
+        .keys()
+        .map(|n| (n.as_str(), node_strength(adj, n)))
+        .collect();
+
+    // Pre-compute community strength sums (sigma_c) — maintained incrementally
+    let mut sigma_c: HashMap<usize, f64> = HashMap::new();
+    for (&cid, members) in &community_members {
+        let sum: f64 = members
+            .iter()
+            .map(|n| ki_cache.get(n.as_str()).copied().unwrap_or(0.0))
+            .sum();
+        sigma_c.insert(cid, sum);
+    }
+
     let max_iterations = 50;
     let mut any_changed = false;
 
@@ -287,44 +303,30 @@ fn louvain_phase(
 
         for node in node_ids {
             let current_community = community_of[node];
-            let ki = node_strength(adj, node);
+            let ki = ki_cache.get(node.as_str()).copied().unwrap_or(0.0);
 
-            // Get neighboring communities
-            let mut neighbor_communities: HashSet<usize> = HashSet::new();
+            // Aggregate edges to each neighboring community in one pass
+            let mut ki_to: HashMap<usize, f64> = HashMap::new();
             if let Some(neighbors) = adj.get(node.as_str()) {
-                for (n, _) in neighbors {
-                    neighbor_communities.insert(community_of[n]);
+                for (nbr, w) in neighbors {
+                    let nbr_cid = community_of[nbr];
+                    *ki_to.entry(nbr_cid).or_default() += w;
                 }
             }
-            neighbor_communities.insert(current_community);
 
             let mut best_community = current_community;
             let mut best_gain = 0.0f64;
 
-            for &target_community in &neighbor_communities {
+            // ki to current community (excluding self-loop edges already handled)
+            let ki_in_current = ki_to.get(&current_community).copied().unwrap_or(0.0);
+            let sigma_current = sigma_c.get(&current_community).copied().unwrap_or(0.0) - ki;
+
+            for (&target_community, &ki_in_target) in &ki_to {
                 if target_community == current_community {
                     continue;
                 }
 
-                let members_ref: HashSet<&str> = community_members
-                    .get(&target_community)
-                    .map(|s| s.iter().map(|x| x.as_str()).collect())
-                    .unwrap_or_default();
-
-                let current_members_ref: HashSet<&str> = community_members
-                    .get(&current_community)
-                    .map(|s| {
-                        s.iter()
-                            .filter(|x| x.as_str() != node.as_str())
-                            .map(|x| x.as_str())
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                let ki_in_target = edges_to_community(adj, node, &members_ref);
-                let ki_in_current = edges_to_community(adj, node, &current_members_ref);
-                let sigma_target = community_strength(adj, &members_ref);
-                let sigma_current = community_strength(adj, &current_members_ref);
+                let sigma_target = sigma_c.get(&target_community).copied().unwrap_or(0.0);
 
                 let gain = (ki_in_target - ki_in_current) / m
                     - RESOLUTION * ki * (sigma_target - sigma_current) / (2.0 * m * m);
@@ -336,6 +338,7 @@ fn louvain_phase(
             }
 
             if best_community != current_community {
+                // Update community_members
                 community_members
                     .get_mut(&current_community)
                     .unwrap()
@@ -344,6 +347,11 @@ fn louvain_phase(
                     .entry(best_community)
                     .or_default()
                     .insert(node.clone());
+
+                // Update sigma_c incrementally
+                *sigma_c.entry(current_community).or_default() -= ki;
+                *sigma_c.entry(best_community).or_default() += ki;
+
                 community_of.insert(node.clone(), best_community);
                 improved = true;
                 any_changed = true;
@@ -535,13 +543,13 @@ fn merge_small_communities(
     communities: &mut HashMap<usize, Vec<String>>,
     adj: &HashMap<String, Vec<(String, f64)>>,
 ) {
-    loop {
-        // Build node → community reverse map each iteration
-        let node_to_cid: HashMap<String, usize> = communities
-            .iter()
-            .flat_map(|(&cid, nodes)| nodes.iter().map(move |n| (n.clone(), cid)))
-            .collect();
+    // Build node → community reverse map once, maintain incrementally
+    let mut node_to_cid: HashMap<String, usize> = communities
+        .iter()
+        .flat_map(|(&cid, nodes)| nodes.iter().map(move |n| (n.clone(), cid)))
+        .collect();
 
+    loop {
         // Find one small community to merge
         let merge = communities
             .iter()
@@ -570,6 +578,10 @@ fn merge_small_communities(
         match merge {
             Some((small_cid, best_cid)) => {
                 let nodes = communities.remove(&small_cid).unwrap_or_default();
+                // Update node_to_cid incrementally
+                for node in &nodes {
+                    node_to_cid.insert(node.clone(), best_cid);
+                }
                 communities.entry(best_cid).or_default().extend(nodes);
             }
             None => break, // No more small communities to merge

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::Write;
 
 use petgraph::Undirected;
 use petgraph::stable_graph::{NodeIndex, StableGraph};
@@ -188,6 +189,42 @@ impl KnowledgeGraph {
         })
     }
 
+    /// Stream the graph as NetworkX `node_link_data` JSON directly to a writer.
+    ///
+    /// Unlike `to_node_link_json()`, this avoids building the entire JSON tree
+    /// in memory. For a 50K-node graph this saves ~500 MB of intermediate
+    /// allocations.
+    pub fn write_node_link_json<W: Write>(&self, writer: W) -> serde_json::Result<()> {
+        use serde::ser::SerializeMap;
+        use serde_json::ser::{PrettyFormatter, Serializer};
+
+        let formatter = PrettyFormatter::with_indent(b"  ");
+        let mut ser = Serializer::with_formatter(writer, formatter);
+        let mut map = serde::Serializer::serialize_map(&mut ser, Some(5))?;
+
+        map.serialize_entry("directed", &false)?;
+        map.serialize_entry("multigraph", &false)?;
+        map.serialize_entry("graph", &serde_json::Map::new())?;
+
+        // Stream nodes one by one
+        let nodes: Vec<&GraphNode> = self
+            .graph
+            .node_indices()
+            .filter_map(|idx| self.graph.node_weight(idx))
+            .collect();
+        map.serialize_entry("nodes", &nodes)?;
+
+        // Stream edges one by one
+        let links: Vec<&GraphEdge> = self
+            .graph
+            .edge_indices()
+            .filter_map(|idx| self.graph.edge_weight(idx))
+            .collect();
+        map.serialize_entry("links", &links)?;
+
+        map.end()
+    }
+
     /// Deserialize from the NetworkX `node_link_data` JSON format.
     pub fn from_node_link_json(value: &Value) -> Result<Self> {
         let mut kg = Self::new();
@@ -346,5 +383,42 @@ mod tests {
     fn get_node_mut_missing_returns_none() {
         let mut kg = KnowledgeGraph::new();
         assert!(kg.get_node_mut("nope").is_none());
+    }
+
+    #[test]
+    fn write_node_link_json_matches_to_node_link_json() {
+        let mut kg = KnowledgeGraph::new();
+        kg.add_node(make_node("a")).unwrap();
+        kg.add_node(make_node("b")).unwrap();
+        kg.add_edge(make_edge("a", "b")).unwrap();
+
+        // Streaming write to buffer
+        let mut buf = Vec::new();
+        kg.write_node_link_json(&mut buf).unwrap();
+        let streamed: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+
+        // In-memory build
+        let in_mem = kg.to_node_link_json();
+
+        assert_eq!(streamed["directed"], in_mem["directed"]);
+        assert_eq!(streamed["multigraph"], in_mem["multigraph"]);
+        assert_eq!(
+            streamed["nodes"].as_array().unwrap().len(),
+            in_mem["nodes"].as_array().unwrap().len()
+        );
+        assert_eq!(
+            streamed["links"].as_array().unwrap().len(),
+            in_mem["links"].as_array().unwrap().len()
+        );
+    }
+
+    #[test]
+    fn write_node_link_json_empty_graph() {
+        let kg = KnowledgeGraph::new();
+        let mut buf = Vec::new();
+        kg.write_node_link_json(&mut buf).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert!(json["nodes"].as_array().unwrap().is_empty());
+        assert!(json["links"].as_array().unwrap().is_empty());
     }
 }

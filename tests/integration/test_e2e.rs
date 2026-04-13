@@ -686,7 +686,8 @@ fn test_all_export_formats() {
 
     // HTML
     let p =
-        graphify_export::export_html(&graph, &communities, &community_labels, &output_dir).unwrap();
+        graphify_export::export_html(&graph, &communities, &community_labels, &output_dir, None)
+            .unwrap();
     assert!(p.exists(), "graph.html should exist");
     let html = std::fs::read_to_string(&p).unwrap();
     assert!(html.contains("vis-network"), "HTML should contain vis.js");

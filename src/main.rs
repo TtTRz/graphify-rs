@@ -3,9 +3,11 @@ use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod config;
 mod install;
@@ -52,6 +54,9 @@ enum Commands {
         /// Export formats (comma-separated). Available: json,html,graphml,cypher,svg,wiki,obsidian,report. Default: all
         #[arg(long, value_delimiter = ',')]
         format: Vec<String>,
+        /// Maximum nodes in HTML visualization (default: 2000). Larger values may slow browser.
+        #[arg(long)]
+        max_viz_nodes: Option<usize>,
     },
     /// Install graphify skill for AI coding assistant
     Install {
@@ -269,6 +274,7 @@ async fn main() -> Result<()> {
             code_only,
             update,
             format,
+            max_viz_nodes,
         } => {
             // Merge config file defaults with CLI args
             let cfg = config::load_config(Path::new(&path));
@@ -295,6 +301,7 @@ async fn main() -> Result<()> {
                 &effective_formats,
                 verb,
                 cli.jobs,
+                max_viz_nodes,
             )?;
         }
         Commands::Install { platform } => {
@@ -424,6 +431,7 @@ fn cmd_build(
     formats: &[String],
     verb: Verbosity,
     jobs: Option<usize>,
+    max_viz_nodes: Option<usize>,
 ) -> Result<()> {
     let root = PathBuf::from(path);
     let output_dir = PathBuf::from(output);
@@ -505,8 +513,8 @@ fn cmd_build(
         code_files.len()
     );
     let mut ast_result = graphify_core::model::ExtractionResult::default();
-    let mut cache_hits = 0usize;
-    let mut extract_errors = 0usize;
+    let cache_hits = AtomicUsize::new(0);
+    let extract_errors = AtomicUsize::new(0);
 
     let pb = if !verb.is_quiet() {
         let pb = ProgressBar::new(code_files.len() as u64);
@@ -520,57 +528,62 @@ fn cmd_build(
         None
     };
 
-    for file_path in &code_files {
-        if let Some(ref pb) = pb {
-            pb.set_message(
-                file_path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string(),
-            );
-        }
-        // Try loading from cache
-        if let Some(cached) = graphify_cache::load_cached_from::<
-            graphify_core::model::ExtractionResult,
-        >(file_path, &root, &cache_dir)
-        {
-            cache_hits += 1;
-            ast_result.nodes.extend(cached.nodes);
-            ast_result.edges.extend(cached.edges);
-            ast_result.hyperedges.extend(cached.hyperedges);
+    // Parallel extraction: each file is processed independently, results collected
+    let file_results: Vec<graphify_core::model::ExtractionResult> = code_files
+        .par_iter()
+        .map(|file_path| {
+            if let Some(ref pb) = pb {
+                pb.set_message(
+                    file_path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string(),
+                );
+            }
+            // Try loading from cache
+            if let Some(cached) = graphify_cache::load_cached_from::<
+                graphify_core::model::ExtractionResult,
+            >(file_path, &root, &cache_dir)
+            {
+                cache_hits.fetch_add(1, Ordering::Relaxed);
+                if let Some(ref pb) = pb {
+                    pb.inc(1);
+                }
+                return cached;
+            }
+            // Extract fresh — catch panics to not abort the entire pipeline
+            let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                graphify_extract::extract(std::slice::from_ref(file_path))
+            })) {
+                Ok(fresh) => {
+                    let _ = graphify_cache::save_cached_to(file_path, &fresh, &root, &cache_dir);
+                    fresh
+                }
+                Err(_) => {
+                    extract_errors.fetch_add(1, Ordering::Relaxed);
+                    graphify_core::model::ExtractionResult::default()
+                }
+            };
             if let Some(ref pb) = pb {
                 pb.inc(1);
             }
-            continue;
-        }
-        // Extract fresh — catch panics to not abort the entire pipeline
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            graphify_extract::extract(std::slice::from_ref(file_path))
-        })) {
-            Ok(fresh) => {
-                let _ = graphify_cache::save_cached_to(file_path, &fresh, &root, &cache_dir);
-                ast_result.nodes.extend(fresh.nodes);
-                ast_result.edges.extend(fresh.edges);
-                ast_result.hyperedges.extend(fresh.hyperedges);
-            }
-            Err(_) => {
-                extract_errors += 1;
-                verbose_print!(
-                    verb,
-                    "    {} extraction panicked: {}",
-                    "⚠".yellow(),
-                    file_path.display()
-                );
-            }
-        }
-        if let Some(ref pb) = pb {
-            pb.inc(1);
-        }
+            result
+        })
+        .collect();
+
+    // Merge all results
+    for partial in file_results {
+        ast_result.nodes.extend(partial.nodes);
+        ast_result.edges.extend(partial.edges);
+        ast_result.hyperedges.extend(partial.hyperedges);
     }
+
     if let Some(pb) = pb {
         pb.finish_and_clear();
     }
+    let cache_hits = cache_hits.load(Ordering::Relaxed);
+    let extract_errors = extract_errors.load(Ordering::Relaxed);
     if cache_hits > 0 {
         info_print!(
             verb,
@@ -815,8 +828,13 @@ fn cmd_build(
     }
 
     if should_export("html") {
-        let html_path =
-            graphify_export::export_html(&graph, &communities, &community_labels, &output_dir)?;
+        let html_path = graphify_export::export_html(
+            &graph,
+            &communities,
+            &community_labels,
+            &output_dir,
+            max_viz_nodes,
+        )?;
         info_print!(verb, "  Wrote {}", html_path.display().to_string().dimmed());
 
         // Also generate split HTML (per-community pages)

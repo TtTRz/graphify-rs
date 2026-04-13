@@ -14,33 +14,34 @@ const COMMUNITY_COLORS: &[&str] = &[
     "#9C755F", "#BAB0AC",
 ];
 
-/// Soft limit: above this we prune to top nodes.
-const PRUNE_THRESHOLD: usize = 2000;
-/// Hard maximum nodes after pruning.
-const MAX_VIS_NODES: usize = 2000;
+/// Soft limit: above this we prune to top nodes (default, overridable via `max_nodes`).
+const DEFAULT_MAX_VIS_NODES: usize = 2000;
 
 /// Export an interactive HTML visualization of the knowledge graph.
 ///
-/// For large graphs (> 2000 nodes), automatically prunes to the most important
-/// nodes: highest-degree nodes plus community representatives, capped at 2000.
+/// For large graphs (> `max_nodes` nodes), automatically prunes to the most
+/// important nodes: highest-degree nodes plus community representatives.
+/// Pass `None` for `max_nodes` to use the default of 2000.
 pub fn export_html(
     graph: &KnowledgeGraph,
     communities: &HashMap<usize, Vec<String>>,
     community_labels: &HashMap<usize, String>,
     output_dir: &Path,
+    max_nodes: Option<usize>,
 ) -> anyhow::Result<PathBuf> {
+    let max_vis = max_nodes.unwrap_or(DEFAULT_MAX_VIS_NODES);
     let total_nodes = graph.node_count();
     let total_edges = graph.edge_count();
 
     // Determine which nodes to include
-    let (included_nodes, pruned) = if total_nodes > PRUNE_THRESHOLD {
+    let (included_nodes, pruned) = if total_nodes > max_vis {
         warn!(
             total_nodes,
-            threshold = PRUNE_THRESHOLD,
+            threshold = max_vis,
             "graph too large for interactive viz, pruning to top {} nodes",
-            MAX_VIS_NODES
+            max_vis
         );
-        (prune_nodes(graph, communities, MAX_VIS_NODES), true)
+        (prune_nodes(graph, communities, max_vis), true)
     } else {
         (
             graph.node_ids().into_iter().collect::<HashSet<String>>(),
@@ -956,7 +957,7 @@ mod tests {
         let labels: HashMap<usize, String> =
             [(0, "Cluster A".into()), (1, "Cluster B".into())].into();
 
-        let path = export_html(&kg, &communities, &labels, dir.path()).unwrap();
+        let path = export_html(&kg, &communities, &labels, dir.path(), None).unwrap();
         assert!(path.exists());
 
         let content = std::fs::read_to_string(&path).unwrap();
@@ -1051,5 +1052,53 @@ mod tests {
         let c0 = std::fs::read_to_string(path.join("community_0.html")).unwrap();
         assert!(c0.contains("Cluster A"));
         assert!(c0.contains("index.html"));
+    }
+
+    #[test]
+    fn export_html_respects_max_nodes() {
+        // Build a graph with 10 nodes
+        let mut kg = KnowledgeGraph::new();
+        for i in 0..10 {
+            kg.add_node(GraphNode {
+                id: format!("n{i}"),
+                label: format!("Node{i}"),
+                source_file: "test.rs".into(),
+                source_location: None,
+                node_type: NodeType::Function,
+                community: Some(0),
+                extra: HashMap::new(),
+            })
+            .unwrap();
+        }
+        for i in 1..10 {
+            let _ = kg.add_edge(GraphEdge {
+                source: "n0".into(),
+                target: format!("n{i}"),
+                relation: "calls".into(),
+                confidence: Confidence::Extracted,
+                confidence_score: 1.0,
+                source_file: "test.rs".into(),
+                source_location: None,
+                weight: 1.0,
+                extra: HashMap::new(),
+            });
+        }
+
+        let communities: HashMap<usize, Vec<String>> =
+            [(0, (0..10).map(|i| format!("n{i}")).collect())].into();
+        let labels: HashMap<usize, String> = [(0, "All".into())].into();
+        let dir = tempfile::tempdir().unwrap();
+
+        // With max_nodes=5, should prune (10 > 5)
+        let path = export_html(&kg, &communities, &labels, dir.path(), Some(5)).unwrap();
+        assert!(path.exists());
+        let html = std::fs::read_to_string(&path).unwrap();
+        // n0 is highest degree, must appear
+        assert!(html.contains("Node0"));
+        // Pruning banner should appear
+        assert!(
+            html.contains("pruned") || html.contains("Showing"),
+            "should indicate pruning occurred"
+        );
     }
 }

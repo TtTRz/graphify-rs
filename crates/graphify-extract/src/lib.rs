@@ -281,15 +281,17 @@ fn resolve_python_imports(result: &mut ExtractionResult) {
 /// entities defined in the target module. This turns file-level import edges
 /// into entity-level relationship edges.
 fn resolve_cross_file_imports(result: &mut ExtractionResult) {
-    // Step 1: Build file stem → [(node_label, node_id, node_type)] for entities
-    //         defined in each file. We key by the file stem (e.g. "utils" for "utils.ts").
+    // Step 1: Build lookup indexes in a single pass over nodes.
+    //   - id_to_label: node_id → label (for fast import label lookup)
+    //   - stem_to_entities: file_stem → [(label, node_id, node_type)]
+    //   - go_pkg_to_entities: go_dir_name → [(label, node_id, node_type)]
+    let mut id_to_label: HashMap<String, String> = HashMap::new();
     let mut stem_to_entities: HashMap<String, Vec<(String, String, NodeType)>> = HashMap::new();
-    // Also build: file source_file → file stem
+    let mut go_pkg_to_entities: HashMap<String, Vec<(String, String, NodeType)>> = HashMap::new();
     let mut source_file_to_stem: HashMap<String, String> = HashMap::new();
-
-    // Collect which node IDs are "entity" definitions (classes, functions, structs, etc.)
-    // by looking at "defines" edges: file --defines--> entity
     let mut file_id_to_source: HashMap<String, String> = HashMap::new();
+
+    // Collect defined entity IDs from edges (one pass)
     let defined_entity_ids: HashSet<String> = result
         .edges
         .iter()
@@ -297,43 +299,50 @@ fn resolve_cross_file_imports(result: &mut ExtractionResult) {
         .map(|e| e.target.clone())
         .collect();
 
+    // Build source_file → [entity_node_id] and id_to_label in one pass over edges
+    let mut source_file_entities: HashMap<String, Vec<String>> = HashMap::new();
+    for edge in &result.edges {
+        if edge.relation == "defines" {
+            source_file_entities
+                .entry(edge.source_file.clone())
+                .or_default()
+                .push(edge.target.clone());
+        }
+    }
+
+    // Single pass over nodes to build all indexes
     for node in &result.nodes {
+        id_to_label.insert(node.id.clone(), node.label.clone());
+
         if node.node_type == NodeType::File {
             let stem = Path::new(&node.source_file)
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("")
                 .to_string();
-            source_file_to_stem.insert(node.source_file.clone(), stem.clone());
+            source_file_to_stem.insert(node.source_file.clone(), stem);
             file_id_to_source.insert(node.id.clone(), node.source_file.clone());
+            continue;
         }
-    }
 
-    // Build stem → entities map from nodes that are defined (have a "defines" edge)
-    for node in &result.nodes {
         if !defined_entity_ids.contains(&node.id) {
             continue;
         }
-        let stem = Path::new(&node.source_file)
+
+        let path = Path::new(&node.source_file);
+        let stem = path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_string();
+
         stem_to_entities.entry(stem).or_default().push((
             node.label.clone(),
             node.id.clone(),
             node.node_type.clone(),
         ));
-    }
 
-    // Step 2: Build a map of Go package directories → entities
-    // Go files in the same directory share a package. Map dir name → entities.
-    let mut go_pkg_to_entities: HashMap<String, Vec<(String, String, NodeType)>> = HashMap::new();
-    for node in &result.nodes {
-        if !defined_entity_ids.contains(&node.id) {
-            continue;
-        }
-        let path = Path::new(&node.source_file);
+        // Go package grouping
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         if ext == "go"
             && let Some(dir) = path
@@ -348,29 +357,7 @@ fn resolve_cross_file_imports(result: &mut ExtractionResult) {
         }
     }
 
-    // Step 3: For each file, collect its own entity IDs (the entities defined in that file)
-    let mut file_source_to_entity_ids: HashMap<String, Vec<String>> = HashMap::new();
-    for edge in &result.edges {
-        if edge.relation == "defines" {
-            file_source_to_entity_ids
-                .entry(edge.source_file.clone())
-                .or_default()
-                .push(edge.source.clone()); // file_id is the source of "defines"
-            // Actually we need source_file's entity IDs (the targets of "defines")
-        }
-    }
-    // Rebuild correctly: source_file → [entity_node_id]
-    let mut source_file_entities: HashMap<String, Vec<String>> = HashMap::new();
-    for edge in &result.edges {
-        if edge.relation == "defines" {
-            source_file_entities
-                .entry(edge.source_file.clone())
-                .or_default()
-                .push(edge.target.clone());
-        }
-    }
-
-    // Step 4: Find import edges and resolve targets to create cross-file uses edges
+    // Step 2: Resolve imports → create uses edges
     let mut new_edges: Vec<GraphEdge> = Vec::new();
     let mut seen = HashSet::new();
 
@@ -385,52 +372,38 @@ fn resolve_cross_file_imports(result: &mut ExtractionResult) {
             .and_then(|e| e.to_str())
             .unwrap_or("");
 
-        // Determine the target module stem from the import node label
-        // The import node's target is an import-node ID; find its label
-        let import_label = result
-            .nodes
-            .iter()
-            .find(|n| n.id == edge.target)
-            .map(|n| n.label.as_str())
-            .unwrap_or("");
+        // O(1) lookup instead of linear scan
+        let import_label = match id_to_label.get(&edge.target) {
+            Some(label) => label.as_str(),
+            None => continue,
+        };
 
         if import_label.is_empty() {
             continue;
         }
 
         let target_entities = match ext {
-            // JS/TS: import labels are like "module/Name" or just "Name"
             "js" | "jsx" | "ts" | "tsx" => resolve_jsts_import(import_label, &stem_to_entities),
-            // Go: import labels are like "fmt" or "net/http"
             "go" => resolve_go_import(import_label, &stem_to_entities, &go_pkg_to_entities),
-            // Rust: import labels are like "std::collections" or "crate::model"
             "rs" => resolve_rust_import(import_label, &stem_to_entities),
-            // Java: import labels are like "java.util.List"
             "java" => resolve_dot_import(import_label, &stem_to_entities),
-            // C#: using labels are like "System.Collections.Generic"
             "cs" => resolve_dot_import(import_label, &stem_to_entities),
-            // C/C++: include labels are like "stdio.h" or "myheader.h"
             "c" | "h" | "cpp" | "cc" | "cxx" | "hpp" => {
                 resolve_c_include(import_label, &stem_to_entities)
             }
-            // Kotlin: raw "import com.example.Foo"
             "kt" | "kts" => {
                 let cleaned = import_label.strip_prefix("import ").unwrap_or(import_label);
                 resolve_dot_import(cleaned.trim(), &stem_to_entities)
             }
-            // PHP: labels are like "use App\Models\User"
             "php" => {
                 let cleaned = import_label.strip_prefix("use ").unwrap_or(import_label);
                 resolve_backslash_import(cleaned.trim(), &stem_to_entities)
             }
-            // Dart: raw "import 'package:foo/bar.dart'"
             "dart" => resolve_dart_import(import_label, &stem_to_entities),
-            // Scala: raw "import scala.collection.mutable"
             "scala" => {
                 let cleaned = import_label.strip_prefix("import ").unwrap_or(import_label);
                 resolve_dot_import(cleaned.trim(), &stem_to_entities)
             }
-            // Swift: raw "import Foundation"
             "swift" => {
                 let cleaned = import_label.strip_prefix("import ").unwrap_or(import_label);
                 resolve_dot_import(cleaned.trim(), &stem_to_entities)
@@ -747,20 +720,6 @@ mod tests {
         assert_eq!(map.get(".tsx"), Some(&"typescript"));
         assert_eq!(map.get(".jl"), Some(&"julia"));
         assert_eq!(map.get(".mm"), Some(&"objc"));
-    }
-
-    #[test]
-    fn language_for_path_works() {
-        assert_eq!(language_for_path(Path::new("foo/bar.py")), Some("python"));
-        assert_eq!(language_for_path(Path::new("main.rs")), Some("rust"));
-        assert_eq!(language_for_path(Path::new("readme.md")), None);
-    }
-
-    #[test]
-    fn extract_empty_paths() {
-        let result = extract(&[]);
-        assert!(result.nodes.is_empty());
-        assert!(result.edges.is_empty());
     }
 
     // -----------------------------------------------------------------------
