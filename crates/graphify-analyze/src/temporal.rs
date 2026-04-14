@@ -59,7 +59,7 @@ pub fn temporal_analysis(
         .iter()
         .filter_map(|node| {
             let (change_count, last_modified) = file_stats.get(&node.source_file)?;
-            let age_days = date_to_age(&last_modified, now).max(1);
+            let age_days = date_to_age(last_modified, now).max(1);
             let churn_rate = *change_count as f64 / age_days as f64;
             let normalized_degree = graph.degree(&node.id) as f64 / max_degree;
             let risk_score = churn_rate * normalized_degree;

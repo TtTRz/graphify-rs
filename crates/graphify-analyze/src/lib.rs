@@ -653,10 +653,10 @@ pub fn detect_cycles(graph: &KnowledgeGraph, max_cycles: usize) -> Vec<Dependenc
     // Build directed adjacency list
     let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
     for (src, tgt, edge) in graph.edges_with_endpoints() {
-        if directional.contains(&edge.relation.as_str()) {
-            if let (Some(&si), Some(&ti)) = (id_to_idx.get(src), id_to_idx.get(tgt)) {
-                adj[si].push(ti);
-            }
+        if directional.contains(&edge.relation.as_str())
+            && let (Some(&si), Some(&ti)) = (id_to_idx.get(src), id_to_idx.get(tgt))
+        {
+            adj[si].push(ti);
         }
     }
 
@@ -709,6 +709,7 @@ fn tarjan_scc(adj: &[Vec<usize>], n: usize) -> Vec<Vec<usize>> {
     let mut lowlink = vec![0usize; n];
     let mut result: Vec<Vec<usize>> = Vec::new();
 
+    #[allow(clippy::too_many_arguments)]
     fn strongconnect(
         v: usize,
         adj: &[Vec<usize>],

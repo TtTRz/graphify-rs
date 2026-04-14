@@ -335,7 +335,7 @@ fn extract_with_treesitter(
             let has_noparen_call = if lang == "ruby" {
                 // Ruby allows `func arg` or `func\n` — check if func_label appears
                 // as a standalone word (not part of a longer identifier)
-                body_lower.find(func_label.as_str()).map_or(false, |pos| {
+                body_lower.find(func_label.as_str()).is_some_and(|pos| {
                     let after = pos + func_label.len();
                     if after >= body_lower.len() {
                         true // at end of body
@@ -771,18 +771,15 @@ fn normalize_dart_function_name(lang: &str, func_name: &str) -> String {
 
     let mut name = func_name;
 
-    // Strip "get " prefix for getters (e.g., "get value" -> "value")
-    if name.starts_with("get ") {
-        name = &name[4..];
-    }
-    // Strip "set " prefix for setters (e.g., "set value" -> "value")
-    else if name.starts_with("set ") {
+    // Strip "get "/"set " prefix for Dart getters/setters (e.g., "get value" -> "value")
+    if name.starts_with("get ") || name.starts_with("set ") {
         name = &name[4..];
     }
 
     name.to_string()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_function(
     node: Node,
     source: &[u8],

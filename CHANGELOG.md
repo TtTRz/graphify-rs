@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-04-14
+
+### Fixed
+- **Clippy warnings resolved** — 6 warnings across 4 files fixed:
+  - `treesitter.rs`: Merged identical `get`/`set` prefix stripping branches
+  - `lib.rs`: Collapsed nested `if` into let-chain for Rust 2024
+  - `embedding.rs`: Replaced loop variable indexing with slice iterator
+  - `temporal.rs`: Removed needless borrow in `date_to_age()` call
+
 ## [0.4.3] - 2026-04-14
 
 ### Fixed
@@ -146,6 +155,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Git hook integration (post-commit, post-checkout)
 - CLI with 21 subcommands via clap derive
 
+[0.4.4]: https://github.com/TtTRz/graphify-rs/compare/v0.4.3...v0.4.4
+[0.4.3]: https://github.com/TtTRz/graphify-rs/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/TtTRz/graphify-rs/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/TtTRz/graphify-rs/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/TtTRz/graphify-rs/compare/v0.3.1...v0.4.0

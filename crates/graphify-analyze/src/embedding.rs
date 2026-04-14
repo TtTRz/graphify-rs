@@ -84,11 +84,11 @@ pub fn compute_embeddings(
             for (pos, &center) in walk.iter().enumerate() {
                 let ctx_start = pos.saturating_sub(window);
                 let ctx_end = (pos + window + 1).min(walk.len());
-                for ctx_pos in ctx_start..ctx_end {
-                    if ctx_pos == pos {
+                for (ctx_pos, &context) in walk[ctx_start..ctx_end].iter().enumerate() {
+                    let actual_pos = ctx_start + ctx_pos;
+                    if actual_pos == pos {
                         continue;
                     }
-                    let context = walk[ctx_pos];
                     // Simplified SGD update (no negative sampling for speed)
                     let dot: f64 = embeddings[center]
                         .iter()
