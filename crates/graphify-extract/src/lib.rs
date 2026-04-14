@@ -498,10 +498,10 @@ fn resolve_jsts_import<'a>(
     }
 
     // Barrel export: if the last segment matches a directory, check for "index" file
-    if let Some(entities) = stem_to_entities.get("index") {
-        if label.contains('/') || label.starts_with('.') {
-            return entities.iter().collect();
-        }
+    if let Some(entities) = stem_to_entities.get("index")
+        && (label.contains('/') || label.starts_with('.'))
+    {
+        return entities.iter().collect();
     }
 
     Vec::new()
