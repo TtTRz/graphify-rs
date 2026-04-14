@@ -464,15 +464,16 @@ fn resolve_cross_file_imports(result: &mut ExtractionResult) {
 /// - `"DefaultName"` (default import, label is the local binding name)
 /// - `"./relative/path"` module path
 ///
-/// Also handles barrel exports: if import points to a directory, tries to
-/// resolve via `index` file (index.js/index.ts).
+/// Handles aliased imports (`X as Y`), barrel exports (index files),
+/// and re-exports (`export { } from`).
 fn resolve_jsts_import<'a>(
     import_label: &str,
     stem_to_entities: &'a HashMap<String, Vec<(String, String, NodeType)>>,
 ) -> Vec<&'a (String, String, NodeType)> {
-    // For named imports like "utils/parseDate", the stem is "utils"
-    // For path imports like "./components/Button", the stem is "Button"
-    let parts: Vec<&str> = import_label.split('/').collect();
+    // Strip alias: "Foo as Bar" → "Foo"
+    let label = import_label.split(" as ").next().unwrap_or(import_label);
+
+    let parts: Vec<&str> = label.split('/').collect();
 
     // Try the first segment as module stem (for "module/Name" patterns)
     if parts.len() >= 2 {
@@ -491,18 +492,14 @@ fn resolve_jsts_import<'a>(
     }
 
     // Try the whole label as a stem (for simple imports like "React")
-    let simple = import_label
-        .trim_start_matches("./")
-        .trim_start_matches("../");
+    let simple = label.trim_start_matches("./").trim_start_matches("../");
     if let Some(entities) = stem_to_entities.get(simple) {
         return entities.iter().collect();
     }
 
     // Barrel export: if the last segment matches a directory, check for "index" file
-    // This handles `import { Foo } from './components'` → resolves to components/index.ts
     if let Some(entities) = stem_to_entities.get("index") {
-        // Only use index if the import looks like a directory path
-        if import_label.contains('/') || import_label.starts_with('.') {
+        if label.contains('/') || label.starts_with('.') {
             return entities.iter().collect();
         }
     }
@@ -513,25 +510,30 @@ fn resolve_jsts_import<'a>(
 /// Resolve a Go import to target entities.
 ///
 /// Go import labels are like `"fmt"`, `"net/http"`, or `"myproject/pkg/utils"`.
-/// The last path segment is the package name.
-/// Also handles dot imports (`import . "pkg"`) which bring all entities into scope.
+/// Handles dot imports (`import . "pkg"`), blank imports (`import _ "pkg"`),
+/// and aliased imports (`import alias "pkg"`).
 fn resolve_go_import<'a>(
     import_label: &str,
     stem_to_entities: &'a HashMap<String, Vec<(String, String, NodeType)>>,
     go_pkg_to_entities: &'a HashMap<String, Vec<(String, String, NodeType)>>,
 ) -> Vec<&'a (String, String, NodeType)> {
-    // Handle dot import: strip leading "." prefix
-    let label = import_label.trim_start_matches(". ");
+    // Strip dot import prefix, blank import prefix, or alias
+    let label = import_label
+        .trim_start_matches(". ")
+        .trim_start_matches("_ ");
+    // Also strip any remaining alias: `alias "path"` → `"path"`
+    let label = if label.contains('"') {
+        label.split('"').nth(1).unwrap_or(label)
+    } else {
+        label
+    };
 
-    // Extract the last path segment as the package name
     let pkg_name = label.rsplit('/').next().unwrap_or(label);
 
-    // Try matching against Go package directory names
     if let Some(entities) = go_pkg_to_entities.get(pkg_name) {
         return entities.iter().collect();
     }
 
-    // Fall back to file stem matching
     if let Some(entities) = stem_to_entities.get(pkg_name) {
         return entities.iter().collect();
     }
@@ -541,21 +543,28 @@ fn resolve_go_import<'a>(
 
 /// Resolve a Rust `use` import to target entities.
 ///
-/// Rust import labels are like `"std::collections"`, `"crate::model"`, or `"super::utils"`.
-/// Handles `pub use` re-exports: if import label starts with `pub use`, resolves
-/// transitively through the re-exporting module to the original definition.
+/// Handles `pub use` re-exports, glob imports (`use foo::*`),
+/// and specific type imports (`use crate::model::Config`).
 fn resolve_rust_import<'a>(
     import_label: &str,
     stem_to_entities: &'a HashMap<String, Vec<(String, String, NodeType)>>,
 ) -> Vec<&'a (String, String, NodeType)> {
-    // Strip `pub use ` prefix if present (re-export)
     let label = import_label
         .strip_prefix("pub use ")
         .unwrap_or(import_label);
     let segments: Vec<&str> = label.split("::").collect();
 
+    // Glob import: `use module::*` → return all entities from module
+    if segments.last() == Some(&"*") && segments.len() >= 2 {
+        let module = segments[segments.len() - 2];
+        if let Some(entities) = stem_to_entities.get(module) {
+            return entities.iter().collect();
+        }
+    }
+
     // Try the last segment as a module/file stem
     if let Some(last) = segments.last()
+        && *last != "*"
         && let Some(entities) = stem_to_entities.get(*last)
     {
         return entities.iter().collect();
@@ -565,16 +574,11 @@ fn resolve_rust_import<'a>(
     if segments.len() >= 2 {
         let module = segments[segments.len() - 2];
         if let Some(entities) = stem_to_entities.get(module) {
-            // Filter to only return entities whose label matches the last segment
             let last = segments.last().unwrap();
-            let filtered: Vec<_> = entities
-                .iter()
-                .filter(|(label, _, _)| label == last)
-                .collect();
+            let filtered: Vec<_> = entities.iter().filter(|(lbl, _, _)| lbl == last).collect();
             if !filtered.is_empty() {
                 return filtered;
             }
-            // If no exact match, return all entities from the module
             return entities.iter().collect();
         }
     }
@@ -585,12 +589,20 @@ fn resolve_rust_import<'a>(
 /// Resolve a dot-separated import (Java, C#, Kotlin, Scala, Swift).
 ///
 /// Import labels like `"java.util.List"` or `"System.Collections.Generic"`.
-/// Tries the last segment as a type name, then second-to-last as module stem.
+/// Handles aliased imports (`using X = Y`), static imports (`import static`).
 fn resolve_dot_import<'a>(
     import_label: &str,
     stem_to_entities: &'a HashMap<String, Vec<(String, String, NodeType)>>,
 ) -> Vec<&'a (String, String, NodeType)> {
-    let segments: Vec<&str> = import_label.split('.').collect();
+    // Strip common prefixes: "static ", alias part after " = "
+    let label = import_label.strip_prefix("static ").unwrap_or(import_label);
+    let label = if let Some(idx) = label.find(" = ") {
+        label[idx + 3..].trim()
+    } else {
+        label
+    };
+
+    let segments: Vec<&str> = label.split('.').collect();
 
     // Try the last segment as a type/entity name matching a file stem
     if let Some(last) = segments.last()
@@ -604,10 +616,7 @@ fn resolve_dot_import<'a>(
         let module = segments[segments.len() - 2];
         if let Some(entities) = stem_to_entities.get(module) {
             let last = segments.last().unwrap();
-            let filtered: Vec<_> = entities
-                .iter()
-                .filter(|(label, _, _)| label == last)
-                .collect();
+            let filtered: Vec<_> = entities.iter().filter(|(lbl, _, _)| lbl == last).collect();
             if !filtered.is_empty() {
                 return filtered;
             }
@@ -681,21 +690,61 @@ fn resolve_dart_import<'a>(
     import_label: &str,
     stem_to_entities: &'a HashMap<String, Vec<(String, String, NodeType)>>,
 ) -> Vec<&'a (String, String, NodeType)> {
-    // Strip "import " prefix and quotes
-    let label = import_label
-        .strip_prefix("import ")
-        .unwrap_or(import_label)
-        .trim_matches('\'')
+    // Start with the full import label
+    let mut label = import_label;
+
+    // Strip common prefixes: "import ", "export ", "part "
+    if let Some(stripped) = label.strip_prefix("import ") {
+        label = stripped;
+    } else if let Some(stripped) = label.strip_prefix("export ") {
+        label = stripped;
+    } else if let Some(stripped) = label.strip_prefix("part ") {
+        label = stripped;
+    }
+
+    // Step 1: Handle aliased imports like "utils.dart' as utils"
+    // Extract the path part before " as "
+    let path_and_alias = label;
+    let path_part = if let Some(idx) = path_and_alias.find(" as ") {
+        &path_and_alias[..idx]
+    } else {
+        path_and_alias
+    };
+
+    // Step 2: Handle deferred imports like "heavy.dart' deferred as heavy"
+    // Extract the path part before " deferred"
+    let path_deferred = path_part;
+    let path_no_deferred = if let Some(idx) = path_deferred.find(" deferred") {
+        &path_deferred[..idx]
+    } else {
+        path_deferred
+    };
+
+    // Step 3: Strip quotes
+    let quoted = path_no_deferred.trim();
+    let unquoted = quoted
+        .trim_matches('\'') // Single quote character
         .trim_matches('"');
 
-    // Strip "package:" prefix and extract last path segment
-    let path_part = label.strip_prefix("package:").unwrap_or(label);
-    let last_segment = path_part.rsplit('/').next().unwrap_or(path_part);
+    // Step 4: Handle relative imports with "../" - resolve up to file stem
+    let normalized = if unquoted.contains("../") {
+        // For relative imports, just take the last segment (filename)
+        // e.g., "../models/user.dart" -> "user"
+        let last_segment = unquoted.rsplit('/').next().unwrap_or(unquoted);
+        last_segment.strip_suffix(".dart").unwrap_or(last_segment)
+    } else {
+        // Step 5: Strip "package:" prefix
+        let path_part = unquoted.strip_prefix("package:").unwrap_or(unquoted);
 
-    // Strip .dart extension
-    let stem = last_segment.strip_suffix(".dart").unwrap_or(last_segment);
+        // Step 6: Extract last path segment (filename)
+        let last_segment = path_part.rsplit('/').next().unwrap_or(path_part);
 
-    if let Some(entities) = stem_to_entities.get(stem) {
+        // Step 7: Strip .dart extension
+        last_segment.strip_suffix(".dart").unwrap_or(last_segment)
+    };
+
+    // Look up the stem in the entities map
+    if let Some(entities) = stem_to_entities.get(normalized) {
         return entities.iter().collect();
     }
 
@@ -1518,5 +1567,126 @@ mod tests {
                 .iter()
                 .any(|e| e.source == "app_fn" && e.target == "mgr_class")
         );
+    }
+
+    // ===== Resolver unit tests =====
+
+    #[test]
+    fn jsts_resolver_strips_alias() {
+        let mut entities = HashMap::new();
+        entities.insert(
+            "utils".to_string(),
+            vec![("parseDate".into(), "pd_id".into(), NodeType::Function)],
+        );
+        // "utils/parseDate as pd" should still resolve to utils entities
+        let result = resolve_jsts_import("utils/parseDate as pd", &entities);
+        assert!(!result.is_empty(), "aliased JS import should resolve");
+    }
+
+    #[test]
+    fn go_resolver_handles_blank_import() {
+        let mut entities = HashMap::new();
+        entities.insert(
+            "driver".to_string(),
+            vec![("Register".into(), "reg_id".into(), NodeType::Function)],
+        );
+        let empty = HashMap::new();
+        // import _ "database/sql/driver"
+        let result = resolve_go_import("_ database/sql/driver", &entities, &empty);
+        assert!(!result.is_empty(), "Go blank import should resolve");
+    }
+
+    #[test]
+    fn go_resolver_handles_alias_import() {
+        let mut entities = HashMap::new();
+        entities.insert(
+            "http".to_string(),
+            vec![("Server".into(), "srv_id".into(), NodeType::Struct)],
+        );
+        let empty = HashMap::new();
+        // import h "net/http"
+        let result = resolve_go_import(r#"h "net/http""#, &entities, &empty);
+        assert!(!result.is_empty(), "Go aliased import should resolve");
+    }
+
+    #[test]
+    fn rust_resolver_handles_glob() {
+        let mut entities = HashMap::new();
+        entities.insert(
+            "model".to_string(),
+            vec![
+                ("Config".into(), "cfg_id".into(), NodeType::Struct),
+                ("Database".into(), "db_id".into(), NodeType::Struct),
+            ],
+        );
+        // use crate::model::*
+        let result = resolve_rust_import("crate::model::*", &entities);
+        assert_eq!(result.len(), 2, "glob import should return all entities");
+    }
+
+    #[test]
+    fn dot_resolver_handles_static_import() {
+        let mut entities = HashMap::new();
+        entities.insert(
+            "Math".to_string(),
+            vec![("sqrt".into(), "sqrt_id".into(), NodeType::Function)],
+        );
+        // import static java.lang.Math.sqrt
+        let result = resolve_dot_import("static java.lang.Math.sqrt", &entities);
+        assert!(
+            !result.is_empty(),
+            "Java static import should resolve: got empty"
+        );
+    }
+
+    #[test]
+    fn dot_resolver_handles_csharp_alias() {
+        let mut entities = HashMap::new();
+        entities.insert(
+            "MySqlClient".to_string(),
+            vec![("Connection".into(), "conn_id".into(), NodeType::Class)],
+        );
+        // using MySql = MySql.Data.MySqlClient
+        let result = resolve_dot_import("MySql = MySql.Data.MySqlClient", &entities);
+        assert!(
+            !result.is_empty(),
+            "C# alias using should resolve: got empty"
+        );
+    }
+
+    #[test]
+    fn dart_resolver_handles_relative_import() {
+        let mut entities = HashMap::new();
+        entities.insert(
+            "user".to_string(),
+            vec![("User".into(), "user_id".into(), NodeType::Class)],
+        );
+        let result = resolve_dart_import("import '../models/user.dart'", &entities);
+        assert!(!result.is_empty(), "Dart relative import should resolve");
+    }
+
+    #[test]
+    fn dart_resolver_handles_deferred_import() {
+        let mut entities = HashMap::new();
+        entities.insert(
+            "heavy".to_string(),
+            vec![("compute".into(), "comp_id".into(), NodeType::Function)],
+        );
+        let result = resolve_dart_import(
+            "import 'package:myapp/heavy.dart' deferred as heavy",
+            &entities,
+        );
+        assert!(!result.is_empty(), "Dart deferred import should resolve");
+    }
+
+    #[test]
+    fn dart_resolver_handles_part_directive() {
+        let mut entities = HashMap::new();
+        entities.insert(
+            "models".to_string(),
+            vec![("Item".into(), "item_id".into(), NodeType::Class)],
+        );
+        let result = resolve_dart_import("part 'src/models.dart'", &entities);
+        assert!(!result.is_empty(), "Dart part directive should resolve");
     }
 }

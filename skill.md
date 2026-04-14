@@ -79,6 +79,7 @@ Available flags:
 - `--update`: incremental rebuild, only re-extract changed files
 - `--format json,html,report,wiki,svg,graphml,cypher,obsidian`: select export formats (default: all)
 - `--jobs N`: control parallelism
+- `--max-viz-nodes N`: maximum nodes in HTML visualization (default: 2000, increase for larger projects)
 
 The command outputs progress with a progress bar and colored status messages.
 

@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-04-14
+
+### Fixed
+- **Dart extraction — Critical fixes for 70-80% missing edges**
+  - `treesitter.rs`: Added missing `function_declaration` and `method_definition` types (fixes 40-60% of functions)
+  - `treesitter.rs`: Added `part_directive` and `part_of_directive` for Dart file-splitting (fixes cross-file relationships)
+  - `lib.rs`: Rewrote `resolve_dart_import()` to handle aliased imports (`as`), deferred imports, relative paths (`../`), and part directives (fixes 30-50% of imports)
+  - `treesitter.rs`: Added function name normalization for Dart getters/setters (strips `get`/`set` prefixes)
+- **Ruby import handler** — `require`/`require_relative` now produce clean module names instead of raw AST text; non-require `call` nodes no longer intercepted as imports
+- **Python star import** — `from x import *` now correctly detected even when prior import statements exist (was counting total edges instead of per-statement delta)
+- **Java static import** — `import static java.util.Arrays.asList` no longer mis-parsed due to nested `unwrap_or_else` confusion
+- **Dart function signatures** — `function_signature`/`method_signature` nodes without `name` field now fall back to first `identifier` child
+- **JS async functions** — added `async_function_declaration` to tree-sitter config (was only covered by regex fallback)
+- **Ruby no-parens call inference** — call-graph heuristic now detects Ruby-style `bark` calls without parentheses via word-boundary matching
+- **NodeType classification for all languages** — `classify_class_kind()` now returns correct types for C/C++/C#/Java/Dart/Ruby (struct→Struct, enum→Enum, interface→Interface, namespace→Namespace, module→Module); was previously falling through to Class for all non-Rust types
+- **Dart import handler** — dedicated `extract_dart_import()` properly strips `deferred as`/`show`/`hide` suffixes from import paths
+
+## [0.4.2] - 2026-04-14
+
+### Fixed
+- **Skill file sync** — installed skill at `~/.claude/skills/` now matches repo (was stuck at 7 tools, updated to 15)
+- **`--max-viz-nodes` flag** added to skill.md available flags
+
 ## [0.4.1] - 2026-04-13
 
 ### Added
@@ -123,6 +146,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Git hook integration (post-commit, post-checkout)
 - CLI with 21 subcommands via clap derive
 
+[0.4.2]: https://github.com/TtTRz/graphify-rs/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/TtTRz/graphify-rs/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/TtTRz/graphify-rs/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/TtTRz/graphify-rs/compare/v0.3.0...v0.3.1

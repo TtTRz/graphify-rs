@@ -350,3 +350,454 @@ fn node_ids_are_deterministic() {
         assert_eq!(a.id, b.id);
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tree-sitter config completeness tests
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn ts_ruby_extracts_module_and_require() {
+    let source = br#"
+require 'json'
+
+module Utilities
+  class Helper
+    def process(data)
+      data.to_s
+    end
+  end
+end
+"#;
+    let result = try_extract(Path::new("helper.rb"), source, "ruby").unwrap();
+    let labels: Vec<&str> = result.nodes.iter().map(|n| n.label.as_str()).collect();
+    // module should be extracted (was missing before)
+    assert!(
+        labels.iter().any(|l| l.contains("Utilities")),
+        "missing module Utilities: {labels:?}"
+    );
+    assert!(
+        labels.iter().any(|l| l.contains("Helper")),
+        "missing class Helper: {labels:?}"
+    );
+}
+
+#[test]
+fn ts_csharp_extracts_struct_and_enum() {
+    let source = br#"
+using System;
+
+public struct Point {
+    public int X;
+    public int Y;
+}
+
+public enum Status {
+    Active,
+    Inactive
+}
+
+public class Service {
+    public Service() {}
+    public void Run() {}
+}
+"#;
+    let result = try_extract(Path::new("Types.cs"), source, "csharp").unwrap();
+    let labels: Vec<&str> = result.nodes.iter().map(|n| n.label.as_str()).collect();
+    assert!(
+        labels.iter().any(|l| l.contains("Point")),
+        "missing struct Point: {labels:?}"
+    );
+    assert!(
+        labels.iter().any(|l| l.contains("Status")),
+        "missing enum Status: {labels:?}"
+    );
+    assert!(
+        labels.iter().any(|l| l.contains("Service")),
+        "missing class Service: {labels:?}"
+    );
+}
+
+#[test]
+fn ts_java_extracts_enum() {
+    let source = br#"
+public enum Priority {
+    LOW,
+    MEDIUM,
+    HIGH;
+}
+"#;
+    let result = try_extract(Path::new("Priority.java"), source, "java").unwrap();
+    let labels: Vec<&str> = result.nodes.iter().map(|n| n.label.as_str()).collect();
+    assert!(
+        labels.iter().any(|l| l.contains("Priority")),
+        "missing enum Priority: {labels:?}"
+    );
+}
+
+#[test]
+fn ts_cpp_extracts_struct_and_namespace() {
+    let source = br#"
+#include <string>
+
+namespace MyApp {
+
+struct Config {
+    std::string host;
+    int port;
+};
+
+enum Color { Red, Green, Blue };
+
+}
+"#;
+    let result = try_extract(Path::new("types.cpp"), source, "cpp").unwrap();
+    let labels: Vec<&str> = result.nodes.iter().map(|n| n.label.as_str()).collect();
+    assert!(
+        labels.iter().any(|l| l.contains("MyApp")),
+        "missing namespace MyApp: {labels:?}"
+    );
+    assert!(
+        labels.iter().any(|l| l.contains("Config")),
+        "missing struct Config: {labels:?}"
+    );
+}
+
+#[test]
+fn ts_c_extracts_struct() {
+    let source = br#"
+struct Vector {
+    double x;
+    double y;
+};
+
+int main() { return 0; }
+"#;
+    let result = try_extract(Path::new("types.c"), source, "c").unwrap();
+    let labels: Vec<&str> = result.nodes.iter().map(|n| n.label.as_str()).collect();
+    assert!(
+        labels.iter().any(|l| l.contains("Vector")),
+        "missing struct Vector: {labels:?}"
+    );
+    assert!(
+        labels.iter().any(|l| l.contains("main")),
+        "missing main: {labels:?}"
+    );
+}
+
+#[test]
+fn ts_js_extracts_generator_function() {
+    let source = br#"
+function* generateIds() {
+    let id = 0;
+    while (true) {
+        yield id++;
+    }
+}
+
+function normalFunc() {
+    return 1;
+}
+"#;
+    let result = try_extract(Path::new("gen.js"), source, "javascript").unwrap();
+    let labels: Vec<&str> = result.nodes.iter().map(|n| n.label.as_str()).collect();
+    assert!(
+        labels.iter().any(|l| l.contains("generateIds")),
+        "missing generator function generateIds: {labels:?}"
+    );
+    assert!(
+        labels.iter().any(|l| l.contains("normalFunc")),
+        "missing normalFunc: {labels:?}"
+    );
+}
+
+#[test]
+fn ts_dart_extracts_part_directive() {
+    let source = br#"
+import 'dart:async';
+part 'src/models.dart';
+
+void main() {
+  print('hello');
+}
+"#;
+    let result = try_extract(Path::new("app.dart"), source, "dart").unwrap();
+    // Should have imports for both the import and part directive
+    let import_count = result
+        .edges
+        .iter()
+        .filter(|e| e.relation == "imports")
+        .count();
+    assert!(
+        import_count >= 2,
+        "expected >=2 imports (import + part), got {import_count}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Bug fix regression tests
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Bug 1: Ruby require/require_relative should produce clean module names, not raw text
+#[test]
+fn ts_ruby_require_produces_clean_module_name() {
+    let source = br#"
+require 'json'
+require_relative 'helper'
+"#;
+    let result = try_extract(Path::new("app.rb"), source, "ruby").unwrap();
+    let import_labels: Vec<&str> = result
+        .nodes
+        .iter()
+        .filter(|n| n.node_type == NodeType::Module)
+        .map(|n| n.label.as_str())
+        .collect();
+    assert!(
+        import_labels.iter().any(|l| *l == "json"),
+        "expected clean 'json' import, got: {import_labels:?}"
+    );
+    assert!(
+        import_labels.iter().any(|l| *l == "helper"),
+        "expected clean 'helper' import, got: {import_labels:?}"
+    );
+    // Should NOT contain raw text like "require 'json'"
+    assert!(
+        !import_labels.iter().any(|l| l.contains("require")),
+        "import labels should not contain 'require' keyword: {import_labels:?}"
+    );
+}
+
+/// Bug 2: Python `from x import *` should add module even when prior imports exist
+#[test]
+fn ts_python_star_import_after_regular_import() {
+    let source = br#"
+import os
+from collections import *
+"#;
+    let result = try_extract(Path::new("test.py"), source, "python").unwrap();
+    let import_labels: Vec<&str> = result
+        .nodes
+        .iter()
+        .filter(|n| n.node_type == NodeType::Module)
+        .map(|n| n.label.as_str())
+        .collect();
+    assert!(
+        import_labels.iter().any(|l| *l == "os"),
+        "expected 'os' import: {import_labels:?}"
+    );
+    assert!(
+        import_labels.iter().any(|l| *l == "collections"),
+        "expected 'collections' import from star import: {import_labels:?}"
+    );
+}
+
+/// Bug 4: Java static import should parse correctly
+#[test]
+fn ts_java_static_import() {
+    let source = br#"
+import static java.util.Arrays.asList;
+import java.util.List;
+
+public class Foo {
+    public void bar() {}
+}
+"#;
+    let result = try_extract(Path::new("Foo.java"), source, "java").unwrap();
+    let import_labels: Vec<&str> = result
+        .nodes
+        .iter()
+        .filter(|n| n.node_type == NodeType::Module)
+        .map(|n| n.label.as_str())
+        .collect();
+    assert!(
+        import_labels
+            .iter()
+            .any(|l| *l == "java.util.Arrays.asList"),
+        "expected 'java.util.Arrays.asList' from static import: {import_labels:?}"
+    );
+    assert!(
+        import_labels.iter().any(|l| *l == "java.util.List"),
+        "expected 'java.util.List': {import_labels:?}"
+    );
+}
+
+/// Bug 5: JS async function declaration should be extracted
+#[test]
+fn ts_js_async_function() {
+    let source = br#"
+async function fetchData(url) {
+    const res = await fetch(url);
+    return res.json();
+}
+
+function syncFunc() {
+    return 1;
+}
+"#;
+    let result = try_extract(Path::new("api.js"), source, "javascript").unwrap();
+    let labels: Vec<&str> = result.nodes.iter().map(|n| n.label.as_str()).collect();
+    assert!(
+        labels.iter().any(|l| l.contains("fetchData")),
+        "missing async function fetchData: {labels:?}"
+    );
+    assert!(
+        labels.iter().any(|l| l.contains("syncFunc")),
+        "missing syncFunc: {labels:?}"
+    );
+}
+
+/// Bug 6: Ruby no-parens call inference
+#[test]
+fn ts_ruby_no_parens_call_inference() {
+    let source = br#"
+class Dog
+  def bark
+    "Woof!"
+  end
+  def speak
+    bark
+    puts bark
+  end
+end
+"#;
+    let result = try_extract(Path::new("dog.rb"), source, "ruby").unwrap();
+    let call_edges: Vec<_> = result
+        .edges
+        .iter()
+        .filter(|e| e.relation == "calls")
+        .collect();
+    assert!(
+        !call_edges.is_empty(),
+        "expected at least one call edge for Ruby no-parens calls"
+    );
+}
+
+/// classify_class_kind: C# struct should be Struct, not Class
+#[test]
+fn ts_csharp_struct_has_correct_node_type() {
+    let source = br#"
+public struct Point {
+    public int X;
+    public int Y;
+}
+"#;
+    let result = try_extract(Path::new("Point.cs"), source, "csharp").unwrap();
+    assert!(
+        result
+            .nodes
+            .iter()
+            .any(|n| n.label == "Point" && n.node_type == NodeType::Struct),
+        "C# struct should have NodeType::Struct, nodes: {:?}",
+        result
+            .nodes
+            .iter()
+            .map(|n| (&n.label, &n.node_type))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// classify_class_kind: C# enum should be Enum, not Class
+#[test]
+fn ts_csharp_enum_has_correct_node_type() {
+    let source = br#"
+public enum Color { Red, Green, Blue }
+"#;
+    let result = try_extract(Path::new("Color.cs"), source, "csharp").unwrap();
+    assert!(
+        result
+            .nodes
+            .iter()
+            .any(|n| n.label == "Color" && n.node_type == NodeType::Enum),
+        "C# enum should have NodeType::Enum, nodes: {:?}",
+        result
+            .nodes
+            .iter()
+            .map(|n| (&n.label, &n.node_type))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// classify_class_kind: Java enum should be Enum, not Class
+#[test]
+fn ts_java_enum_has_correct_node_type() {
+    let source = br#"
+public enum Priority { LOW, MEDIUM, HIGH }
+"#;
+    let result = try_extract(Path::new("Priority.java"), source, "java").unwrap();
+    assert!(
+        result
+            .nodes
+            .iter()
+            .any(|n| n.label == "Priority" && n.node_type == NodeType::Enum),
+        "Java enum should have NodeType::Enum, nodes: {:?}",
+        result
+            .nodes
+            .iter()
+            .map(|n| (&n.label, &n.node_type))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// classify_class_kind: Java interface should be Interface, not Class
+#[test]
+fn ts_java_interface_has_correct_node_type() {
+    let source = br#"
+public interface Runnable { void run(); }
+"#;
+    let result = try_extract(Path::new("Runnable.java"), source, "java").unwrap();
+    assert!(
+        result
+            .nodes
+            .iter()
+            .any(|n| n.label == "Runnable" && n.node_type == NodeType::Interface),
+        "Java interface should have NodeType::Interface, nodes: {:?}",
+        result
+            .nodes
+            .iter()
+            .map(|n| (&n.label, &n.node_type))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// classify_class_kind: C++ namespace should be Namespace
+#[test]
+fn ts_cpp_namespace_has_correct_node_type() {
+    let source = br#"
+namespace MyApp {
+    class Foo {};
+}
+"#;
+    let result = try_extract(Path::new("app.cpp"), source, "cpp").unwrap();
+    assert!(
+        result
+            .nodes
+            .iter()
+            .any(|n| n.label == "MyApp" && n.node_type == NodeType::Namespace),
+        "C++ namespace should have NodeType::Namespace, nodes: {:?}",
+        result
+            .nodes
+            .iter()
+            .map(|n| (&n.label, &n.node_type))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// C struct should be Struct, not Class
+#[test]
+fn ts_c_struct_has_correct_node_type() {
+    let source = br#"
+struct Vector { double x; double y; };
+"#;
+    let result = try_extract(Path::new("types.c"), source, "c").unwrap();
+    assert!(
+        result
+            .nodes
+            .iter()
+            .any(|n| n.label == "Vector" && n.node_type == NodeType::Struct),
+        "C struct should have NodeType::Struct, nodes: {:?}",
+        result
+            .nodes
+            .iter()
+            .map(|n| (&n.label, &n.node_type))
+            .collect::<Vec<_>>()
+    );
+}

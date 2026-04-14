@@ -57,6 +57,8 @@ fn js_config() -> TsConfig {
             "method_definition",
             "arrow_function",
             "generator_function_declaration",
+            "generator_function",
+            "async_function_declaration",
         ]
         .into_iter()
         .collect(),
@@ -101,9 +103,13 @@ fn go_config() -> TsConfig {
 
 fn java_config() -> TsConfig {
     TsConfig {
-        class_types: ["class_declaration", "interface_declaration"]
-            .into_iter()
-            .collect(),
+        class_types: [
+            "class_declaration",
+            "interface_declaration",
+            "enum_declaration",
+        ]
+        .into_iter()
+        .collect(),
         function_types: ["method_declaration", "constructor_declaration"]
             .into_iter()
             .collect(),
@@ -118,12 +124,14 @@ fn java_config() -> TsConfig {
 
 fn c_config() -> TsConfig {
     TsConfig {
-        class_types: HashSet::new(),
+        class_types: ["struct_specifier", "enum_specifier", "type_definition"]
+            .into_iter()
+            .collect(),
         function_types: ["function_definition"].into_iter().collect(),
         import_types: ["preproc_include"].into_iter().collect(),
         call_types: ["call_expression"].into_iter().collect(),
         name_field: "declarator",
-        class_name_field: None,
+        class_name_field: Some("name"),
         body_field: "body",
         call_function_field: "function",
     }
@@ -131,7 +139,14 @@ fn c_config() -> TsConfig {
 
 fn cpp_config() -> TsConfig {
     TsConfig {
-        class_types: ["class_specifier"].into_iter().collect(),
+        class_types: [
+            "class_specifier",
+            "struct_specifier",
+            "enum_specifier",
+            "namespace_definition",
+        ]
+        .into_iter()
+        .collect(),
         function_types: ["function_definition"].into_iter().collect(),
         import_types: ["preproc_include"].into_iter().collect(),
         call_types: ["call_expression"].into_iter().collect(),
@@ -144,9 +159,9 @@ fn cpp_config() -> TsConfig {
 
 fn ruby_config() -> TsConfig {
     TsConfig {
-        class_types: ["class"].into_iter().collect(),
+        class_types: ["class", "module"].into_iter().collect(),
         function_types: ["method", "singleton_method"].into_iter().collect(),
-        import_types: HashSet::new(),
+        import_types: ["call"].into_iter().collect(), // require/require_relative are method calls
         call_types: ["call"].into_iter().collect(),
         name_field: "name",
         class_name_field: None,
@@ -157,10 +172,17 @@ fn ruby_config() -> TsConfig {
 
 fn csharp_config() -> TsConfig {
     TsConfig {
-        class_types: ["class_declaration", "interface_declaration"]
+        class_types: [
+            "class_declaration",
+            "interface_declaration",
+            "struct_declaration",
+            "enum_declaration",
+        ]
+        .into_iter()
+        .collect(),
+        function_types: ["method_declaration", "constructor_declaration"]
             .into_iter()
             .collect(),
-        function_types: ["method_declaration"].into_iter().collect(),
         import_types: ["using_directive"].into_iter().collect(),
         call_types: ["invocation_expression"].into_iter().collect(),
         name_field: "name",
@@ -180,10 +202,18 @@ fn dart_config() -> TsConfig {
         ]
         .into_iter()
         .collect(),
-        function_types: ["function_signature", "method_signature", "function_body"]
+        function_types: [
+            "function_signature",
+            "method_signature",
+            "function_body",
+            "function_declaration",
+            "method_definition",
+        ]
+        .into_iter()
+        .collect(),
+        import_types: ["import_or_export", "part_directive", "part_of_directive"]
             .into_iter()
             .collect(),
-        import_types: ["import_or_export"].into_iter().collect(),
         call_types: ["method_invocation", "function_expression_invocation"]
             .into_iter()
             .collect(),
@@ -295,12 +325,30 @@ fn extract_with_treesitter(
     for (caller_nid, body_start, body_end) in &function_bodies {
         let body_text = &source[*body_start..*body_end];
         let body_str = String::from_utf8_lossy(body_text);
+        let body_lower = body_str.to_lowercase();
         for (func_label, callee_nid) in &label_to_nid {
             if callee_nid == caller_nid {
                 continue;
             }
-            // Simple heuristic: look for `func_name(` in body
-            if body_str.to_lowercase().contains(&format!("{func_label}(")) {
+            // Heuristic: look for `func_name(` in body, or for Ruby-style no-parens calls
+            let has_paren_call = body_lower.contains(&format!("{func_label}("));
+            let has_noparen_call = if lang == "ruby" {
+                // Ruby allows `func arg` or `func\n` — check if func_label appears
+                // as a standalone word (not part of a longer identifier)
+                body_lower.find(func_label.as_str()).map_or(false, |pos| {
+                    let after = pos + func_label.len();
+                    if after >= body_lower.len() {
+                        true // at end of body
+                    } else {
+                        let next_ch = body_lower.as_bytes()[after];
+                        // Must be followed by non-alphanumeric (space, newline, paren, etc.)
+                        !next_ch.is_ascii_alphanumeric() && next_ch != b'_'
+                    }
+                })
+            } else {
+                false
+            };
+            if has_paren_call || has_noparen_call {
                 let key = (caller_nid.clone(), callee_nid.clone());
                 if seen_calls.insert(key) {
                     edges.push(GraphEdge {
@@ -357,8 +405,22 @@ fn walk_node(
 
     // ---- Imports ----
     if config.import_types.contains(kind) {
-        extract_import(node, source, file_nid, str_path, lang, edges, nodes);
-        return; // Don't recurse into import children
+        // For Ruby, `call` is in both import_types and call_types.
+        // Only treat require/require_relative as imports; let other calls recurse normally.
+        if lang == "ruby" && kind == "call" {
+            let method_name = node
+                .child_by_field_name("method")
+                .map(|n| node_text(n, source))
+                .unwrap_or_default();
+            if method_name == "require" || method_name == "require_relative" {
+                extract_import(node, source, file_nid, str_path, lang, edges, nodes);
+                return;
+            }
+            // Not a require call, fall through to normal processing
+        } else {
+            extract_import(node, source, file_nid, str_path, lang, edges, nodes);
+            return; // Don't recurse into import children
+        }
     }
 
     // ---- Classes / Structs / Enums / Traits ----
@@ -526,10 +588,30 @@ fn handle_class_like(
 }
 
 fn classify_class_kind(kind: &str, lang: &str) -> NodeType {
-    match (kind, lang) {
-        ("struct_item", "rust") => NodeType::Struct,
-        ("enum_item", "rust") => NodeType::Enum,
-        ("trait_item", "rust") => NodeType::Trait,
+    match kind {
+        // Rust
+        "struct_item" => NodeType::Struct,
+        "enum_item" => NodeType::Enum,
+        "trait_item" => NodeType::Trait,
+        // C / C++
+        "struct_specifier" => NodeType::Struct,
+        "enum_specifier" => NodeType::Enum,
+        "namespace_definition" => NodeType::Namespace,
+        // C#
+        "struct_declaration" => NodeType::Struct,
+        "enum_declaration" => match lang {
+            "csharp" | "java" | "dart" => NodeType::Enum,
+            _ => NodeType::Enum,
+        },
+        // Java / C#
+        "interface_declaration" => NodeType::Interface,
+        // Dart
+        "mixin_declaration" | "extension_declaration" => NodeType::Class,
+        // Ruby
+        "module" => NodeType::Module,
+        // C (type_definition is used for typedef'd structs/enums)
+        "type_definition" => NodeType::Struct,
+        // Default
         _ => NodeType::Class,
     }
 }
@@ -681,6 +763,26 @@ fn handle_rust_impl(
 // ═══════════════════════════════════════════════════════════════════════════
 
 #[allow(clippy::too_many_arguments)]
+/// Normalize Dart function names: handle getters/setters and named constructors
+fn normalize_dart_function_name(lang: &str, func_name: &str) -> String {
+    if lang != "dart" {
+        return func_name.to_string();
+    }
+
+    let mut name = func_name;
+
+    // Strip "get " prefix for getters (e.g., "get value" -> "value")
+    if name.starts_with("get ") {
+        name = &name[4..];
+    }
+    // Strip "set " prefix for setters (e.g., "set value" -> "value")
+    else if name.starts_with("set ") {
+        name = &name[4..];
+    }
+
+    name.to_string()
+}
+
 fn handle_function(
     node: Node,
     source: &[u8],
@@ -715,27 +817,43 @@ fn handle_function(
                 } else {
                     return;
                 }
+            } else if _lang == "dart" {
+                // Dart function_signature/method_signature may not have a name field;
+                // try to find the first identifier child as the function name
+                let mut found = None;
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if child.kind() == "identifier" {
+                        found = Some(node_text(child, source));
+                        break;
+                    }
+                }
+                match found {
+                    Some(n) if !n.is_empty() => n,
+                    _ => return,
+                }
             } else {
                 return;
             }
         }
     };
 
+    let normalized_name = normalize_dart_function_name(_lang, &func_name);
     let line = node.start_position().row + 1;
 
     let (func_nid, label, node_type, relation) = if let Some(class_nid) = parent_class_nid {
-        let nid = make_id(&[class_nid, &func_name]);
+        let nid = make_id(&[class_nid, &normalized_name]);
         (
             nid,
-            format!(".{}()", func_name),
+            format!(".{}()", normalized_name),
             NodeType::Method,
             "defines",
         )
     } else {
-        let nid = make_id(&[str_path, &func_name]);
+        let nid = make_id(&[str_path, &normalized_name]);
         (
             nid,
-            format!("{}()", func_name),
+            format!("{}()", normalized_name),
             NodeType::Function,
             "defines",
         )
@@ -807,14 +925,12 @@ fn extract_import(
             extract_go_import(node, source, file_nid, str_path, line, edges, nodes);
         }
         "java" => {
-            // `import java.util.List;` → extract path after "import"
+            // `import java.util.List;` or `import static java.util.Arrays.asList;`
             let text = node_text(node, source);
-            let module = text
-                .trim()
-                .strip_prefix("import ")
-                .unwrap_or(&text)
+            let after_import = text.trim().strip_prefix("import ").unwrap_or(text.trim());
+            let module = after_import
                 .strip_prefix("static ")
-                .unwrap_or_else(|| text.trim().strip_prefix("import ").unwrap_or(&text))
+                .unwrap_or(after_import)
                 .trim_end_matches(';')
                 .trim();
             add_import_node(
@@ -866,6 +982,12 @@ fn extract_import(
                 NodeType::Module,
             );
         }
+        "ruby" => {
+            extract_ruby_import(node, source, file_nid, str_path, line, edges, nodes);
+        }
+        "dart" => {
+            extract_dart_import(node, source, file_nid, str_path, line, edges, nodes);
+        }
         _ => {
             add_import_node(
                 nodes,
@@ -898,6 +1020,8 @@ fn extract_python_import(
             .child_by_field_name("module_name")
             .map(|n| node_text(n, source))
             .unwrap_or_default();
+        // Track how many edges existed before this statement
+        let edges_before = edges.len();
         // Iterate over named import children
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -928,9 +1052,9 @@ fn extract_python_import(
                 }
             }
         }
-        // If no names were added (e.g. `from x import *`), add the module
-        let import_count = edges.iter().filter(|e| e.relation == "imports").count();
-        if import_count == 0 && !module.is_empty() {
+        // If no names were added by this statement (e.g. `from x import *`), add the module
+        let new_edges = edges.len() - edges_before;
+        if new_edges == 0 && !module.is_empty() {
             add_import_node(
                 nodes,
                 edges,
@@ -1113,6 +1237,122 @@ fn extract_go_import(
             }
             _ => {}
         }
+    }
+}
+
+fn extract_ruby_import(
+    node: Node,
+    source: &[u8],
+    file_nid: &str,
+    str_path: &str,
+    line: usize,
+    edges: &mut Vec<GraphEdge>,
+    nodes: &mut Vec<GraphNode>,
+) {
+    // Ruby imports are method calls: `require 'json'`, `require_relative 'helper'`
+    // The tree-sitter node is a `call` with method=identifier("require"/"require_relative")
+    // and arguments containing a string.
+    let method_name = node
+        .child_by_field_name("method")
+        .map(|n| node_text(n, source))
+        .unwrap_or_default();
+
+    if method_name != "require" && method_name != "require_relative" {
+        return; // Not an import call, skip
+    }
+
+    // Extract the argument string
+    if let Some(args) = node.child_by_field_name("arguments") {
+        let mut cursor = args.walk();
+        for child in args.children(&mut cursor) {
+            let kind = child.kind();
+            if kind == "string" || kind == "string_literal" {
+                let raw = node_text(child, source);
+                let module = raw.trim_matches(&['"', '\''][..]).to_string();
+                if !module.is_empty() {
+                    add_import_node(
+                        nodes,
+                        edges,
+                        file_nid,
+                        str_path,
+                        line,
+                        &module,
+                        NodeType::Module,
+                    );
+                }
+                return;
+            }
+        }
+    }
+
+    // Fallback: try parsing from the raw text
+    let text = node_text(node, source);
+    let module = text
+        .trim()
+        .strip_prefix("require_relative ")
+        .or_else(|| text.trim().strip_prefix("require "))
+        .unwrap_or(&text)
+        .trim_matches(&['"', '\'', ' '][..]);
+    if !module.is_empty() {
+        add_import_node(
+            nodes,
+            edges,
+            file_nid,
+            str_path,
+            line,
+            module,
+            NodeType::Module,
+        );
+    }
+}
+
+fn extract_dart_import(
+    node: Node,
+    source: &[u8],
+    file_nid: &str,
+    str_path: &str,
+    line: usize,
+    edges: &mut Vec<GraphEdge>,
+    nodes: &mut Vec<GraphNode>,
+) {
+    // Dart: `import 'dart:async';`, `part 'src/models.dart';`
+    let text = node_text(node, source);
+    let trimmed = text.trim().trim_end_matches(';').trim();
+
+    // Strip keyword prefix
+    let module = trimmed
+        .strip_prefix("part of ")
+        .or_else(|| trimmed.strip_prefix("part "))
+        .or_else(|| trimmed.strip_prefix("import "))
+        .or_else(|| trimmed.strip_prefix("export "))
+        .unwrap_or(trimmed)
+        .trim()
+        .trim_matches(&['"', '\''][..])
+        // Remove `deferred as X`, `as X`, `show X`, `hide X` suffixes
+        .split(" deferred ")
+        .next()
+        .unwrap_or("")
+        .split(" as ")
+        .next()
+        .unwrap_or("")
+        .split(" show ")
+        .next()
+        .unwrap_or("")
+        .split(" hide ")
+        .next()
+        .unwrap_or("")
+        .trim();
+
+    if !module.is_empty() {
+        add_import_node(
+            nodes,
+            edges,
+            file_nid,
+            str_path,
+            line,
+            module,
+            NodeType::Module,
+        );
     }
 }
 
