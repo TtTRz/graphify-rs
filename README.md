@@ -117,7 +117,7 @@ graphify-rs install              # install skill for AI coding agents
 graphify-rs serve                # start MCP server (15 tools)
 ```
 
-Agents auto-check the graph before architecture questions and rebuild after code changes. Works with Claude Code, Codex, OpenCode, and more.
+Agents auto-check the graph before architecture questions and rebuild after code changes. Works with Claude Code, CodeBuddy, Codex, OpenCode, and more.
 
 15 MCP tools: `query_graph`, `pagerank`, `detect_cycles`, `smart_summary`, `find_similar`, `shortest_path`, and [9 more](docs/ARCHITECTURE.md#mcp-server-tools-15).
 
@@ -158,7 +158,7 @@ graphify-rs diff old.json new.json                               # compare
 graphify-rs stats graph.json                                     # statistics
 ```
 
-Full reference: **[docs/CLI.md](docs/CLI.md)** (21 subcommands)
+Full reference: **[docs/CLI.md](docs/CLI.md)** (22 subcommands)
 
 ## Contributing
 

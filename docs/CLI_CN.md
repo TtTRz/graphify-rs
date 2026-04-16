@@ -331,6 +331,19 @@ graphify-rs opencode uninstall
 
 ---
 
+### `graphify-rs codebuddy install` / `uninstall`
+
+项目级 CodeBuddy 集成。将 `PreToolUse` 钩子写入 `.codebuddy/settings.json`，并将指令添加到 `AGENTS.md`。
+
+#### 示例
+
+```bash
+graphify-rs codebuddy install
+graphify-rs codebuddy uninstall
+```
+
+---
+
 ### `graphify-rs claw install` / `uninstall`
 
 项目级 OpenClaw 集成。将图谱指令添加到 `AGENTS.md`。
@@ -391,7 +404,7 @@ graphify-rs trae-cn uninstall
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--platform <NAME>` | `String` | `"claude"` | 要安装的平台。可选值：`claude`、`codex`、`opencode`、`claw`、`droid`、`trae`、`trae-cn`、`windows`。 |
+| `--platform <NAME>` | `String` | `"claude"` | 要安装的平台。可选值：`claude`、`codex`、`opencode`、`claw`、`droid`、`trae`、`trae-cn`、`codebuddy`、`windows`。 |
 
 #### 技能文件位置
 
@@ -404,6 +417,7 @@ graphify-rs trae-cn uninstall
 | `droid` | `~/.factory/skills/graphify/SKILL.md` |
 | `trae` | `~/.trae/skills/graphify/SKILL.md` |
 | `trae-cn` | `~/.trae-cn/skills/graphify/SKILL.md` |
+| `codebuddy` | `~/.codebuddy/skills/graphify/SKILL.md` |
 | `windows` | `~/.claude/skills/graphify/SKILL.md` |
 
 #### 示例
@@ -641,6 +655,23 @@ graphify-rs install --platform opencode
 - `.opencode/plugins/graphify.js` — PreToolUse 插件
 - `opencode.json` — 注册插件
 
+#### CodeBuddy
+
+```bash
+# 1. 安装项目级集成
+graphify-rs codebuddy install
+
+# 2. 构建图谱
+graphify-rs build
+
+# 3.（可选）安装全局技能
+graphify-rs install --platform codebuddy
+```
+
+`codebuddy install` 创建的内容：
+- `./AGENTS.md` — 追加 `## graphify` 章节，包含智能体规则
+- `.codebuddy/settings.json` — 添加 `PreToolUse` 钩子，在 `Glob|Grep` 工具调用时触发
+
 #### Claw / Droid / Trae / Trae CN
 
 ```bash
@@ -659,7 +690,7 @@ graphify-rs build
 3. **对于具体问题** — 运行 `graphify-rs query "<问题>"` 获取相关子图上下文。
 4. **修改代码文件后** — 运行 `graphify-rs build --path . --output graphify-out --no-llm --update` 保持图谱最新（快速，仅 AST，约 2-5 秒）。
 
-`PreToolUse` 钩子会在智能体使用 `Glob` 或 `Grep` 工具（Claude）或 `Bash`（Codex）时自动触发，注入提醒智能体先查看图谱的消息。
+`PreToolUse` 钩子会在智能体使用 `Glob` 或 `Grep` 工具（Claude/CodeBuddy）或 `Bash`（Codex）时自动触发，注入提醒智能体先查看图谱的消息。
 
 ### MCP 服务器集成
 

@@ -40,7 +40,7 @@ AI 驱动的知识图谱构建工具 — 将代码、文档、论文和图片转
 | 社区检测 | Louvain (graspologic) | Leiden（手写实现，带细化阶段）|
 | MCP 服务器 | 无 | 15 个工具，JSON-RPC 2.0 stdio |
 | 导出格式 | 7 种 | 9 种（+ Obsidian 知识库、按社区拆分 HTML）|
-| CLI | 基础 | 21 个子命令、`--quiet`/`--verbose`、Shell 补全 |
+| CLI | 基础 | 22 个子命令、`--quiet`/`--verbose`、Shell 补全 |
 | Watch 模式 | 全量重建 | 增量重建（仅变更文件重新提取）|
 
 输出格式**完全兼容** — `graph.json` 使用相同的 NetworkX `node_link_data` 格式。
@@ -186,7 +186,7 @@ graphify-rs stats graph.json                                    # 统计信息
 
 ## Agent 集成
 
-graphify-rs 通过 skill 安装和 MCP 服务器与 AI 编码 Agent（Claude Code、Codex、OpenCode 等）集成。
+graphify-rs 通过 skill 安装和 MCP 服务器与 AI 编码 Agent（Claude Code、CodeBuddy、Codex、OpenCode 等）集成。
 
 ```bash
 graphify-rs install                # 全局安装 skill
