@@ -544,7 +544,7 @@ fn register_opencode_config(path: &Path) -> Result<()> {
     let plugins = config
         .as_object_mut()
         .context("config is not an object")?
-        .entry("plugins")
+        .entry("plugin")
         .or_insert_with(|| serde_json::json!([]));
 
     if let Some(arr) = plugins.as_array_mut() {
@@ -571,7 +571,7 @@ fn unregister_opencode_config(path: &Path) -> Result<()> {
     let mut config: serde_json::Value =
         serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}));
 
-    if let Some(plugins) = config.get_mut("plugins") {
+    if let Some(plugins) = config.get_mut("plugin") {
         if let Some(arr) = plugins.as_array_mut() {
             arr.retain(|v| v.as_str() != Some(".opencode/plugins/graphify.js"));
         }
