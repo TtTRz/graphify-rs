@@ -212,7 +212,7 @@ fn prune_nodes(
             (id, deg)
         })
         .collect();
-    by_degree.sort_by(|a, b| b.1.cmp(&a.1));
+    by_degree.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     // Reserve slots for community representatives
     let community_slots = communities.len().min(max_nodes / 4);
@@ -777,7 +777,7 @@ fn generate_community_page(
         r#"<a href="index.html" class="nav-link" style="font-weight:bold;">← Overview</a>"#,
     );
     let mut sorted_ext: Vec<(usize, usize)> = external_links.into_iter().collect();
-    sorted_ext.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted_ext.sort_by_key(|b| std::cmp::Reverse(b.1));
     for (ext_cid, count) in &sorted_ext {
         let ext_label = community_labels
             .get(ext_cid)
