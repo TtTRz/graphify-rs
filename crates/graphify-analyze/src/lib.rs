@@ -502,11 +502,10 @@ fn is_concept_node(graph: &KnowledgeGraph, node_id: &str) -> bool {
             return true;
         }
         let parts: Vec<&str> = node.source_file.split('/').collect();
-        if let Some(last) = parts.last() {
-            if !last.contains('.') {
+        if let Some(last) = parts.last()
+            && !last.contains('.') {
                 return true;
             }
-        }
     }
     false
 }
@@ -834,7 +833,7 @@ mod tests {
     use super::*;
     use graphify_core::confidence::Confidence;
     use graphify_core::graph::KnowledgeGraph;
-    use graphify_core::id::make_id;
+    
     use graphify_core::model::{GraphEdge, GraphNode, NodeType};
     use std::collections::HashMap as StdHashMap;
 

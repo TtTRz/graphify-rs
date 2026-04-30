@@ -552,11 +552,11 @@ require_relative 'helper'
         .map(|n| n.label.as_str())
         .collect();
     assert!(
-        import_labels.iter().any(|l| *l == "json"),
+        import_labels.contains(&"json"),
         "expected clean 'json' import, got: {import_labels:?}"
     );
     assert!(
-        import_labels.iter().any(|l| *l == "helper"),
+        import_labels.contains(&"helper"),
         "expected clean 'helper' import, got: {import_labels:?}"
     );
     // Should NOT contain raw text like "require 'json'"
@@ -581,11 +581,11 @@ from collections import *
         .map(|n| n.label.as_str())
         .collect();
     assert!(
-        import_labels.iter().any(|l| *l == "os"),
+        import_labels.contains(&"os"),
         "expected 'os' import: {import_labels:?}"
     );
     assert!(
-        import_labels.iter().any(|l| *l == "collections"),
+        import_labels.contains(&"collections"),
         "expected 'collections' import from star import: {import_labels:?}"
     );
 }
@@ -609,13 +609,11 @@ public class Foo {
         .map(|n| n.label.as_str())
         .collect();
     assert!(
-        import_labels
-            .iter()
-            .any(|l| *l == "java.util.Arrays.asList"),
+        import_labels.contains(&"java.util.Arrays.asList"),
         "expected 'java.util.Arrays.asList' from static import: {import_labels:?}"
     );
     assert!(
-        import_labels.iter().any(|l| *l == "java.util.List"),
+        import_labels.contains(&"java.util.List"),
         "expected 'java.util.List': {import_labels:?}"
     );
 }

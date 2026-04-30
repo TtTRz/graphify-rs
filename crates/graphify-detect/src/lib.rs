@@ -316,7 +316,7 @@ mod tests {
         fs::write(root.join("README.md"), "# Project\n\nSome documentation.").unwrap();
 
         // Image
-        fs::write(root.join("logo.png"), &[0x89, 0x50, 0x4E, 0x47]).unwrap();
+        fs::write(root.join("logo.png"), [0x89, 0x50, 0x4E, 0x47]).unwrap();
 
         // Sensitive
         fs::write(root.join(".env"), "SECRET=foo").unwrap();
@@ -330,7 +330,7 @@ mod tests {
         fs::write(root.join(".hidden/secret.rs"), "// hidden").unwrap();
 
         // Unknown
-        fs::write(root.join("data.parquet"), &[0u8; 16]).unwrap();
+        fs::write(root.join("data.parquet"), [0u8; 16]).unwrap();
 
         dir
     }
