@@ -65,6 +65,13 @@ const PLATFORMS: &[(&str, PlatformConfig)] = &[
         },
     ),
     (
+        "codebuddy",
+        PlatformConfig {
+            skill_dst: ".codebuddy/skills/graphify/SKILL.md",
+            register_claude_md: false,
+        },
+    ),
+    (
         "windows",
         PlatformConfig {
             skill_dst: ".claude/skills/graphify/SKILL.md",
@@ -216,6 +223,38 @@ pub fn claude_uninstall(project_root: &Path) -> Result<()> {
     println!("  Cleaned {}", settings_path.display());
 
     println!("\n  Claude integration uninstalled.");
+    Ok(())
+}
+
+/// `graphify-rs codebuddy install` — project-level CodeBuddy integration.
+pub fn codebuddy_install(project_root: &Path) -> Result<()> {
+    // 1. Append section to ./AGENTS.md
+    let agents_md = project_root.join("AGENTS.md");
+    append_section(&agents_md, AGENTS_MD_SECTION, AGENTS_MD_MARKER)?;
+    println!("  Updated {}", agents_md.display());
+
+    // 2. Write PreToolUse hook to .codebuddy/settings.json
+    let settings_path = project_root.join(".codebuddy/settings.json");
+    write_codebuddy_settings_hook(&settings_path)?;
+    println!("  Wrote hook to {}", settings_path.display());
+
+    println!("\n  CodeBuddy integration installed.");
+    Ok(())
+}
+
+/// `graphify-rs codebuddy uninstall` — remove project-level CodeBuddy integration.
+pub fn codebuddy_uninstall(project_root: &Path) -> Result<()> {
+    // 1. Remove section from ./AGENTS.md
+    let agents_md = project_root.join("AGENTS.md");
+    remove_section(&agents_md, AGENTS_MD_MARKER)?;
+    println!("  Cleaned {}", agents_md.display());
+
+    // 2. Remove hook from .codebuddy/settings.json
+    let settings_path = project_root.join(".codebuddy/settings.json");
+    remove_codebuddy_settings_hook(&settings_path)?;
+    println!("  Cleaned {}", settings_path.display());
+
+    println!("\n  CodeBuddy integration uninstalled.");
     Ok(())
 }
 
@@ -461,6 +500,79 @@ fn write_claude_settings_hook(path: &Path) -> Result<()> {
 
 /// Remove Claude PreToolUse hook from .claude/settings.json.
 fn remove_claude_settings_hook(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(path)?;
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}));
+
+    if let Some(hooks) = settings.get_mut("hooks") {
+        if let Some(pre_tool_use) = hooks.get_mut("PreToolUse") {
+            if let Some(arr) = pre_tool_use.as_array_mut() {
+                arr.retain(|v| v.get("matcher").and_then(|m| m.as_str()) != Some("Glob|Grep"));
+            }
+        }
+    }
+
+    let output = serde_json::to_string_pretty(&settings)?;
+    fs::write(path, output)?;
+    Ok(())
+}
+
+/// Write CodeBuddy PreToolUse hook to .codebuddy/settings.json.
+fn write_codebuddy_settings_hook(path: &Path) -> Result<()> {
+    let mut settings: serde_json::Value = if path.exists() {
+        let content = fs::read_to_string(path)?;
+        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let hook_entry = serde_json::json!({
+        "matcher": "Glob|Grep",
+        "hooks": [{
+            "type": "command",
+            "command": "[ -f graphify-out/graph.json ] && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"graphify-rs: Knowledge graph exists. Read graphify-out/GRAPH_REPORT.md for god nodes and community structure before searching raw files.\"}}' || true"
+        }]
+    });
+
+    // Ensure hooks.PreToolUse exists as an array
+    let hooks = settings
+        .as_object_mut()
+        .context("settings is not an object")?
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}));
+    let pre_tool_use = hooks
+        .as_object_mut()
+        .context("hooks is not an object")?
+        .entry("PreToolUse")
+        .or_insert_with(|| serde_json::json!([]));
+
+    let arr = pre_tool_use
+        .as_array_mut()
+        .context("PreToolUse is not an array")?;
+
+    // Check if already present (by matcher)
+    let already = arr
+        .iter()
+        .any(|v| v.get("matcher").and_then(|m| m.as_str()) == Some("Glob|Grep"));
+    if !already {
+        arr.push(hook_entry);
+    }
+
+    let output = serde_json::to_string_pretty(&settings)?;
+    fs::write(path, output)?;
+    Ok(())
+}
+
+/// Remove CodeBuddy PreToolUse hook from .codebuddy/settings.json.
+fn remove_codebuddy_settings_hook(path: &Path) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }

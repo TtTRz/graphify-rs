@@ -331,6 +331,19 @@ graphify-rs opencode uninstall
 
 ---
 
+### `graphify-rs codebuddy install` / `uninstall`
+
+Project-level CodeBuddy integration. Writes a `PreToolUse` hook to `.codebuddy/settings.json` and adds instructions to `AGENTS.md`.
+
+#### Examples
+
+```bash
+graphify-rs codebuddy install
+graphify-rs codebuddy uninstall
+```
+
+---
+
 ### `graphify-rs claw install` / `uninstall`
 
 Project-level OpenClaw integration. Adds graph instructions to `AGENTS.md`.
@@ -391,7 +404,7 @@ Install the graphify skill globally for an AI coding assistant platform. Writes 
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--platform <NAME>` | `String` | `"claude"` | Platform to install for. Valid values: `claude`, `codex`, `opencode`, `claw`, `droid`, `trae`, `trae-cn`, `windows`. |
+| `--platform <NAME>` | `String` | `"claude"` | Platform to install for. Valid values: `claude`, `codex`, `opencode`, `claw`, `droid`, `trae`, `trae-cn`, `codebuddy`, `windows`. |
 
 #### Skill File Locations
 
@@ -404,6 +417,7 @@ Install the graphify skill globally for an AI coding assistant platform. Writes 
 | `droid` | `~/.factory/skills/graphify/SKILL.md` |
 | `trae` | `~/.trae/skills/graphify/SKILL.md` |
 | `trae-cn` | `~/.trae-cn/skills/graphify/SKILL.md` |
+| `codebuddy` | `~/.codebuddy/skills/graphify/SKILL.md` |
 | `windows` | `~/.claude/skills/graphify/SKILL.md` |
 
 #### Examples
@@ -641,6 +655,23 @@ What `opencode install` creates:
 - `.opencode/plugins/graphify.js` — PreToolUse plugin
 - `opencode.json` — registers the plugin
 
+#### CodeBuddy
+
+```bash
+# 1. Install project-level integration
+graphify-rs codebuddy install
+
+# 2. Build the graph
+graphify-rs build
+
+# 3. (Optional) Install global skill
+graphify-rs install --platform codebuddy
+```
+
+What `codebuddy install` creates:
+- `./AGENTS.md` — appends a `## graphify` section with agent rules
+- `.codebuddy/settings.json` — adds a `PreToolUse` hook on `Glob|Grep` tool calls
+
 #### Claw / Droid / Trae / Trae CN
 
 ```bash
@@ -659,7 +690,7 @@ Once installed, the agent follows these rules (injected into `CLAUDE.md` or `AGE
 3. **For specific questions** — run `graphify-rs query "<question>"` to get relevant subgraph context.
 4. **After modifying code files** — run `graphify-rs build --path . --output graphify-out --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s).
 
-The `PreToolUse` hook automatically fires when the agent uses `Glob` or `Grep` tools (Claude) or `Bash` (Codex), injecting a reminder to check the graph first.
+The `PreToolUse` hook automatically fires when the agent uses `Glob` or `Grep` tools (Claude/CodeBuddy) or `Bash` (Codex), injecting a reminder to check the graph first.
 
 ### MCP Server Integration
 

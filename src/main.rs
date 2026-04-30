@@ -88,6 +88,11 @@ enum Commands {
         #[command(subcommand)]
         action: PlatformAction,
     },
+    /// CodeBuddy integration
+    Codebuddy {
+        #[command(subcommand)]
+        action: PlatformAction,
+    },
     /// Codex integration
     Codex {
         #[command(subcommand)]
@@ -332,6 +337,13 @@ async fn main() -> Result<()> {
             match action {
                 PlatformAction::Install => install::claude_install(root)?,
                 PlatformAction::Uninstall => install::claude_uninstall(root)?,
+            }
+        }
+        Commands::Codebuddy { action } => {
+            let root = Path::new(".");
+            match action {
+                PlatformAction::Install => install::codebuddy_install(root)?,
+                PlatformAction::Uninstall => install::codebuddy_uninstall(root)?,
             }
         }
         Commands::Codex { action } => {
