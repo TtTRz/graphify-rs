@@ -125,8 +125,8 @@ pub fn default_config() -> Config {
     let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
     assert!(json.get("nodes").unwrap().as_array().unwrap().len() >= 4);
     assert!(json.get("links").unwrap().as_array().unwrap().len() >= 2);
-    assert_eq!(json.get("directed").unwrap().as_bool().unwrap(), false);
-    assert_eq!(json.get("multigraph").unwrap().as_bool().unwrap(), false);
+    assert!(!json.get("directed").unwrap().as_bool().unwrap());
+    assert!(!json.get("multigraph").unwrap().as_bool().unwrap());
 }
 
 #[test]
