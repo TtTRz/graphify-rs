@@ -356,25 +356,24 @@ fn handle_query_graph(
         return tool_result_text("No meaningful search terms found in the question.");
     }
 
-    let start = if let Some(semantic) = semantic {
-        match semantic.query(graph, question, 5) {
-            Ok(matches) if !matches.is_empty() => matches.into_iter().map(|m| m.node_id).collect(),
-            Ok(_) => Vec::new(),
+    // Exact lexical starts go first. Semantic embeddings are good for fuzzy
+    // discovery, but exact function/config names should not disappear behind
+    // migrations, generated stubs, or project docs.
+    let scored = score_nodes(graph, &terms);
+    let mut start: Vec<String> = scored.iter().take(6).map(|(_, id)| id.clone()).collect();
+
+    if let Some(semantic) = semantic {
+        match semantic.query(graph, question, 8) {
+            Ok(matches) => {
+                start.extend(matches.into_iter().map(|m| m.node_id));
+            }
             Err(err) => {
                 debug!("semantic query unavailable, falling back to lexical query: {err}");
-                Vec::new()
             }
         }
-    } else {
-        Vec::new()
-    };
+    }
 
-    let start = if start.is_empty() {
-        let scored = score_nodes(graph, &terms);
-        scored.iter().take(5).map(|(_, id)| id.clone()).collect()
-    } else {
-        start
-    };
+    start = dedupe_start_nodes(start, 8);
 
     if start.is_empty() {
         return tool_result_text("No matching nodes found for the given question.");
@@ -384,6 +383,20 @@ fn handle_query_graph(
     let text = subgraph_to_text(graph, &nodes, &edges, budget);
 
     tool_result_text(&text)
+}
+
+fn dedupe_start_nodes(nodes: Vec<String>, limit: usize) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for node in nodes {
+        if seen.insert(node.clone()) {
+            out.push(node);
+        }
+        if out.len() >= limit {
+            break;
+        }
+    }
+    out
 }
 
 fn handle_get_node(graph: &KnowledgeGraph, args: &Value) -> Value {

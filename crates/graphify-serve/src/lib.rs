@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::sync::Mutex;
 
-use graphify_core::graph::KnowledgeGraph;
+use graphify_core::{graph::KnowledgeGraph, model::NodeType, quality};
 use graphify_embed::{SemanticEngine, SemanticMatch, default_index_path_for_graph};
 use serde_json::Value;
 use thiserror::Error;
@@ -89,38 +89,50 @@ pub fn load_semantic_state(graph_path: &Path, graph: &KnowledgeGraph) -> Option<
 
 /// Score nodes by relevance to search terms.
 ///
-/// Returns `(score, node_id)` pairs sorted by descending score.
-/// Scoring: +2.0 for exact label match, +1.0 for label contains,
-/// +0.5 for id contains, plus a small degree-based boost.
+/// Returns `(score, node_id)` pairs sorted by descending score. Exact identifier
+/// hits beat broad text matches, and low-signal sources are downranked rather
+/// than hidden.
 pub fn score_nodes(graph: &KnowledgeGraph, terms: &[String]) -> Vec<(f64, String)> {
-    let lower_terms: Vec<String> = terms.iter().map(|t| t.to_lowercase()).collect();
+    let lower_terms = normalize_search_terms(terms);
 
     let mut scored = Vec::new();
     for node_id in graph.node_ids() {
         if let Some(node) = graph.get_node(&node_id) {
-            let label_lower = node.label.to_lowercase();
-            let id_lower = node.id.to_lowercase();
+            let label_lower = node.label.to_ascii_lowercase();
+            let id_lower = node.id.to_ascii_lowercase();
+            let path_lower = node.source_file.to_ascii_lowercase();
 
             let mut score: f64 = 0.0;
+            let mut matched = 0usize;
 
             for term in &lower_terms {
-                // Exact match in label
+                let mut best = 0.0f64;
                 if label_lower == *term {
-                    score += 2.0;
+                    best = best.max(4.0);
                 } else if label_lower.contains(term.as_str()) {
-                    score += 1.0;
+                    best = best.max(2.5);
                 }
-
-                // Match in node ID
-                if id_lower.contains(term.as_str()) {
-                    score += 0.5;
+                if id_lower == *term {
+                    best = best.max(3.0);
+                } else if id_lower.contains(term.as_str()) {
+                    best = best.max(1.8);
+                }
+                if path_lower.contains(term.as_str()) {
+                    best = best.max(0.8);
+                }
+                if best > 0.0 {
+                    matched += 1;
+                    score += best;
                 }
             }
 
             if score > 0.0 {
-                // Boost by degree (well-connected nodes are more relevant)
-                let degree_boost = (graph.degree(&node_id) as f64).ln_1p() * 0.1;
-                score += degree_boost;
+                let coverage = matched as f64 / lower_terms.len().max(1) as f64;
+                let degree_boost = (graph.degree(&node_id) as f64).ln_1p() * 0.05;
+                score = (score + coverage)
+                    * quality::node_priority(node) as f64
+                    * node_type_multiplier(&node.node_type)
+                    + degree_boost;
                 scored.push((score, node_id.clone()));
             }
         }
@@ -128,6 +140,37 @@ pub fn score_nodes(graph: &KnowledgeGraph, terms: &[String]) -> Vec<(f64, String
 
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     scored
+}
+
+fn node_type_multiplier(node_type: &NodeType) -> f64 {
+    match node_type {
+        NodeType::Function | NodeType::Method => 1.30,
+        NodeType::Struct | NodeType::Class | NodeType::Interface | NodeType::Enum => 1.10,
+        NodeType::File | NodeType::Module => 0.90,
+        NodeType::Variable | NodeType::Constant => 0.55,
+        NodeType::Package => 0.45,
+        NodeType::Concept | NodeType::Paper | NodeType::Image => 0.85,
+        NodeType::Trait | NodeType::Namespace => 1.0,
+    }
+}
+
+fn normalize_search_terms(terms: &[String]) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for term in terms {
+        for raw in term.split(|ch: char| !ch.is_alphanumeric() && ch != '_') {
+            if raw.len() > 2 {
+                normalized.push(raw.to_ascii_lowercase());
+            }
+            if !raw.contains('_') {
+                for part in raw.split('_').filter(|part| part.len() > 2) {
+                    normalized.push(part.to_ascii_lowercase());
+                }
+            }
+        }
+    }
+    normalized.sort();
+    normalized.dedup();
+    normalized
 }
 
 /// BFS traversal from start nodes up to a maximum depth.
@@ -139,12 +182,13 @@ pub fn bfs(
     depth: usize,
 ) -> (Vec<String>, Vec<(String, String)>) {
     let mut visited: HashSet<String> = HashSet::new();
+    let mut visited_order: Vec<String> = Vec::new();
     let mut edges: Vec<(String, String)> = Vec::new();
     let mut queue: VecDeque<(String, usize)> = VecDeque::new();
 
     for s in start {
-        if graph.get_node(s).is_some() {
-            visited.insert(s.clone());
+        if graph.get_node(s).is_some() && visited.insert(s.clone()) {
+            visited_order.push(s.clone());
             queue.push_back((s.clone(), 0));
         }
     }
@@ -157,15 +201,14 @@ pub fn bfs(
         for neighbor_id in graph.neighbor_ids(&current) {
             edges.push((current.clone(), neighbor_id.clone()));
 
-            if !visited.contains(&neighbor_id) {
-                visited.insert(neighbor_id.clone());
+            if visited.insert(neighbor_id.clone()) {
+                visited_order.push(neighbor_id.clone());
                 queue.push_back((neighbor_id, current_depth + 1));
             }
         }
     }
 
-    let visited_vec: Vec<String> = visited.into_iter().collect();
-    (visited_vec, edges)
+    (visited_order, edges)
 }
 
 /// DFS traversal from start nodes up to a maximum depth.
@@ -754,6 +797,69 @@ mod tests {
         let results = score_nodes(&g, &["user".to_string(), "manager".to_string()]);
         assert!(!results.is_empty());
         assert!(results.iter().any(|(_, id)| id == "user"));
+    }
+
+    #[test]
+    fn test_score_nodes_downranks_low_signal_when_exact_signal_absent() {
+        let mut g = KnowledgeGraph::new();
+        g.add_node(GraphNode {
+            id: "prod_config".into(),
+            label: "Config".into(),
+            source_file: "./internal/app/configs/config.go".into(),
+            source_location: None,
+            node_type: NodeType::Struct,
+            community: None,
+            extra: HashMap::new(),
+        })
+        .unwrap();
+        g.add_node(GraphNode {
+            id: "test_config".into(),
+            label: "Config".into(),
+            source_file: "./internal/app/configs/config_test.go".into(),
+            source_location: None,
+            node_type: NodeType::Struct,
+            community: None,
+            extra: HashMap::new(),
+        })
+        .unwrap();
+
+        let results = score_nodes(&g, &["config".to_string()]);
+        assert_eq!(results[0].1, "prod_config");
+    }
+
+    #[test]
+    fn test_score_nodes_prefers_exact_function_over_schema_variable() {
+        let mut g = KnowledgeGraph::new();
+        g.add_node(GraphNode {
+            id: "internal_api_admin_go_approveitem".into(),
+            label: "ApproveItem()".into(),
+            source_file: "./internal/api/admin.go".into(),
+            source_location: None,
+            node_type: NodeType::Function,
+            community: None,
+            extra: HashMap::new(),
+        })
+        .unwrap();
+        g.add_node(GraphNode {
+            id: "internal_migrations_init_up_sql_audit_records_account_id".into(),
+            label: "audit_records.account_id".into(),
+            source_file: "./internal/migrations/20230327090320_init.up.sql".into(),
+            source_location: None,
+            node_type: NodeType::Variable,
+            community: None,
+            extra: HashMap::new(),
+        })
+        .unwrap();
+
+        let results = score_nodes(&g, &["ApproveItem".to_string(), "account_id".to_string()]);
+        assert_eq!(results[0].1, "internal_api_admin_go_approveitem");
+    }
+
+    #[test]
+    fn test_bfs_preserves_start_order_for_context_output() {
+        let g = make_test_graph();
+        let (nodes, _) = bfs(&g, &["user".to_string(), "auth".to_string()], 1);
+        assert_eq!(&nodes[..2], &["user".to_string(), "auth".to_string()]);
     }
 
     #[test]

@@ -476,6 +476,8 @@ pub fn score_hybrid(
     }
 
     let terms = query_terms(question);
+    let weighted_terms = weight_terms(index, &terms);
+    let intent = QueryIntent::infer(question, &terms);
     let mut matches = Vec::new();
     for indexed in &index.nodes {
         let Some(node) = graph.get_node(&indexed.node_id) else {
@@ -485,10 +487,11 @@ pub fn score_hybrid(
             continue;
         }
         let semantic_score = cosine_similarity(query_embedding, &indexed.embedding);
-        let lexical_score = lexical_score(node, &indexed.text, &terms);
-        let degree_boost = (graph.degree(&indexed.node_id) as f32).ln_1p() * 0.03;
-        let raw_score = (semantic_score * 0.50) + (lexical_score * 0.45) + degree_boost;
-        let score = raw_score * source_quality_multiplier(node);
+        let lexical_score = lexical_score(node, &indexed.text, &weighted_terms);
+        let degree_boost = (graph.degree(&indexed.node_id) as f32).ln_1p() * 0.015;
+        let exact_signal = has_exact_identifier_signal(node, &weighted_terms);
+        let raw_score = (semantic_score * 0.36) + (lexical_score * 0.60) + degree_boost;
+        let score = raw_score * source_quality_multiplier(node, &intent, exact_signal);
         if score.is_finite() && score > 0.0 {
             matches.push(SemanticMatch {
                 node_id: indexed.node_id.clone(),
@@ -632,41 +635,321 @@ fn parse_line(location: Option<&str>) -> Option<usize> {
     digits.parse().ok()
 }
 
-fn query_terms(question: &str) -> Vec<String> {
-    question
-        .split(|ch: char| !ch.is_alphanumeric() && ch != '_')
-        .map(str::to_lowercase)
-        .filter(|term| term.len() > 2)
+#[derive(Debug, Clone)]
+struct QueryTerm {
+    text: String,
+    exact_identifier: bool,
+}
+
+#[derive(Debug, Clone)]
+struct WeightedTerm {
+    text: String,
+    weight: f32,
+    exact_identifier: bool,
+}
+
+#[derive(Debug, Default)]
+struct QueryIntent {
+    code: bool,
+    schema: bool,
+    docs: bool,
+    explicit_down_migration: bool,
+}
+
+impl QueryIntent {
+    fn infer(question: &str, terms: &[QueryTerm]) -> Self {
+        let raw = question.to_ascii_lowercase();
+        let has = |needles: &[&str]| -> bool {
+            needles
+                .iter()
+                .any(|needle| terms.iter().any(|t| t.text == *needle))
+        };
+        let camel_or_symbol = question.split_whitespace().any(|word| {
+            word.chars().any(|c| c.is_ascii_lowercase())
+                && word.chars().any(|c| c.is_ascii_uppercase())
+        }) || question.contains('_')
+            || question.contains('.');
+
+        Self {
+            code: camel_or_symbol
+                || has(&[
+                    "function",
+                    "handler",
+                    "client",
+                    "config",
+                    "load",
+                    "loaded",
+                    "implementation",
+                    "implemented",
+                    "workflow",
+                    "activity",
+                    "method",
+                    "struct",
+                    "interface",
+                    "telemetry",
+                    "health",
+                    "confirm",
+                    "decline",
+                ]),
+            schema: has(&[
+                "schema",
+                "sql",
+                "migration",
+                "migrations",
+                "table",
+                "tables",
+                "view",
+                "views",
+                "materialized",
+                "dictionary",
+                "dictionaries",
+                "clickhouse",
+            ]),
+            docs: has(&[
+                "readme",
+                "docs",
+                "documentation",
+                "architecture",
+                "product",
+                "agent",
+                "claude",
+            ]),
+            explicit_down_migration: raw.contains("down migration")
+                || raw.contains(".down.sql")
+                || terms.iter().any(|t| t.text == "down"),
+        }
+    }
+}
+
+const QUERY_STOPWORDS: &[&str] = &[
+    "about",
+    "after",
+    "also",
+    "and",
+    "are",
+    "can",
+    "does",
+    "for",
+    "from",
+    "get",
+    "how",
+    "into",
+    "its",
+    "near",
+    "the",
+    "this",
+    "that",
+    "was",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "why",
+    "with",
+    "without",
+    "defined",
+    "handled",
+    "configured",
+    "located",
+    "related",
+    "works",
+    "used",
+];
+
+fn query_terms(question: &str) -> Vec<QueryTerm> {
+    let mut terms = Vec::new();
+    for raw in question.split(|ch: char| !ch.is_alphanumeric() && ch != '_') {
+        if raw.is_empty() {
+            continue;
+        }
+        let identifier_like = is_identifier_like(raw);
+        push_query_term(raw, identifier_like, &mut terms);
+        if !raw.contains('_') {
+            for part in split_camel(raw) {
+                push_query_term(&part, false, &mut terms);
+            }
+        }
+    }
+    terms.sort_by(|a, b| a.text.cmp(&b.text));
+    terms.dedup_by(|a, b| {
+        if a.text == b.text {
+            b.exact_identifier |= a.exact_identifier;
+            true
+        } else {
+            false
+        }
+    });
+    terms
+}
+
+fn push_query_term(raw: &str, exact_identifier: bool, terms: &mut Vec<QueryTerm>) {
+    let term = raw.to_ascii_lowercase();
+    if term.len() <= 2 || QUERY_STOPWORDS.contains(&term.as_str()) {
+        return;
+    }
+    terms.push(QueryTerm {
+        text: term,
+        exact_identifier,
+    });
+}
+
+fn is_identifier_like(raw: &str) -> bool {
+    raw.len() > 4
+        && (raw.contains('_')
+            || raw.contains('.')
+            || raw.chars().any(|c| c.is_ascii_uppercase())
+                && raw.chars().any(|c| c.is_ascii_lowercase()))
+}
+
+fn split_camel(raw: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let chars: Vec<char> = raw.chars().collect();
+    for (idx, ch) in chars.iter().enumerate() {
+        let prev = idx.checked_sub(1).and_then(|i| chars.get(i)).copied();
+        let next = chars.get(idx + 1).copied();
+        let boundary = idx > 0
+            && ch.is_ascii_uppercase()
+            && (prev.is_some_and(|p| p.is_ascii_lowercase() || p.is_ascii_digit())
+                || next.is_some_and(|n| n.is_ascii_lowercase()));
+        if boundary && !current.is_empty() {
+            parts.push(std::mem::take(&mut current));
+        }
+        current.push(*ch);
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    parts
+}
+
+fn weight_terms(index: &SemanticIndex, terms: &[QueryTerm]) -> Vec<WeightedTerm> {
+    if terms.is_empty() {
+        return Vec::new();
+    }
+    let total = index.nodes.len().max(1) as f32;
+    terms
+        .iter()
+        .map(|term| {
+            let df = index
+                .nodes
+                .iter()
+                .filter(|node| node.text.to_ascii_lowercase().contains(&term.text))
+                .count() as f32;
+            let idf = ((total + 1.0) / (df + 1.0)).ln();
+            WeightedTerm {
+                text: term.text.clone(),
+                // Keep common domain words useful, but stop them from dominating exact identifiers.
+                weight: idf.clamp(0.25, 2.75),
+                exact_identifier: term.exact_identifier,
+            }
+        })
         .collect()
 }
 
-fn lexical_score(node: &GraphNode, indexed_text: &str, terms: &[String]) -> f32 {
+fn lexical_score(node: &GraphNode, indexed_text: &str, terms: &[WeightedTerm]) -> f32 {
     if terms.is_empty() {
         return 0.0;
     }
-    let label = node.label.to_lowercase();
-    let id = node.id.to_lowercase();
-    let text = indexed_text.to_lowercase();
+    let label = node.label.to_ascii_lowercase();
+    let id = node.id.to_ascii_lowercase();
+    let path = node.source_file.to_ascii_lowercase();
+    let text = indexed_text.to_ascii_lowercase();
 
-    let mut score = 0.0;
+    let mut weighted_score = 0.0;
+    let mut matched_weight = 0.0;
+    let total_weight: f32 = terms.iter().map(|term| term.weight).sum::<f32>().max(0.01);
+
     for term in terms {
-        if label == *term {
-            score += 2.0;
-        } else if label.contains(term) {
-            score += 1.0;
+        let needle = term.text.as_str();
+        let mut best = 0.0f32;
+        if label == needle {
+            best = best.max(4.0);
+        } else if label.contains(needle) {
+            best = best.max(2.6);
         }
-        if id.contains(term) {
-            score += 0.6;
+        if id == needle {
+            best = best.max(3.2);
+        } else if id.contains(needle) {
+            best = best.max(2.0);
         }
-        if text.contains(term) {
-            score += 0.25;
+        if path.contains(needle) {
+            best = best.max(1.25);
+        }
+        if text.contains(needle) {
+            best = best.max(0.55);
+        }
+        if best > 0.0 {
+            matched_weight += term.weight;
+            weighted_score += best * term.weight;
         }
     }
-    (score / terms.len() as f32).min(3.0)
+
+    let coverage = matched_weight / total_weight;
+    let score = (weighted_score / total_weight) + (coverage * 1.2);
+    score.min(5.0)
 }
 
-fn source_quality_multiplier(node: &GraphNode) -> f32 {
-    quality::node_priority(node)
+fn has_exact_identifier_signal(node: &GraphNode, terms: &[WeightedTerm]) -> bool {
+    let label = node.label.to_ascii_lowercase();
+    let id = node.id.to_ascii_lowercase();
+    terms.iter().any(|term| {
+        (term.exact_identifier || term.weight >= 1.0)
+            && term.text.len() >= 4
+            && (label == term.text
+                || label.contains(&term.text)
+                || id == term.text
+                || id.contains(&term.text))
+    })
+}
+
+fn source_quality_multiplier(node: &GraphNode, intent: &QueryIntent, exact_signal: bool) -> f32 {
+    let mut multiplier = quality::node_priority(node);
+    let kind = quality::node_source_kind(node);
+    let flags = quality::node_flags(node);
+    let has_flag = |flag: &str| flags.iter().any(|f| f == flag);
+
+    if intent.code {
+        if has_flag("schema") {
+            multiplier *= 0.42;
+        }
+        if has_flag("down_migration") && !intent.explicit_down_migration {
+            multiplier *= 0.45;
+        }
+        if kind == "project_context" && !intent.docs {
+            multiplier *= 0.68;
+        }
+        if has_flag("generated") && !exact_signal {
+            multiplier *= 0.58;
+        }
+        if has_flag("test") && !exact_signal {
+            multiplier *= 0.58;
+        }
+    }
+
+    if intent.schema {
+        if has_flag("schema") {
+            multiplier *= 1.25;
+        }
+        if has_flag("down_migration") && !intent.explicit_down_migration {
+            multiplier *= 0.55;
+        }
+        if kind == "project_context" && !intent.docs {
+            multiplier *= 0.75;
+        }
+    }
+
+    if intent.docs && kind == "project_context" {
+        multiplier *= 1.15;
+    }
+
+    if exact_signal {
+        // Exact identifiers should remain discoverable even if they live in generated stubs or tests.
+        multiplier = multiplier.max(0.72);
+    }
+
+    multiplier.clamp(0.03, 2.5)
 }
 
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
@@ -714,7 +997,7 @@ mod tests {
         graph
             .add_node(GraphNode {
                 id: "kafka_sender".into(),
-                label: "SendToKafka".into(),
+                label: "SendEvent".into(),
                 source_file: "./src/kafka.rs".into(),
                 source_location: Some("L10".into()),
                 node_type: NodeType::Function,
@@ -820,12 +1103,12 @@ mod tests {
             nodes: vec![
                 IndexedNode {
                     node_id: "test_validator".into(),
-                    text: "tournament decimal validation".into(),
+                    text: "numeric threshold validation".into(),
                     embedding: vec![1.0, 0.0],
                 },
                 IndexedNode {
                     node_id: "prod_validator".into(),
-                    text: "tournament decimal validation".into(),
+                    text: "numeric threshold validation".into(),
                     embedding: vec![1.0, 0.0],
                 },
             ],
@@ -834,7 +1117,7 @@ mod tests {
         let matches = score_hybrid(
             &graph,
             &index,
-            "tournament decimal validation",
+            "numeric threshold validation",
             &[1.0, 0.0],
             2,
         );
@@ -846,16 +1129,16 @@ mod tests {
     fn hybrid_scoring_prefers_schema_over_down_migration_when_signal_is_equal() {
         let mut graph = KnowledgeGraph::new();
         for (id, file) in [
-            ("schema_mv", "./database/leaderboards/schema.sql"),
+            ("schema_mv", "./database/reporting/schema.sql"),
             (
                 "down_mv",
-                "./database/leaderboards/migrations/20240215111131_fix.down.sql",
+                "./database/reporting/migrations/20240215111131_fix.down.sql",
             ),
         ] {
             graph
                 .add_node(GraphNode {
                     id: id.into(),
-                    label: "mark_transactions_with_tournaments_mv".into(),
+                    label: "refresh_order_metrics_mv".into(),
                     source_file: file.into(),
                     source_location: Some("L10".into()),
                     node_type: NodeType::Function,
@@ -872,12 +1155,12 @@ mod tests {
             nodes: vec![
                 IndexedNode {
                     node_id: "down_mv".into(),
-                    text: "materialized view tournament transactions leaderboards".into(),
+                    text: "materialized view order metrics reporting".into(),
                     embedding: vec![1.0, 0.0],
                 },
                 IndexedNode {
                     node_id: "schema_mv".into(),
-                    text: "materialized view tournament transactions leaderboards".into(),
+                    text: "materialized view order metrics reporting".into(),
                     embedding: vec![1.0, 0.0],
                 },
             ],
@@ -886,12 +1169,128 @@ mod tests {
         let matches = score_hybrid(
             &graph,
             &index,
-            "materialized view tournament transactions leaderboards",
+            "materialized view order metrics reporting",
             &[1.0, 0.0],
             2,
         );
 
         assert_eq!(matches[0].node_id, "schema_mv");
+    }
+
+    #[test]
+    fn hybrid_scoring_prefers_code_over_schema_for_code_intent() {
+        let mut graph = KnowledgeGraph::new();
+        for (id, label, file) in [
+            (
+                "config_loader",
+                "ConfigFromFile",
+                "./internal/app/configs/config.go",
+            ),
+            (
+                "migration_localization",
+                "tenant_settings",
+                "./internal/storage/migrations/20250204094020_settings.up.sql",
+            ),
+            ("project_docs", "Messaging", "./CLAUDE.md"),
+        ] {
+            graph
+                .add_node(GraphNode {
+                    id: id.into(),
+                    label: label.into(),
+                    source_file: file.into(),
+                    source_location: Some("L10".into()),
+                    node_type: NodeType::Function,
+                    community: None,
+                    extra: HashMap::new(),
+                })
+                .unwrap();
+        }
+        let index = SemanticIndex {
+            version: INDEX_VERSION,
+            model: "stub-model".into(),
+            graph_fingerprint: graph_fingerprint(&graph),
+            dim: 2,
+            nodes: vec![
+                IndexedNode {
+                    node_id: "migration_localization".into(),
+                    text: "service config localization loaded settings".into(),
+                    embedding: vec![1.0, 0.0],
+                },
+                IndexedNode {
+                    node_id: "project_docs".into(),
+                    text: "service messaging config documentation".into(),
+                    embedding: vec![1.0, 0.0],
+                },
+                IndexedNode {
+                    node_id: "config_loader".into(),
+                    text: "ConfigFromFile tenant config loaded from yaml".into(),
+                    embedding: vec![1.0, 0.0],
+                },
+            ],
+        };
+
+        let matches = score_hybrid(
+            &graph,
+            &index,
+            "Where is tenant config loaded?",
+            &[1.0, 0.0],
+            3,
+        );
+
+        assert_eq!(matches[0].node_id, "config_loader");
+    }
+
+    #[test]
+    fn hybrid_scoring_keeps_exact_generated_rpc_discoverable() {
+        let mut graph = KnowledgeGraph::new();
+        for (id, label, file) in [
+            (
+                "generated_rpc",
+                "SendEvent",
+                "./internal/proto/acme/events/eventsconnect/service_events.connect.go",
+            ),
+            ("readme", "EventGateway", "./README.md"),
+        ] {
+            graph
+                .add_node(GraphNode {
+                    id: id.into(),
+                    label: label.into(),
+                    source_file: file.into(),
+                    source_location: Some("L10".into()),
+                    node_type: NodeType::Function,
+                    community: None,
+                    extra: HashMap::new(),
+                })
+                .unwrap();
+        }
+        let index = SemanticIndex {
+            version: INDEX_VERSION,
+            model: "stub-model".into(),
+            graph_fingerprint: graph_fingerprint(&graph),
+            dim: 2,
+            nodes: vec![
+                IndexedNode {
+                    node_id: "readme".into(),
+                    text: "event producer protobuf RPC service documentation".into(),
+                    embedding: vec![1.0, 0.0],
+                },
+                IndexedNode {
+                    node_id: "generated_rpc".into(),
+                    text: "SendEvent EventProducerService RPC handler".into(),
+                    embedding: vec![1.0, 0.0],
+                },
+            ],
+        };
+
+        let matches = score_hybrid(
+            &graph,
+            &index,
+            "SendEvent EventProducerService handler",
+            &[1.0, 0.0],
+            2,
+        );
+
+        assert_eq!(matches[0].node_id, "generated_rpc");
     }
 
     #[test]
