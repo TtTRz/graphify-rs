@@ -11,3 +11,4 @@ graphify-core.workspace = true
 petgraph.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
+serde_json.workspace = true

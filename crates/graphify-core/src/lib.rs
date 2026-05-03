@@ -3,6 +3,7 @@ pub mod error;
 pub mod graph;
 pub mod id;
 pub mod model;
+pub mod quality;
 
 /// Maximum bytes for a single filename component (excluding extension).
 /// macOS HFS+/APFS limit is 255 bytes per component; we reserve 15 for extension + safety.

@@ -52,13 +52,15 @@ Build the knowledge graph from files in a directory. This is the main pipeline: 
 |------|-------|------|---------|-------------|
 | `--path <PATH>` | `-p` | `String` | `"."` | Root directory to scan for source files. |
 | `--output <DIR>` | `-o` | `String` | `".graphify"` | Output directory for all generated files. |
-| `--no-llm` | | `bool` | `false` | Skip Claude API semantic extraction (pass 2). Only AST extraction runs. |
+| `--no-llm` | | `bool` | `false` | Disable legacy LLM extraction. Local AST + document context extraction still runs. |
 | `--code-only` | | `bool` | `false` | Only process code files, skip docs and papers. |
 | `--update` | | `bool` | `false` | Incremental rebuild: only re-extract new/modified files since last build. |
-| `--format <FMT,...>` | | `String` (comma-separated) | all formats | Export formats to generate. Available: `json`, `html`, `graphml`, `cypher`, `svg`, `wiki`, `obsidian`, `report`. |
+| `--format <FMT,...>` | | `String` (comma-separated) | all formats | Export formats to generate. Available: `json`, `html`, `graphml`, `cypher`, `svg`, `wiki`, `obsidian`, `report`, `context`. |
 | `--max-viz-nodes <N>` | | `usize` | `2000` | Maximum nodes in HTML visualization. Larger values show more detail but may slow the browser. |
-| `--embed` | | `bool` | `false` | Build `.graphify/semantic-index.json` with Model2Vec for local semantic graph search. `graphifyq ensure/query` enables this by default. |
-| `--embedding-model <MODEL>` | | `String` | `minishlab/potion-code-16M` | Hugging Face model ID or local Model2Vec model directory for `--embed`. |
+| `--embed` | | `bool` | `false` | Build `.graphify/semantic-index.json` for semantic graph search. `graphifyq ensure/query` enables this by default. |
+| `--embedding-provider <PROVIDER>` | | `String` | `model2vec` | Embedding backend: `model2vec`, `ollama`, or `voyage`. |
+| `--embedding-model <MODEL>` | | `String` | provider default | Model2Vec HF ID/local path, Ollama model name, or Voyage model name. Prefixes like `ollama:embeddinggemma` are accepted. |
+| `--anthropic-semantic` | | `bool` | `false` | Explicitly enable legacy Anthropic document concept extraction. Requires `ANTHROPIC_API_KEY`. |
 
 #### Examples
 
@@ -72,8 +74,15 @@ graphify-rs build --path /path/to/project --output my-graph
 # Fast AST-only build (no Claude API calls)
 graphify-rs build --no-llm
 
-# Fast AST-only build plus local semantic query index
+# Fast local-only build plus local semantic query index and LLM_CONTEXT.md
 graphify-rs build --no-llm --embed
+
+# Local Ollama embeddings instead of Model2Vec
+ollama pull embeddinggemma
+graphify-rs build --no-llm --embed --embedding-provider ollama --embedding-model embeddinggemma
+
+# Hosted Voyage embeddings
+VOYAGE_API_KEY=... graphify-rs build --no-llm --embed --embedding-provider voyage --embedding-model voyage-code-3
 
 # Only code files, skip docs/papers
 graphify-rs build --code-only
@@ -93,13 +102,14 @@ graphify-rs build --update --code-only --no-llm --format json,report
 
 #### Build Pipeline
 
-1. **Detect** — Scans `--path` for code, doc, paper, and image files (respects `.graphifyignore`, skips sensitive files).
+1. **Detect** — Scans `--path` for code, doc, paper, and image files (respects root `.gitignore`, `.git/info/exclude`, and `.graphifyignore`, skips sensitive files).
 2. **Extract AST (Pass 1)** — Deterministic tree-sitter + regex extraction for code files. Per-file SHA256 cache in `<output>/cache/`.
-3. **Semantic Extraction (Pass 2)** — Concurrent Claude API extraction for docs/papers (skipped with `--no-llm` or `--code-only`). Requires `ANTHROPIC_API_KEY` env var. Concurrency = `min(--jobs, 8)`, default 4.
-4. **Build Graph** — Assemble nodes and edges, deduplicate.
-5. **Cluster** — Leiden community detection + cohesion scoring.
-6. **Analyze** — God nodes, surprising connections, suggested questions.
-7. **Export** — Write selected formats to `--output`.
+3. **Local Document Context (Pass 1b)** — Markdown/RST/text headings and prose become concept nodes. This is LLM-free and runs unless `--code-only` is set.
+4. **Optional Legacy Anthropic Extraction** — Only runs with `--anthropic-semantic` and `ANTHROPIC_API_KEY`; skipped by default.
+5. **Build Graph** — Assemble nodes and edges, deduplicate, and annotate source quality (`source`, `generated`, `minified`, `test`, `build_artifact`, `dependency`, `project_context`).
+6. **Cluster** — Leiden community detection + cohesion scoring.
+7. **Analyze** — God nodes, surprising connections, suggested questions with generated/minified/test/build artifacts downranked.
+8. **Export** — Write selected formats to `--output`, including compact `LLM_CONTEXT.md` by default.
 
 ---
 

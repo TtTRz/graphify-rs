@@ -36,3 +36,6 @@ sqlparser = { version = "0.61.0", optional = true }
 [features]
 default = ["sql"]
 sql = ["dep:sqlparser"]
+
+[dev-dependencies]
+tempfile = "3"

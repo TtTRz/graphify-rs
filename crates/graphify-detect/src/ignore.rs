@@ -1,15 +1,18 @@
-//! `.graphifyignore` parser and matcher.
+//! Ignore parser and matcher for graphify file discovery.
 //!
-//! Follows a simplified gitignore-like format:
-//! - One pattern per line
-//! - Lines starting with `#` are comments
-//! - Blank lines are skipped
-//! - Patterns are matched using glob (fnmatch) semantics
+//! graphify respects repository-level Git ignore files by default and layers
+//! `.graphifyignore` on top for graphify-specific overrides. The effective
+//! precedence is:
+//!
+//! 1. `.gitignore` / `.git/info/exclude` ignore repository-local generated or
+//!    bulky artifacts by default.
+//! 2. `.graphifyignore` patterns are applied last, so `!path` entries can
+//!    explicitly re-include a gitignored file or subtree for graph building.
 
 use std::fs;
 use std::path::Path;
 
-use globset::{Glob, GlobMatcher};
+use ignore_crate::gitignore::{Gitignore, GitignoreBuilder};
 
 // ---------------------------------------------------------------------------
 // load_graphifyignore
@@ -17,7 +20,8 @@ use globset::{Glob, GlobMatcher};
 
 /// Read `.graphifyignore` from `root` and return the raw pattern strings.
 ///
-/// Returns an empty vec if the file does not exist.
+/// Returns an empty vec if the file does not exist. Patterns use gitignore
+/// syntax, including `!` negation to re-include paths ignored by `.gitignore`.
 pub fn load_graphifyignore(root: &Path) -> Vec<String> {
     let ignore_path = root.join(".graphifyignore");
     let content = match fs::read_to_string(&ignore_path) {
@@ -37,57 +41,64 @@ pub fn load_graphifyignore(root: &Path) -> Vec<String> {
 // IgnoreSet
 // ---------------------------------------------------------------------------
 
-/// Pre-compiled set of ignore matchers for efficient repeated checks.
+/// Pre-compiled ignore matcher for efficient repeated checks.
 pub struct IgnoreSet {
-    matchers: Vec<(String, GlobMatcher)>,
+    matcher: Gitignore,
+    has_graphify_unignore: bool,
 }
 
 impl IgnoreSet {
-    /// Build an `IgnoreSet` from raw pattern strings.
-    pub fn new(patterns: &[String]) -> Self {
-        let matchers = patterns
-            .iter()
-            .filter_map(|p| Glob::new(p).ok().map(|g| (p.clone(), g.compile_matcher())))
-            .collect();
-        Self { matchers }
+    /// Build an `IgnoreSet` for a repository root.
+    ///
+    /// root `.gitignore` and `.git/info/exclude` are loaded first. The supplied
+    /// `.graphifyignore` patterns are added last so graphify-specific `!`
+    /// entries can override gitignored paths.
+    pub fn new(root: &Path, graphify_patterns: &[String]) -> Self {
+        let mut builder = GitignoreBuilder::new(root);
+
+        add_ignore_file_if_exists(&mut builder, &root.join(".gitignore"));
+        add_ignore_file_if_exists(&mut builder, &root.join(".git/info/exclude"));
+
+        let graphifyignore_path = root.join(".graphifyignore");
+        for pattern in graphify_patterns {
+            let _ = builder.add_line(Some(graphifyignore_path.clone()), pattern);
+        }
+
+        let matcher = builder.build().unwrap_or_else(|_| {
+            GitignoreBuilder::new(root)
+                .build()
+                .expect("empty gitignore matcher")
+        });
+        let has_graphify_unignore = graphify_patterns.iter().any(|pattern| {
+            let trimmed = pattern.trim_start();
+            trimmed.starts_with('!') && !trimmed.starts_with("\\!")
+        });
+
+        Self {
+            matcher,
+            has_graphify_unignore,
+        }
     }
 
-    /// Returns `true` if `path` (relative to `root`) matches any ignore pattern.
-    pub fn is_ignored(&self, path: &Path, root: &Path) -> bool {
-        let rel = match path.strip_prefix(root) {
-            Ok(r) => r,
-            Err(_) => path,
-        };
+    /// Returns `true` if `path` should be ignored.
+    pub fn is_ignored(&self, path: &Path, is_dir: bool) -> bool {
+        self.matcher
+            .matched_path_or_any_parents(path, is_dir)
+            .is_ignore()
+    }
 
-        let rel_str = rel.to_string_lossy();
-        let file_name = path
-            .file_name()
-            .map(|f| f.to_string_lossy().into_owned())
-            .unwrap_or_default();
+    /// Returns `true` when `.graphifyignore` contains an unignore (`!`) rule.
+    ///
+    /// Directory pruning must be conservative in this case: an ignored parent
+    /// may contain a descendant that `.graphifyignore` re-includes.
+    pub fn has_graphify_unignore(&self) -> bool {
+        self.has_graphify_unignore
+    }
+}
 
-        for (pattern, matcher) in &self.matchers {
-            // Match against full relative path
-            if matcher.is_match(rel) {
-                return true;
-            }
-            // Match against the relative path as a string
-            if matcher.is_match(rel_str.as_ref()) {
-                return true;
-            }
-            // Match against filename alone (for patterns without path separators)
-            if !pattern.contains('/') && matcher.is_match(file_name.as_str()) {
-                return true;
-            }
-            // Match against each path segment
-            for component in rel.components() {
-                if let std::path::Component::Normal(seg) = component
-                    && matcher.is_match(seg)
-                {
-                    return true;
-                }
-            }
-        }
-        false
+fn add_ignore_file_if_exists(builder: &mut GitignoreBuilder, path: &Path) {
+    if path.is_file() {
+        let _ = builder.add(path);
     }
 }
 
@@ -95,13 +106,14 @@ impl IgnoreSet {
 // Convenience function
 // ---------------------------------------------------------------------------
 
-/// Check if a path is ignored given raw patterns (builds a fresh [`IgnoreSet`]).
+/// Check if a path is ignored given raw `.graphifyignore` patterns.
 ///
 /// If you are checking many paths, prefer constructing an [`IgnoreSet`] once
 /// and calling [`IgnoreSet::is_ignored`] in a loop.
 pub fn is_ignored(path: &Path, root: &Path, patterns: &[String]) -> bool {
-    let set = IgnoreSet::new(patterns);
-    set.is_ignored(path, root)
+    let is_dir = path.is_dir();
+    let set = IgnoreSet::new(root, patterns);
+    set.is_ignored(path, is_dir)
 }
 
 // ---------------------------------------------------------------------------
@@ -175,11 +187,11 @@ mod tests {
     fn ignore_set_reuse() {
         let root = PathBuf::from("/project");
         let patterns = vec!["*.tmp".to_string()];
-        let set = IgnoreSet::new(&patterns);
+        let set = IgnoreSet::new(&root, &patterns);
 
-        assert!(set.is_ignored(Path::new("/project/a.tmp"), &root));
-        assert!(set.is_ignored(Path::new("/project/sub/b.tmp"), &root));
-        assert!(!set.is_ignored(Path::new("/project/main.rs"), &root));
+        assert!(set.is_ignored(Path::new("/project/a.tmp"), false));
+        assert!(set.is_ignored(Path::new("/project/sub/b.tmp"), false));
+        assert!(!set.is_ignored(Path::new("/project/main.rs"), false));
     }
 
     #[test]
@@ -202,5 +214,21 @@ mod tests {
             &root,
             &patterns,
         ));
+    }
+
+    #[test]
+    fn graphifyignore_unignore_overrides_gitignore() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("docs/references")).unwrap();
+        std::fs::write(root.join(".gitignore"), "docs/references/\n").unwrap();
+        std::fs::write(root.join(".graphifyignore"), "!docs/references/keep.md\n").unwrap();
+
+        let patterns = load_graphifyignore(root);
+        let set = IgnoreSet::new(root, &patterns);
+
+        assert!(set.is_ignored(&root.join("docs/references/drop.md"), false));
+        assert!(!set.is_ignored(&root.join("docs/references/keep.md"), false));
+        assert!(set.has_graphify_unignore());
     }
 }

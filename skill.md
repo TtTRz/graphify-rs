@@ -71,29 +71,33 @@ If the binary is found, print nothing extra and move straight to Step 2.
 Run the full pipeline. graphify-rs handles detection, extraction, building, clustering, analysis, and export in a single command:
 
 ```bash
-graphify-rs build --path INPUT_PATH --output .graphify --embed
+graphify-rs build --path INPUT_PATH --output .graphify --no-llm --embed
 ```
 
 Replace INPUT_PATH with the actual path the user provided.
 
 Available flags:
-- `--no-llm`: skip Claude API semantic extraction (AST-only graph build; Model2Vec `--embed` still stays local)
+- `--no-llm`: disable legacy LLM extraction; local AST + Markdown/RST/text document context still runs
 - `--code-only`: only process code files
 - `--update`: incremental rebuild, only re-extract changed files
-- `--format json,html,report,wiki,svg,graphml,cypher,obsidian`: select export formats (default: all)
+- `--format json,html,report,context,wiki,svg,graphml,cypher,obsidian`: select export formats (default: all)
 - `--jobs N`: control parallelism
 - `--max-viz-nodes N`: maximum nodes in HTML visualization (default: 2000, increase for larger projects)
-- `--no-embed`: for `graphifyq`, opt out of the default local Model2Vec semantic index when startup must be strictly AST-only/offline
+- graphify respects root `.gitignore`, `.git/info/exclude`, and `.graphifyignore`; use `.graphifyignore` `!path` rules to re-include gitignored files for graphing
+- `--embedding-provider model2vec|ollama|voyage`: choose semantic index backend; default is local Model2Vec. Ollama uses `/api/embed`; Voyage needs `VOYAGE_API_KEY`
+- `--no-embed`: for `graphifyq`, opt out of the default semantic index when startup must be strictly AST-only/offline
 
 The command outputs progress with a progress bar and colored status messages.
 
-If the user specified `--code-only` or `--no-llm`, pass those flags through.
+Keep `--no-llm --embed` by default. Default builds must not ask for Anthropic keys. If the user explicitly asks for legacy Claude document extraction, add `--anthropic-semantic` and require `ANTHROPIC_API_KEY`. If they ask for Ollama/Voyage embeddings, pass `--embedding-provider ollama|voyage` and the requested model.
 
 ### Step 3 - Present results
 
 After the build completes, read and present key sections from the report:
 
 ```bash
+cat .graphify/LLM_CONTEXT.md
+printf "\n--- report excerpt ---\n"
 cat .graphify/GRAPH_REPORT.md
 ```
 

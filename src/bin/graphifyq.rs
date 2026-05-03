@@ -35,7 +35,10 @@ enum CommandKind {
         /// Disable the default Model2Vec semantic index build.
         #[arg(long = "no-embed", action = ArgAction::SetTrue)]
         no_embed: bool,
-        /// Model2Vec model ID or local model directory for the semantic index.
+        /// Embedding provider: model2vec (local), ollama (local HTTP), or voyage (hosted API).
+        #[arg(long, default_value = graphify_embed::DEFAULT_PROVIDER)]
+        embedding_provider: String,
+        /// Embedding model ID/name for the semantic index.
         #[arg(long, default_value = graphify_embed::DEFAULT_MODEL)]
         embedding_model: String,
     },
@@ -52,7 +55,10 @@ enum CommandKind {
         /// Disable the default Model2Vec semantic index build before querying.
         #[arg(long = "no-embed", action = ArgAction::SetTrue)]
         no_embed: bool,
-        /// Model2Vec model ID or local model directory for the semantic index.
+        /// Embedding provider: model2vec (local), ollama (local HTTP), or voyage (hosted API).
+        #[arg(long, default_value = graphify_embed::DEFAULT_PROVIDER)]
+        embedding_provider: String,
+        /// Embedding model ID/name for the semantic index.
         #[arg(long, default_value = graphify_embed::DEFAULT_MODEL)]
         embedding_model: String,
     },
@@ -111,12 +117,14 @@ async fn main() -> Result<()> {
             no_build,
             embed,
             no_embed,
+            embedding_provider,
             embedding_model,
         } => {
             let registry = ensure(
                 rebuild,
                 no_build,
                 semantic_enabled(embed, no_embed),
+                &embedding_provider,
                 &embedding_model,
             )
             .await?;
@@ -147,12 +155,14 @@ async fn main() -> Result<()> {
             budget,
             embed,
             no_embed,
+            embedding_provider,
             embedding_model,
         } => {
             let registry = ensure(
                 false,
                 false,
                 semantic_enabled(embed, no_embed),
+                &embedding_provider,
                 &embedding_model,
             )
             .await?;
@@ -164,12 +174,26 @@ async fn main() -> Result<()> {
             print_tool_response(&response)?;
         }
         CommandKind::Stats => {
-            let registry = ensure(false, false, false, graphify_embed::DEFAULT_MODEL).await?;
+            let registry = ensure(
+                false,
+                false,
+                false,
+                graphify_embed::DEFAULT_PROVIDER,
+                graphify_embed::DEFAULT_MODEL,
+            )
+            .await?;
             let response = get_json(&format!("{}/graphifyq/stats", registry.http_url)).await?;
             println!("{}", serde_json::to_string_pretty(&response)?);
         }
         CommandKind::Summary { level, budget } => {
-            let registry = ensure(false, false, false, graphify_embed::DEFAULT_MODEL).await?;
+            let registry = ensure(
+                false,
+                false,
+                false,
+                graphify_embed::DEFAULT_PROVIDER,
+                graphify_embed::DEFAULT_MODEL,
+            )
+            .await?;
             let response = call_tool(
                 &registry,
                 "smart_summary",
@@ -184,6 +208,7 @@ async fn main() -> Result<()> {
                 false,
                 false,
                 require_semantic,
+                graphify_embed::DEFAULT_PROVIDER,
                 graphify_embed::DEFAULT_MODEL,
             )
             .await?;
@@ -208,10 +233,18 @@ async fn ensure(
     rebuild: bool,
     no_build: bool,
     embed: bool,
+    embedding_provider: &str,
     embedding_model: &str,
 ) -> Result<Registry> {
     let paths = Paths::discover()?;
-    ensure_graph(&paths, rebuild, no_build, embed, embedding_model)?;
+    ensure_graph(
+        &paths,
+        rebuild,
+        no_build,
+        embed,
+        embedding_provider,
+        embedding_model,
+    )?;
 
     if let Ok(registry) = read_registry(&paths.registry_path) {
         if health_ok(&registry, embed).await {
@@ -228,8 +261,10 @@ fn ensure_graph(
     rebuild: bool,
     no_build: bool,
     embed: bool,
+    embedding_provider: &str,
     embedding_model: &str,
 ) -> Result<()> {
+    let embedding_model = normalize_embedding_model(embedding_provider, embedding_model);
     let semantic_path = paths.out_dir.join(graphify_embed::DEFAULT_INDEX_FILE);
     let needs_semantic = embed && !semantic_path.exists();
     if paths.graph_path.exists() && !rebuild && !needs_semantic {
@@ -266,10 +301,16 @@ fn ensure_graph(
         ".graphify",
         "--no-llm",
         "--format",
-        "json,report",
+        "json,report,context",
     ];
     if embed {
-        args.extend(["--embed", "--embedding-model", embedding_model]);
+        args.extend([
+            "--embed",
+            "--embedding-provider",
+            embedding_provider,
+            "--embedding-model",
+            &embedding_model,
+        ]);
     }
     let status = Command::new(graphify_rs_exe())
         .current_dir(&paths.root)
@@ -282,6 +323,17 @@ fn ensure_graph(
         bail!("graphify-rs build failed with status {status}");
     }
     Ok(())
+}
+
+fn normalize_embedding_model(provider: &str, model: &str) -> String {
+    if model != graphify_embed::DEFAULT_MODEL {
+        return model.to_string();
+    }
+    match provider {
+        "ollama" => graphify_embed::DEFAULT_OLLAMA_MODEL.to_string(),
+        "voyage" | "voyageai" => graphify_embed::DEFAULT_VOYAGE_MODEL.to_string(),
+        _ => model.to_string(),
+    }
 }
 
 fn start_sidecar(paths: &Paths) -> Result<()> {

@@ -14,6 +14,7 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 globset = "0.4"
+ignore_crate = { package = "ignore", version = "0.4" }
 walkdir = "2"
 
 [dev-dependencies]

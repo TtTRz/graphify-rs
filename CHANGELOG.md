@@ -8,11 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Gitignore-aware detection** — file discovery now respects `.gitignore` and `.git/info/exclude`, while `.graphifyignore` can re-include gitignored paths with `!path` rules.
+- **LLM context pack** — builds `.graphify/LLM_CONTEXT.md`, a compact first-read artifact that boosts project docs and production entrypoints instead of forcing agents to ingest full `graph.json`.
+- **Local document context extraction** — Markdown/RST/text headings and prose become concept nodes without requiring any LLM/API key; `.planning` is treated as a project-context directory.
+- **Source-quality classification** — generated code, minified bundles, build artifacts, vendored dependencies, tests, schema files, and project docs are automatically tagged with `source_kind`, `source_priority`, and `source_flags`.
+- **Embedding backends** — semantic indexing now supports local Model2Vec, local Ollama `/api/embed`, and Voyage embeddings (`VOYAGE_API_KEY`).
 - **Model2Vec semantic search** — new `graphify-embed` crate builds `.graphify/semantic-index.json`; MCP exposes `semantic_query`, and `query_graph` can seed graph traversal from semantic matches.
 
 ### Changed
-- **`graphifyq` defaults to semantic search** — `graphifyq ensure` and `graphifyq query` now build/use the local Model2Vec index by default; pass `--no-embed` for strict AST-only/offline startup.
-- **Agent install guidance** — generated `CLAUDE.md`/`AGENTS.md`, README, CLI docs, and the packaged skill now keep `semantic-index.json` current with `--embed`.
+- **Generated/test/build artifacts are downranked by default** — reports, semantic search, and `LLM_CONTEXT.md` keep provenance but stop letting generated OpenAPI, minified bundles, build outputs, or tests dominate LLM context.
+- **Anthropic extraction is explicit opt-in** — default builds no longer prompt for `ANTHROPIC_API_KEY`; legacy Claude document extraction only runs with `--anthropic-semantic`.
+- **`graphifyq` defaults to semantic search** — `graphifyq ensure` and `graphifyq query` now build/use the semantic index by default; pass `--no-embed` for strict AST-only/offline startup.
+- **Agent install guidance** — generated `CLAUDE.md`/`AGENTS.md`, README, CLI docs, and the packaged skill now keep `semantic-index.json` and `LLM_CONTEXT.md` current.
 
 ## [0.4.5] - 2026-04-25
 

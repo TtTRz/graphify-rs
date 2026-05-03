@@ -19,7 +19,7 @@ Source Files → detect → extract → build → cluster → analyze → export
 | Crate | Purpose | Key Functions |
 |-------|---------|---------------|
 | `graphify-core` | Data models, graph structure, ID generation, confidence system | `KnowledgeGraph`, `GraphNode`, `GraphEdge` |
-| `graphify-detect` | File discovery, classification, `.graphifyignore`, sensitive file filtering | `classify_file()`, `is_sensitive()` |
+| `graphify-detect` | File discovery, classification, `.gitignore`/`.graphifyignore`, sensitive file filtering | `classify_file()`, `is_sensitive()` |
 | `graphify-extract` | AST extraction (21 languages via tree-sitter + regex), Claude API semantic extraction | `extract()`, `extract_file()`, `resolve_cross_file_imports()` |
 | `graphify-build` | Graph assembly from extraction results, node/edge deduplication | `build_from_extraction()` |
 | `graphify-cluster` | Leiden community detection, cohesion scoring, incremental re-clustering | `cluster()`, `cluster_incremental()`, `cohesion_score()` |
@@ -43,7 +43,7 @@ Source Files → detect → extract → build → cluster → analyze → export
 | **PageRank** | `graphify-analyze` | Identify structurally critical nodes (not just high-degree) | O(20·(n+m)) |
 | **Tarjan's SCC** | `graphify-analyze` | Detect circular dependency chains | O(n+m) |
 | **Node2Vec embedding** | `graphify-analyze` | Learn node representations for similarity search | O(walks·n·dim) |
-| **Model2Vec semantic index** | `graphify-embed` | Rank graph nodes by natural-language meaning plus lexical/degree boosts | O(n·dim) per query |
+| **Semantic index** | `graphify-embed` | Rank graph nodes by natural-language meaning via Model2Vec, Ollama, or Voyage plus lexical/degree/quality boosts | O(n·dim) per query |
 | **Temporal risk** | `graphify-analyze` | Correlate git churn with graph connectivity | O(n·git_log) |
 | **Dijkstra weighted path** | `graphify-serve` | Shortest path weighted by edge confidence | O((n+m) log n) |
 | **Smart summarization** | `graphify-serve` | Three-level abstraction for LLM token budgets | O(n+m) |
@@ -53,7 +53,7 @@ Source Files → detect → extract → build → cluster → analyze → export
 | Tool | Category | Description |
 |------|----------|-------------|
 | `query_graph` | Search | Search nodes by keywords or semantic index, return subgraph context |
-| `semantic_query` | Search | Return ranked Model2Vec semantic node matches |
+| `semantic_query` | Search | Return ranked semantic node matches from Model2Vec/Ollama/Voyage index |
 | `get_node` | Explore | Get detailed info about a specific node |
 | `get_neighbors` | Explore | Get a node's neighbors and connecting edges |
 | `get_community` | Explore | List all nodes in a community |
@@ -76,8 +76,8 @@ Every edge carries a confidence tag:
 | Tag | Meaning | Score | Source |
 |-----|---------|-------|--------|
 | `EXTRACTED` | Found directly in source (import, call, citation) | 1.0 | tree-sitter / regex |
-| `INFERRED` | Reasonable inference from context | 0.4–0.9 | Claude API / cross-file resolution |
-| `AMBIGUOUS` | Uncertain — flagged for human review | 0.1–0.3 | Claude API |
+| `INFERRED` | Reasonable inference from context | 0.4–0.9 | Optional legacy Claude extraction / cross-file resolution |
+| `AMBIGUOUS` | Uncertain — flagged for human review | 0.1–0.3 | Optional legacy Claude extraction |
 
 ## Supported Languages (22)
 

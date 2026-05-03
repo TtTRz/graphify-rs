@@ -3,6 +3,7 @@
 //! Supports JSON, HTML (interactive visualization), SVG, GraphML, Cypher
 //! (Neo4j), wiki-style markdown, and analysis reports.
 
+pub mod context;
 pub mod cypher;
 pub mod graphml;
 pub mod html;
@@ -21,3 +22,5 @@ pub use obsidian::export_obsidian;
 pub use report::generate_report;
 pub use svg::export_svg;
 pub use wiki::export_wiki;
+
+pub use context::{export_llm_context, generate_llm_context};

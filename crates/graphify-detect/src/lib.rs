@@ -97,7 +97,7 @@ pub fn save_manifest(path: &Path, manifest: &Manifest) -> Result<(), DetectError
 /// Walk `root` and return a [`DetectResult`] with all discovered files.
 pub fn detect(root: &Path) -> DetectResult {
     let ignore_patterns = load_graphifyignore(root);
-    let ignore_set = IgnoreSet::new(&ignore_patterns);
+    let ignore_set = IgnoreSet::new(root, &ignore_patterns);
     let pattern_count = ignore_patterns.len();
 
     let mut files: HashMap<FileType, Vec<String>> = HashMap::new();
@@ -257,21 +257,34 @@ fn should_skip_entry(entry: &walkdir::DirEntry, root: &Path, ignore_set: &Ignore
         if is_noise_dir(name) {
             return true;
         }
-        // Skip hidden directories (except the root itself).
-        if name.starts_with('.') && entry.path() != root {
-            return true;
+        // Skip hidden directories (except project-context dirs like .planning),
+        // unless .graphifyignore has a descendant unignore rule.
+        if name.starts_with('.') && entry.path() != root && !is_project_context_dir(name) {
+            if entry.path().strip_prefix(root).is_ok() {
+                if !ignore_set.has_graphify_unignore() {
+                    return true;
+                }
+            } else {
+                return true;
+            }
         }
     }
 
-    // Check .graphifyignore patterns
-    if ignore_set.is_ignored(entry.path(), root) {
-        return true;
+    // Check .gitignore + .graphifyignore patterns. If .graphifyignore has
+    // an unignore rule, keep ignored directories traversable so a descendant
+    // can be explicitly re-included.
+    if ignore_set.is_ignored(entry.path(), entry.file_type().is_dir()) {
+        return !(entry.file_type().is_dir() && ignore_set.has_graphify_unignore());
     }
 
     false
 }
 
 /// Returns `true` if a directory name is a known "noise" directory.
+fn is_project_context_dir(name: &str) -> bool {
+    matches!(name, ".planning")
+}
+
 fn is_noise_dir(name: &str) -> bool {
     SKIP_DIRS.contains(&name)
         || name.ends_with("_venv")
@@ -409,6 +422,63 @@ mod tests {
             "README.md should be ignored"
         );
         assert_eq!(result.graphifyignore_patterns, 2);
+    }
+
+    #[test]
+    fn detect_respects_gitignore() {
+        let dir = make_test_tree();
+        let root = dir.path();
+        fs::create_dir_all(root.join("docs/references")).unwrap();
+        fs::write(root.join("docs/references/huge.md"), "# Huge reference").unwrap();
+        fs::write(
+            root.join(".gitignore"),
+            "docs/references/
+",
+        )
+        .unwrap();
+
+        let result = detect(root);
+
+        let all_paths: Vec<&String> = result.files.values().flat_map(|v| v.iter()).collect();
+        assert!(
+            !all_paths.iter().any(|p| p.contains("docs/references")),
+            "gitignored docs/references should be skipped"
+        );
+        assert_eq!(result.graphifyignore_patterns, 0);
+    }
+
+    #[test]
+    fn detect_graphifyignore_unignore_overrides_gitignore() {
+        let dir = make_test_tree();
+        let root = dir.path();
+        fs::create_dir_all(root.join("docs/references")).unwrap();
+        fs::write(root.join("docs/references/drop.md"), "# Drop").unwrap();
+        fs::write(root.join("docs/references/keep.md"), "# Keep").unwrap();
+        fs::write(
+            root.join(".gitignore"),
+            "docs/references/
+",
+        )
+        .unwrap();
+        fs::write(
+            root.join(".graphifyignore"),
+            "!docs/references/keep.md
+",
+        )
+        .unwrap();
+
+        let result = detect(root);
+
+        let all_paths: Vec<&String> = result.files.values().flat_map(|v| v.iter()).collect();
+        assert!(
+            all_paths.iter().any(|p| p == &"docs/references/keep.md"),
+            ".graphifyignore should re-include keep.md"
+        );
+        assert!(
+            !all_paths.iter().any(|p| p == &"docs/references/drop.md"),
+            "gitignored drop.md should stay skipped"
+        );
+        assert_eq!(result.graphifyignore_patterns, 1);
     }
 
     #[test]

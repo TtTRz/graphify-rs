@@ -55,7 +55,7 @@ enum Commands {
         /// Only re-extract new/modified files since last build
         #[arg(long)]
         update: bool,
-        /// Export formats (comma-separated). Available: json,html,graphml,cypher,svg,wiki,obsidian,report. Default: all
+        /// Export formats (comma-separated). Available: json,html,graphml,cypher,svg,wiki,obsidian,report,context. Default: all
         #[arg(long, value_delimiter = ',')]
         format: Vec<String>,
         /// Maximum nodes in HTML visualization (default: 2000). Larger values may slow browser.
@@ -64,9 +64,15 @@ enum Commands {
         /// Build a local Model2Vec semantic index next to graph.json.
         #[arg(long)]
         embed: bool,
-        /// Model2Vec model ID or local model directory for --embed.
+        /// Embedding provider for --embed: model2vec (local), ollama (local HTTP), or voyage (hosted API).
+        #[arg(long, default_value = graphify_embed::DEFAULT_PROVIDER)]
+        embedding_provider: String,
+        /// Embedding model ID/name for --embed. Prefixes like ollama:embeddinggemma and voyage:voyage-code-3 are also accepted.
         #[arg(long)]
         embedding_model: Option<String>,
+        /// Enable legacy Anthropic document semantic extraction. Default document indexing is local and does not require API keys.
+        #[arg(long)]
+        anthropic_semantic: bool,
     },
     /// Install graphify skill for AI coding assistant
     Install {
@@ -315,7 +321,9 @@ async fn main() -> Result<()> {
             format,
             max_viz_nodes,
             embed,
+            embedding_provider,
             embedding_model,
+            anthropic_semantic,
         } => {
             // Merge config file defaults with CLI args
             let cfg = config::load_config(Path::new(&path));
@@ -328,9 +336,23 @@ async fn main() -> Result<()> {
             let effective_no_llm = no_llm || cfg.no_llm.unwrap_or(false);
             let effective_code_only = code_only || cfg.code_only.unwrap_or(false);
             let effective_embed = embed || cfg.embed.unwrap_or(false);
-            let effective_embedding_model = embedding_model
-                .or(cfg.embedding_model)
-                .unwrap_or_else(|| graphify_embed::DEFAULT_MODEL.to_string());
+            let effective_embedding_provider =
+                if embedding_provider == graphify_embed::DEFAULT_PROVIDER {
+                    cfg.embedding_provider
+                        .unwrap_or_else(|| embedding_provider.clone())
+                } else {
+                    embedding_provider.clone()
+                };
+            let effective_embedding_model =
+                embedding_model.or(cfg.embedding_model).unwrap_or_else(|| {
+                    match effective_embedding_provider.as_str() {
+                        "ollama" => graphify_embed::DEFAULT_OLLAMA_MODEL.to_string(),
+                        "voyage" | "voyageai" => graphify_embed::DEFAULT_VOYAGE_MODEL.to_string(),
+                        _ => graphify_embed::DEFAULT_MODEL.to_string(),
+                    }
+                });
+            let effective_anthropic_semantic =
+                anthropic_semantic || cfg.anthropic_semantic.unwrap_or(false);
             let effective_formats = if format.is_empty() {
                 cfg.formats.unwrap_or_default()
             } else {
@@ -348,7 +370,9 @@ async fn main() -> Result<()> {
                 cli.jobs,
                 max_viz_nodes,
                 effective_embed,
+                &effective_embedding_provider,
                 &effective_embedding_model,
+                effective_anthropic_semantic,
             )?;
         }
         Commands::Install { platform } => {
@@ -539,7 +563,9 @@ fn cmd_build(
     jobs: Option<usize>,
     max_viz_nodes: Option<usize>,
     embed: bool,
+    embedding_provider: &str,
     embedding_model: &str,
+    anthropic_semantic: bool,
 ) -> Result<()> {
     let root = PathBuf::from(path);
     let output_dir = PathBuf::from(output);
@@ -548,7 +574,7 @@ fn cmd_build(
 
     // Determine which formats to export (empty = all)
     let all_formats = [
-        "json", "html", "graphml", "cypher", "svg", "wiki", "obsidian", "report",
+        "json", "html", "graphml", "cypher", "svg", "wiki", "obsidian", "report", "context",
     ];
     let selected: Vec<&str> = if formats.is_empty() {
         all_formats.to_vec()
@@ -718,8 +744,35 @@ fn cmd_build(
 
     let mut extractions = vec![ast_result];
 
-    // ── Step 2b: Semantic extraction (Pass 2 — Claude API, concurrent) ──
-    if !no_llm && !code_only {
+    // ── Step 2b: Local document extraction (LLM-free) ──
+    if !code_only {
+        let doc_files: Vec<PathBuf> = detection
+            .files
+            .get(&graphify_detect::FileType::Document)
+            .into_iter()
+            .chain(detection.files.get(&graphify_detect::FileType::Paper))
+            .flat_map(|v| v.iter().map(|f| root.join(f)))
+            .collect();
+        if !doc_files.is_empty() {
+            info_print!(
+                verb,
+                "  {} local document context from {} doc/paper files...",
+                "Extracting".cyan(),
+                doc_files.len()
+            );
+            let doc_result = graphify_extract::doc_extract::extract_documents(&doc_files);
+            info_print!(
+                verb,
+                "  Pass 1b (docs): {} nodes, {} edges",
+                doc_result.nodes.len().to_string().bold(),
+                doc_result.edges.len().to_string().bold()
+            );
+            extractions.push(doc_result);
+        }
+    }
+
+    // ── Step 2c: Optional legacy Anthropic extraction (explicit opt-in) ──
+    if anthropic_semantic && !no_llm && !code_only {
         let api_key = std::env::var("ANTHROPIC_API_KEY").ok();
         if let Some(key) = api_key {
             let doc_files: Vec<PathBuf> = detection
@@ -838,9 +891,8 @@ fn cmd_build(
         } else if n_doc + n_paper > 0 {
             info_print!(
                 verb,
-                "  {} Set ANTHROPIC_API_KEY to enable semantic extraction for {} doc/paper files",
-                "ℹ".blue(),
-                n_doc + n_paper
+                "  {} --anthropic-semantic was requested but ANTHROPIC_API_KEY is not set; local document context was still indexed",
+                "ℹ".blue()
             );
         }
     }
@@ -885,6 +937,7 @@ fn cmd_build(
                             && !n.label.starts_with("std::")
                             && !n.label.starts_with("serde::")
                             && !n.label.contains("::")
+                            && graphify_core::quality::is_summary_candidate(n)
                     })
                     // Prefer functions/structs over file nodes
                     .max_by_key(|n| match n.node_type {
@@ -934,10 +987,15 @@ fn cmd_build(
             verb,
             "  {} semantic index with {}...",
             "Embedding".cyan(),
-            embedding_model
+            format!("{embedding_provider}:{embedding_model}")
         );
-        let index = graphify_embed::build_model2vec_index(&graph, Some(&root), embedding_model)
-            .with_context(|| format!("Failed to build semantic index with {embedding_model}"))?;
+        let (provider, model) = if let Some((provider, model)) = embedding_model.split_once(':') {
+            (provider, model)
+        } else {
+            (embedding_provider, embedding_model)
+        };
+        let index = graphify_embed::build_semantic_index(&graph, Some(&root), provider, model)
+            .with_context(|| format!("Failed to build semantic index with {provider}:{model}"))?;
         let index_path = output_dir.join(graphify_embed::DEFAULT_INDEX_FILE);
         graphify_embed::write_index(&index, &index_path)
             .with_context(|| format!("Failed to write {}", index_path.display()))?;
@@ -1024,6 +1082,17 @@ fn cmd_build(
             verb,
             "  Wrote {}",
             report_path.display().to_string().dimmed()
+        );
+    }
+
+    if should_export("context") {
+        let context =
+            graphify_export::generate_llm_context(&graph, &communities, &community_labels, path);
+        let context_path = graphify_export::export_llm_context(&context, &output_dir)?;
+        info_print!(
+            verb,
+            "  Wrote {}",
+            context_path.display().to_string().dimmed()
         );
     }
 

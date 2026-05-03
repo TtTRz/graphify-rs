@@ -9,6 +9,7 @@
 
 pub mod ast_extract;
 pub mod dedup;
+pub mod doc_extract;
 pub mod lang_config;
 pub mod parser;
 pub mod semantic;

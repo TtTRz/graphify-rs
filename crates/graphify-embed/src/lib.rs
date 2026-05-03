@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 use graphify_core::graph::KnowledgeGraph;
 use graphify_core::model::GraphNode;
+use graphify_core::quality;
 use model2vec_rs::model::StaticModel;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -19,6 +20,9 @@ use thiserror::Error;
 
 pub const DEFAULT_INDEX_FILE: &str = "semantic-index.json";
 pub const DEFAULT_MODEL: &str = "minishlab/potion-code-16M";
+pub const DEFAULT_PROVIDER: &str = "model2vec";
+pub const DEFAULT_OLLAMA_MODEL: &str = "embeddinggemma";
+pub const DEFAULT_VOYAGE_MODEL: &str = "voyage-code-3";
 const INDEX_VERSION: u32 = 1;
 const SNIPPET_CONTEXT_LINES: usize = 2;
 const MAX_SNIPPET_CHARS: usize = 900;
@@ -68,9 +72,43 @@ pub enum SemanticIndexError {
     },
 }
 
-pub trait TextEncoder {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmbedPurpose {
+    Document,
+    Query,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmbeddingProvider {
+    Model2Vec,
+    Ollama,
+    Voyage,
+}
+
+impl EmbeddingProvider {
+    pub fn parse(value: &str) -> Result<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "model2vec" | "m2v" | "minish" => Ok(Self::Model2Vec),
+            "ollama" => Ok(Self::Ollama),
+            "voyage" | "voyageai" => Ok(Self::Voyage),
+            other => bail!(
+                "unsupported embedding provider '{other}' (expected model2vec, ollama, or voyage)"
+            ),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Model2Vec => "model2vec",
+            Self::Ollama => "ollama",
+            Self::Voyage => "voyage",
+        }
+    }
+}
+
+pub trait TextEncoder: Send + Sync {
     fn model_id(&self) -> &str;
-    fn encode(&self, texts: &[String]) -> Result<Vec<Vec<f32>>>;
+    fn encode(&self, texts: &[String], purpose: EmbedPurpose) -> Result<Vec<Vec<f32>>>;
 }
 
 pub struct Model2VecEncoder {
@@ -98,16 +136,171 @@ impl TextEncoder for Model2VecEncoder {
         &self.model_id
     }
 
-    fn encode(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+    fn encode(&self, texts: &[String], _purpose: EmbedPurpose) -> Result<Vec<Vec<f32>>> {
         Ok(self
             .model
             .encode_with_args(texts, self.max_length, self.batch_size))
     }
 }
 
+pub struct OllamaEncoder {
+    model_id: String,
+    model: String,
+    endpoint: String,
+    client: reqwest::blocking::Client,
+}
+
+impl OllamaEncoder {
+    pub fn new(model: &str) -> Result<Self> {
+        let host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".into());
+        let host = if host.starts_with("http://") || host.starts_with("https://") {
+            host
+        } else {
+            format!("http://{host}")
+        };
+        Ok(Self {
+            model_id: format!("ollama:{model}"),
+            model: model.to_string(),
+            endpoint: format!("{}/api/embed", host.trim_end_matches('/')),
+            client: reqwest::blocking::Client::new(),
+        })
+    }
+}
+
+impl TextEncoder for OllamaEncoder {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+
+    fn encode(&self, texts: &[String], _purpose: EmbedPurpose) -> Result<Vec<Vec<f32>>> {
+        let mut out = Vec::with_capacity(texts.len());
+        for chunk in texts.chunks(64) {
+            let resp: OllamaEmbedResponse = self
+                .client
+                .post(&self.endpoint)
+                .json(&serde_json::json!({"model": self.model, "input": chunk}))
+                .send()
+                .with_context(|| format!("POST {}", self.endpoint))?
+                .error_for_status()
+                .with_context(|| format!("Ollama embedding model '{}' failed", self.model))?
+                .json()
+                .context("parse Ollama embedding response")?;
+            if resp.embeddings.len() != chunk.len() {
+                bail!(
+                    "Ollama returned {} embeddings for {} inputs",
+                    resp.embeddings.len(),
+                    chunk.len()
+                );
+            }
+            out.extend(resp.embeddings);
+        }
+        Ok(out)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaEmbedResponse {
+    embeddings: Vec<Vec<f32>>,
+}
+
+pub struct VoyageEncoder {
+    model_id: String,
+    model: String,
+    endpoint: String,
+    api_key: String,
+    client: reqwest::blocking::Client,
+}
+
+impl VoyageEncoder {
+    pub fn new(model: &str) -> Result<Self> {
+        let api_key = std::env::var("VOYAGE_API_KEY")
+            .context("VOYAGE_API_KEY is required for --embedding-provider voyage")?;
+        let endpoint = std::env::var("VOYAGE_ENDPOINT")
+            .unwrap_or_else(|_| "https://api.voyageai.com/v1/embeddings".into());
+        Ok(Self {
+            model_id: format!("voyage:{model}"),
+            model: model.to_string(),
+            endpoint,
+            api_key,
+            client: reqwest::blocking::Client::new(),
+        })
+    }
+}
+
+impl TextEncoder for VoyageEncoder {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+
+    fn encode(&self, texts: &[String], purpose: EmbedPurpose) -> Result<Vec<Vec<f32>>> {
+        let input_type = match purpose {
+            EmbedPurpose::Document => "document",
+            EmbedPurpose::Query => "query",
+        };
+        let mut out = Vec::with_capacity(texts.len());
+        for chunk in texts.chunks(128) {
+            let resp: VoyageEmbedResponse = self
+                .client
+                .post(&self.endpoint)
+                .bearer_auth(&self.api_key)
+                .json(&serde_json::json!({
+                    "model": self.model,
+                    "input": chunk,
+                    "input_type": input_type,
+                }))
+                .send()
+                .with_context(|| format!("POST {}", self.endpoint))?
+                .error_for_status()
+                .with_context(|| format!("Voyage embedding model '{}' failed", self.model))?
+                .json()
+                .context("parse Voyage embedding response")?;
+            let mut data = resp.data;
+            data.sort_by_key(|item| item.index);
+            if data.len() != chunk.len() {
+                bail!(
+                    "Voyage returned {} embeddings for {} inputs",
+                    data.len(),
+                    chunk.len()
+                );
+            }
+            out.extend(data.into_iter().map(|item| item.embedding));
+        }
+        Ok(out)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct VoyageEmbedResponse {
+    data: Vec<VoyageEmbedding>,
+}
+
+#[derive(Debug, Deserialize)]
+struct VoyageEmbedding {
+    embedding: Vec<f32>,
+    index: usize,
+}
+
+pub fn build_encoder(provider: &str, model: &str) -> Result<Box<dyn TextEncoder>> {
+    let provider = EmbeddingProvider::parse(provider)?;
+    match provider {
+        EmbeddingProvider::Model2Vec => Ok(Box::new(Model2VecEncoder::from_pretrained(model)?)),
+        EmbeddingProvider::Ollama => Ok(Box::new(OllamaEncoder::new(model)?)),
+        EmbeddingProvider::Voyage => Ok(Box::new(VoyageEncoder::new(model)?)),
+    }
+}
+
+pub fn split_model_spec(spec: &str) -> (&str, &str) {
+    if let Some((provider, model)) = spec.split_once(':')
+        && matches!(provider, "model2vec" | "ollama" | "voyage")
+    {
+        return (provider, model);
+    }
+    (DEFAULT_PROVIDER, spec)
+}
+
 pub struct SemanticEngine {
     index: SemanticIndex,
-    encoder: Model2VecEncoder,
+    encoder: Box<dyn TextEncoder>,
 }
 
 impl SemanticEngine {
@@ -115,7 +308,8 @@ impl SemanticEngine {
         let index = read_index(index_path)?;
         let graph_fingerprint = graph_fingerprint(graph);
         validate_index_for_graph(&index, &graph_fingerprint, &index.model)?;
-        let encoder = Model2VecEncoder::from_pretrained(&index.model)?;
+        let (provider, model) = split_model_spec(&index.model);
+        let encoder = build_encoder(provider, model)?;
         Ok(Self { index, encoder })
     }
 
@@ -125,7 +319,9 @@ impl SemanticEngine {
         question: &str,
         top_n: usize,
     ) -> Result<Vec<SemanticMatch>> {
-        let embeddings = self.encoder.encode(&[question.to_string()])?;
+        let embeddings = self
+            .encoder
+            .encode(&[question.to_string()], EmbedPurpose::Query)?;
         let query_embedding = embeddings
             .first()
             .ok_or_else(|| anyhow!("encoder returned no query embedding"))?;
@@ -156,7 +352,17 @@ pub fn build_model2vec_index(
     build_index_with_encoder(graph, root, &encoder)
 }
 
-pub fn build_index_with_encoder<E: TextEncoder>(
+pub fn build_semantic_index(
+    graph: &KnowledgeGraph,
+    root: Option<&Path>,
+    provider: &str,
+    model_id: &str,
+) -> Result<SemanticIndex> {
+    let encoder = build_encoder(provider, model_id)?;
+    build_index_with_encoder(graph, root, encoder.as_ref())
+}
+
+pub fn build_index_with_encoder<E: TextEncoder + ?Sized>(
     graph: &KnowledgeGraph,
     root: Option<&Path>,
     encoder: &E,
@@ -167,7 +373,7 @@ pub fn build_index_with_encoder<E: TextEncoder>(
     let embeddings = if texts.is_empty() {
         Vec::new()
     } else {
-        encoder.encode(&texts)?
+        encoder.encode(&texts, EmbedPurpose::Document)?
     };
     if embeddings.len() != entries.len() {
         bail!(
@@ -366,6 +572,9 @@ fn node_text(node: &GraphNode, snippet: Option<&str>) -> String {
     if let Some(location) = &node.source_location {
         parts.push(format!("location: {location}"));
     }
+    if let Some(doc_text) = node.extra.get("doc_text").and_then(|v| v.as_str()) {
+        parts.push(format!("document text:\n{doc_text}"));
+    }
 
     let mut extra_keys: Vec<_> = node.extra.keys().collect();
     extra_keys.sort();
@@ -457,39 +666,7 @@ fn lexical_score(node: &GraphNode, indexed_text: &str, terms: &[String]) -> f32 
 }
 
 fn source_quality_multiplier(node: &GraphNode) -> f32 {
-    let path = node.source_file.to_lowercase();
-    let label = node.label.to_lowercase();
-    let id = node.id.to_lowercase();
-    let mut multiplier = 1.0;
-
-    if path.contains("_test.")
-        || path.contains("/test/")
-        || path.contains("/tests/")
-        || path.contains("/fixtures/")
-        || label.contains("mock")
-        || id.contains("mock")
-    {
-        multiplier *= 0.58;
-    }
-
-    if path.ends_with(".pb.go")
-        || path.ends_with(".twirp.go")
-        || path.contains("/internal/proto/")
-        || path.contains("/vendor/")
-        || path.contains("/generated/")
-    {
-        multiplier *= 0.62;
-    }
-
-    if path.ends_with(".down.sql") || path.contains(".down.") {
-        multiplier *= 0.70;
-    }
-
-    if path.ends_with("schema.sql") || path.ends_with(".up.sql") {
-        multiplier *= 1.08;
-    }
-
-    multiplier
+    quality::node_priority(node)
 }
 
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
@@ -527,7 +704,7 @@ mod tests {
             "stub-model"
         }
 
-        fn encode(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        fn encode(&self, texts: &[String], _purpose: EmbedPurpose) -> Result<Vec<Vec<f32>>> {
             Ok(self.embeddings.iter().take(texts.len()).cloned().collect())
         }
     }
@@ -715,6 +892,22 @@ mod tests {
         );
 
         assert_eq!(matches[0].node_id, "schema_mv");
+    }
+
+    #[test]
+    fn split_model_spec_supports_remote_prefixes() {
+        assert_eq!(
+            split_model_spec("ollama:embeddinggemma"),
+            ("ollama", "embeddinggemma")
+        );
+        assert_eq!(
+            split_model_spec("voyage:voyage-code-3"),
+            ("voyage", "voyage-code-3")
+        );
+        assert_eq!(
+            split_model_spec("minishlab/potion-code-16M"),
+            (DEFAULT_PROVIDER, "minishlab/potion-code-16M")
+        );
     }
 
     #[test]

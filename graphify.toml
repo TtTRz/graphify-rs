@@ -4,12 +4,19 @@
 # Output directory for graph files
 # output = ".graphify"
 
-# Disable LLM-based semantic extraction
-# no_llm = false
+# Disable legacy LLM-based semantic extraction. Local document context still runs.
+# no_llm = true
+
+# Explicitly enable legacy Anthropic document extraction (requires ANTHROPIC_API_KEY)
+# anthropic_semantic = false
 
 # Only process code files (skip docs/papers)
 # code_only = false
 
-# Export formats (comma-separated). Available: json,html,graphml,cypher,svg,wiki,obsidian,report
+# Export formats (comma-separated). Available: json,html,graphml,cypher,svg,wiki,obsidian,report,context
 # Leave empty or omit for all formats.
 # formats = ["json", "html", "report"]
+
+# Semantic embedding backend for --embed: model2vec, ollama, or voyage
+# embedding_provider = "model2vec"
+# embedding_model = "minishlab/potion-code-16M"

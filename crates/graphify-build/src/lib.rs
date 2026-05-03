@@ -10,6 +10,7 @@ use tracing::debug;
 use graphify_core::error::Result;
 use graphify_core::graph::KnowledgeGraph;
 use graphify_core::model::ExtractionResult;
+use graphify_core::quality;
 
 /// Build a [`KnowledgeGraph`] from a single extraction result.
 ///
@@ -42,6 +43,8 @@ pub fn build_from_extraction(extraction: &ExtractionResult) -> Result<KnowledgeG
     // Store hyperedges
     graph.set_hyperedges(extraction.hyperedges.clone());
 
+    annotate_quality_metadata(&mut graph);
+
     Ok(graph)
 }
 
@@ -57,6 +60,25 @@ pub fn build(extractions: &[ExtractionResult]) -> Result<KnowledgeGraph> {
         combined.hyperedges.extend(ext.hyperedges.clone());
     }
     build_from_extraction(&combined)
+}
+
+fn annotate_quality_metadata(graph: &mut KnowledgeGraph) {
+    for id in graph.node_ids() {
+        let Some(node) = graph.get_node_mut(&id) else {
+            continue;
+        };
+        let q = quality::classify_node(node);
+        node.extra
+            .insert(quality::EXTRA_SOURCE_KIND.into(), serde_json::json!(q.kind));
+        node.extra.insert(
+            quality::EXTRA_SOURCE_PRIORITY.into(),
+            serde_json::json!(q.priority),
+        );
+        node.extra.insert(
+            quality::EXTRA_SOURCE_FLAGS.into(),
+            serde_json::json!(q.flags),
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
