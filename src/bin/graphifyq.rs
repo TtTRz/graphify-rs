@@ -4,7 +4,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -29,6 +29,15 @@ enum CommandKind {
         /// Do not build a missing graph; fail instead.
         #[arg(long)]
         no_build: bool,
+        /// Also build .graphify/semantic-index.json with Model2Vec. Enabled by default; kept for compatibility.
+        #[arg(long, action = ArgAction::SetTrue, conflicts_with = "no_embed")]
+        embed: bool,
+        /// Disable the default Model2Vec semantic index build.
+        #[arg(long = "no-embed", action = ArgAction::SetTrue)]
+        no_embed: bool,
+        /// Model2Vec model ID or local model directory for the semantic index.
+        #[arg(long, default_value = graphify_embed::DEFAULT_MODEL)]
+        embedding_model: String,
     },
     /// Print sidecar health and registry state.
     Doctor,
@@ -37,6 +46,15 @@ enum CommandKind {
         question: String,
         #[arg(long, default_value_t = 2000)]
         budget: usize,
+        /// Ensure a semantic index exists before querying. Enabled by default; kept for compatibility.
+        #[arg(long, action = ArgAction::SetTrue, conflicts_with = "no_embed")]
+        embed: bool,
+        /// Disable the default Model2Vec semantic index build before querying.
+        #[arg(long = "no-embed", action = ArgAction::SetTrue)]
+        no_embed: bool,
+        /// Model2Vec model ID or local model directory for the semantic index.
+        #[arg(long, default_value = graphify_embed::DEFAULT_MODEL)]
+        embedding_model: String,
     },
     /// Print graph statistics via the local sidecar.
     Stats,
@@ -88,8 +106,20 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        CommandKind::Ensure { rebuild, no_build } => {
-            let registry = ensure(rebuild, no_build).await?;
+        CommandKind::Ensure {
+            rebuild,
+            no_build,
+            embed,
+            no_embed,
+            embedding_model,
+        } => {
+            let registry = ensure(
+                rebuild,
+                no_build,
+                semantic_enabled(embed, no_embed),
+                &embedding_model,
+            )
+            .await?;
             println!("{}", serde_json::to_string_pretty(&registry)?);
         }
         CommandKind::Doctor => {
@@ -112,8 +142,20 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        CommandKind::Query { question, budget } => {
-            let registry = ensure(false, false).await?;
+        CommandKind::Query {
+            question,
+            budget,
+            embed,
+            no_embed,
+            embedding_model,
+        } => {
+            let registry = ensure(
+                false,
+                false,
+                semantic_enabled(embed, no_embed),
+                &embedding_model,
+            )
+            .await?;
             let response = post_json(
                 &format!("{}/graphifyq/query", registry.http_url),
                 &json!({"question": question, "budget": budget}),
@@ -122,12 +164,12 @@ async fn main() -> Result<()> {
             print_tool_response(&response)?;
         }
         CommandKind::Stats => {
-            let registry = ensure(false, false).await?;
+            let registry = ensure(false, false, false, graphify_embed::DEFAULT_MODEL).await?;
             let response = get_json(&format!("{}/graphifyq/stats", registry.http_url)).await?;
             println!("{}", serde_json::to_string_pretty(&response)?);
         }
         CommandKind::Summary { level, budget } => {
-            let registry = ensure(false, false).await?;
+            let registry = ensure(false, false, false, graphify_embed::DEFAULT_MODEL).await?;
             let response = call_tool(
                 &registry,
                 "smart_summary",
@@ -137,7 +179,14 @@ async fn main() -> Result<()> {
             print_tool_response(&response)?;
         }
         CommandKind::Tool { name, arguments } => {
-            let registry = ensure(false, false).await?;
+            let require_semantic = name == "semantic_query";
+            let registry = ensure(
+                false,
+                false,
+                require_semantic,
+                graphify_embed::DEFAULT_MODEL,
+            )
+            .await?;
             let args: Value = serde_json::from_str(&arguments)
                 .with_context(|| "tool arguments must be valid JSON")?;
             let response = call_tool(&registry, &name, args).await?;
@@ -148,29 +197,57 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn ensure(rebuild: bool, no_build: bool) -> Result<Registry> {
+fn semantic_enabled(_embed_flag: bool, no_embed: bool) -> bool {
+    // Semantic graph search is the default for graphifyq. `--embed` remains a
+    // no-op compatibility flag for older scripts; `--no-embed` is the explicit
+    // fast/offline escape hatch.
+    !no_embed
+}
+
+async fn ensure(
+    rebuild: bool,
+    no_build: bool,
+    embed: bool,
+    embedding_model: &str,
+) -> Result<Registry> {
     let paths = Paths::discover()?;
-    ensure_graph(&paths, rebuild, no_build)?;
+    ensure_graph(&paths, rebuild, no_build, embed, embedding_model)?;
 
     if let Ok(registry) = read_registry(&paths.registry_path) {
-        if health_ok(&registry).await {
+        if health_ok(&registry, embed).await {
             return Ok(registry);
         }
     }
 
     start_sidecar(&paths)?;
-    wait_for_registry(&paths.registry_path).await
+    wait_for_registry(&paths.registry_path, embed).await
 }
 
-fn ensure_graph(paths: &Paths, rebuild: bool, no_build: bool) -> Result<()> {
-    if paths.graph_path.exists() && !rebuild {
+fn ensure_graph(
+    paths: &Paths,
+    rebuild: bool,
+    no_build: bool,
+    embed: bool,
+    embedding_model: &str,
+) -> Result<()> {
+    let semantic_path = paths.out_dir.join(graphify_embed::DEFAULT_INDEX_FILE);
+    let needs_semantic = embed && !semantic_path.exists();
+    if paths.graph_path.exists() && !rebuild && !needs_semantic {
         return Ok(());
     }
     if no_build {
-        bail!(
-            "graph not found at {}. Run `graphify-rs build --path . --no-llm` first",
-            paths.graph_path.display()
-        );
+        if !paths.graph_path.exists() {
+            bail!(
+                "graph not found at {}. Run `graphify-rs build --path . --no-llm` first",
+                paths.graph_path.display()
+            );
+        }
+        if needs_semantic {
+            bail!(
+                "semantic index not found at {}. Run `graphify-rs build --path . --no-llm --embed` first",
+                semantic_path.display()
+            );
+        }
     }
 
     fs::create_dir_all(paths.graph_path.parent().unwrap_or(&paths.root))?;
@@ -181,18 +258,22 @@ fn ensure_graph(paths: &Paths, rebuild: bool, no_build: bool) -> Result<()> {
         .open(&build_log_path)
         .with_context(|| format!("open {}", build_log_path.display()))?;
     let build_log_err = build_log.try_clone()?;
+    let mut args = vec![
+        "build",
+        "--path",
+        ".",
+        "--output",
+        ".graphify",
+        "--no-llm",
+        "--format",
+        "json,report",
+    ];
+    if embed {
+        args.extend(["--embed", "--embedding-model", embedding_model]);
+    }
     let status = Command::new(graphify_rs_exe())
         .current_dir(&paths.root)
-        .args([
-            "build",
-            "--path",
-            ".",
-            "--output",
-            ".graphify",
-            "--no-llm",
-            "--format",
-            "json,report",
-        ])
+        .args(args)
         .stdout(Stdio::from(build_log))
         .stderr(Stdio::from(build_log_err))
         .status()
@@ -244,12 +325,12 @@ fn start_sidecar(paths: &Paths) -> Result<()> {
     Ok(())
 }
 
-async fn wait_for_registry(path: &Path) -> Result<Registry> {
+async fn wait_for_registry(path: &Path, require_semantic: bool) -> Result<Registry> {
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut last_err: Option<anyhow::Error> = None;
     while Instant::now() < deadline {
         match read_registry(path) {
-            Ok(registry) if health_ok(&registry).await => return Ok(registry),
+            Ok(registry) if health_ok(&registry, require_semantic).await => return Ok(registry),
             Ok(_) => {
                 last_err = Some(anyhow::anyhow!("sidecar registry exists but health failed"));
             }
@@ -260,12 +341,14 @@ async fn wait_for_registry(path: &Path) -> Result<Registry> {
     Err(last_err.unwrap_or_else(|| anyhow::anyhow!("sidecar did not start")))
 }
 
-async fn health_ok(registry: &Registry) -> bool {
-    get_json(&format!("{}/health", registry.http_url))
-        .await
-        .ok()
-        .and_then(|v| v["ok"].as_bool())
-        .unwrap_or(false)
+async fn health_ok(registry: &Registry, require_semantic: bool) -> bool {
+    let Ok(value) = get_json(&format!("{}/health", registry.http_url)).await else {
+        return false;
+    };
+    if !value["ok"].as_bool().unwrap_or(false) {
+        return false;
+    }
+    !require_semantic || !value["semantic"].is_null()
 }
 
 async fn call_tool(registry: &Registry, name: &str, arguments: Value) -> Result<Value> {
@@ -365,6 +448,13 @@ mod tests {
         assert_eq!(SummaryLevelArg::Detailed.as_str(), "detailed");
         assert_eq!(SummaryLevelArg::Community.as_str(), "community");
         assert_eq!(SummaryLevelArg::Architecture.as_str(), "architecture");
+    }
+
+    #[test]
+    fn semantic_mode_defaults_on_and_allows_opt_out() {
+        assert!(semantic_enabled(false, false));
+        assert!(semantic_enabled(true, false));
+        assert!(!semantic_enabled(false, true));
     }
 
     #[test]

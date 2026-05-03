@@ -8,10 +8,13 @@ pub mod mcp;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
+use std::sync::Mutex;
 
 use graphify_core::graph::KnowledgeGraph;
+use graphify_embed::{SemanticEngine, SemanticMatch, default_index_path_for_graph};
 use serde_json::Value;
 use thiserror::Error;
+use tracing::warn;
 
 /// Errors from the server.
 #[derive(Debug, Error)]
@@ -24,6 +27,64 @@ pub enum ServeError {
 
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
+}
+
+/// Optional semantic query state loaded next to `graph.json`.
+///
+/// Model2Vec tokenizers are CPU-bound and internally immutable for encode, but
+/// the concrete upstream type is wrapped in a mutex here so HTTP handlers can
+/// share one loaded model safely without making public Sync assumptions.
+pub struct SemanticState {
+    engine: Mutex<SemanticEngine>,
+}
+
+impl SemanticState {
+    pub fn load_for_graph_path(
+        graph_path: &Path,
+        graph: &KnowledgeGraph,
+    ) -> std::result::Result<Option<Self>, ServeError> {
+        let index_path = default_index_path_for_graph(graph_path);
+        if !index_path.exists() {
+            return Ok(None);
+        }
+        let engine = SemanticEngine::load_for_graph(&index_path, graph)
+            .map_err(|err| ServeError::GraphLoad(format!("load semantic index: {err:#}")))?;
+        Ok(Some(Self {
+            engine: Mutex::new(engine),
+        }))
+    }
+
+    pub fn query(
+        &self,
+        graph: &KnowledgeGraph,
+        question: &str,
+        top_n: usize,
+    ) -> std::result::Result<Vec<SemanticMatch>, ServeError> {
+        let engine = self
+            .engine
+            .lock()
+            .map_err(|_| ServeError::GraphLoad("semantic engine lock poisoned".into()))?;
+        engine
+            .query(graph, question, top_n)
+            .map_err(|err| ServeError::GraphLoad(format!("semantic query: {err:#}")))
+    }
+
+    pub fn description(&self) -> String {
+        match self.engine.lock() {
+            Ok(engine) => format!("{} nodes via {}", engine.node_count(), engine.model()),
+            Err(_) => "semantic engine unavailable".to_string(),
+        }
+    }
+}
+
+pub fn load_semantic_state(graph_path: &Path, graph: &KnowledgeGraph) -> Option<SemanticState> {
+    match SemanticState::load_for_graph_path(graph_path, graph) {
+        Ok(state) => state,
+        Err(err) => {
+            warn!("{err}");
+            None
+        }
+    }
 }
 
 /// Score nodes by relevance to search terms.

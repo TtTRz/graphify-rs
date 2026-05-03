@@ -10,6 +10,7 @@ members = [
     "crates/graphify-export",
     "crates/graphify-cache",
     "crates/graphify-security",
+    "crates/graphify-embed",
     "crates/graphify-ingest",
     "crates/graphify-serve",
     "crates/graphify-watch",
@@ -67,6 +68,7 @@ graphify-analyze = { path = "crates/graphify-analyze", version = "0.4.4" }
 graphify-export = { path = "crates/graphify-export", version = "0.4.4" }
 graphify-cache = { path = "crates/graphify-cache", version = "0.4.4" }
 graphify-security = { path = "crates/graphify-security", version = "0.4.4" }
+graphify-embed = { path = "crates/graphify-embed", version = "0.4.4" }
 graphify-ingest = { path = "crates/graphify-ingest", version = "0.4.4" }
 graphify-serve = { path = "crates/graphify-serve", version = "0.4.4" }
 graphify-watch = { path = "crates/graphify-watch", version = "0.4.4" }
@@ -111,6 +113,7 @@ graphify-analyze.workspace = true
 graphify-export.workspace = true
 graphify-cache.workspace = true
 graphify-security.workspace = true
+graphify-embed.workspace = true
 graphify-ingest.workspace = true
 graphify-serve.workspace = true
 graphify-watch.workspace = true

@@ -14,6 +14,8 @@ pub struct Config {
     pub no_llm: Option<bool>,
     pub code_only: Option<bool>,
     pub formats: Option<Vec<String>>,
+    pub embed: Option<bool>,
+    pub embedding_model: Option<String>,
 }
 
 /// Load configuration from `graphify.toml` in the given directory.
@@ -40,6 +42,8 @@ mod tests {
         assert!(cfg.no_llm.is_none());
         assert!(cfg.code_only.is_none());
         assert!(cfg.formats.is_none());
+        assert!(cfg.embed.is_none());
+        assert!(cfg.embedding_model.is_none());
     }
 
     #[test]
@@ -54,6 +58,8 @@ mod tests {
 output = "my-output"
 no_llm = true
 formats = ["json", "html"]
+embed = true
+embedding_model = "minishlab/potion-code-16M"
 "#;
         let cfg: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.output.as_deref(), Some("my-output"));
@@ -61,6 +67,11 @@ formats = ["json", "html"]
         assert_eq!(
             cfg.formats.as_deref(),
             Some(&["json".to_string(), "html".to_string()][..])
+        );
+        assert_eq!(cfg.embed, Some(true));
+        assert_eq!(
+            cfg.embedding_model.as_deref(),
+            Some("minishlab/potion-code-16M")
         );
     }
 }

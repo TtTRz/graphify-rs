@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Model2Vec semantic search** — new `graphify-embed` crate builds `.graphify/semantic-index.json`; MCP exposes `semantic_query`, and `query_graph` can seed graph traversal from semantic matches.
+
+### Changed
+- **`graphifyq` defaults to semantic search** — `graphifyq ensure` and `graphifyq query` now build/use the local Model2Vec index by default; pass `--no-embed` for strict AST-only/offline startup.
+- **Agent install guidance** — generated `CLAUDE.md`/`AGENTS.md`, README, CLI docs, and the packaged skill now keep `semantic-index.json` current with `--embed`.
+
 ## [0.4.5] - 2026-04-25
 
 ### Fixed

@@ -11,7 +11,7 @@
   - [diff](#graphify-rs-diff) — Compare two graph snapshots
   - [stats](#graphify-rs-stats) — Show graph statistics
   - [watch](#graphify-rs-watch) — Auto-rebuild on file changes
-  - [serve](#graphify-rs-serve) — Start MCP server (15 tools)
+  - [serve](#graphify-rs-serve) — Start MCP server (16 tools)
   - [ingest](#graphify-rs-ingest) — Fetch URL content
   - [hook](#graphify-rs-hook) — Git hook management
   - [install](#graphify-rs-install) — Install skill for AI agents
@@ -57,6 +57,8 @@ Build the knowledge graph from files in a directory. This is the main pipeline: 
 | `--update` | | `bool` | `false` | Incremental rebuild: only re-extract new/modified files since last build. |
 | `--format <FMT,...>` | | `String` (comma-separated) | all formats | Export formats to generate. Available: `json`, `html`, `graphml`, `cypher`, `svg`, `wiki`, `obsidian`, `report`. |
 | `--max-viz-nodes <N>` | | `usize` | `2000` | Maximum nodes in HTML visualization. Larger values show more detail but may slow the browser. |
+| `--embed` | | `bool` | `false` | Build `.graphify/semantic-index.json` with Model2Vec for local semantic graph search. `graphifyq ensure/query` enables this by default. |
+| `--embedding-model <MODEL>` | | `String` | `minishlab/potion-code-16M` | Hugging Face model ID or local Model2Vec model directory for `--embed`. |
 
 #### Examples
 
@@ -69,6 +71,9 @@ graphify-rs build --path /path/to/project --output my-graph
 
 # Fast AST-only build (no Claude API calls)
 graphify-rs build --no-llm
+
+# Fast AST-only build plus local semantic query index
+graphify-rs build --no-llm --embed
 
 # Only code files, skip docs/papers
 graphify-rs build --code-only
@@ -213,7 +218,7 @@ Start the MCP (Model Context Protocol) server over JSON-RPC 2.0. Stdio remains t
 
 | Tool | Description |
 |------|-------------|
-| `query_graph` | Search nodes by keywords, return subgraph context |
+| `query_graph` | Search nodes by keywords or the optional semantic index, return subgraph context |
 | `get_node` | Get detailed info about a specific node |
 | `get_neighbors` | Get a node's neighbors and connecting edges |
 | `get_community` | List all nodes in a community |
@@ -227,6 +232,7 @@ Start the MCP (Model Context Protocol) server over JSON-RPC 2.0. Stdio remains t
 | `pagerank` | Compute PageRank importance scores (identifies structurally critical nodes) |
 | `detect_cycles` | Detect dependency cycles using Tarjan's SCC algorithm |
 | `smart_summary` | Multi-level graph summary (detailed / community / architecture) |
+| `semantic_query` | Return ranked Model2Vec semantic node matches when `.graphify/semantic-index.json` exists |
 | `find_similar` | Find structurally similar node pairs via graph embeddings |
 
 #### Examples
@@ -249,8 +255,10 @@ graphify-rs serve --transport http --http-bind 127.0.0.1:0 --registry-path .grap
 Short-lived query helper that manages a per-project local HTTP MCP sidecar, similar to `fffq`.
 
 ```bash
-graphifyq ensure
-graphifyq query "how does auth work?"
+graphifyq ensure                         # semantic index is built by default
+graphifyq ensure --no-embed              # opt out for strict AST-only/offline startup
+graphifyq query "how does auth work?"     # semantic query context by default
+graphifyq query --no-embed "where is queue backpressure handled?"
 graphifyq stats
 graphifyq summary architecture --budget 3000
 graphifyq tool pagerank '{"top_n": 20}'
@@ -432,7 +440,7 @@ Install the graphify skill globally for an AI coding assistant platform. Writes 
 | Platform | Skill Path |
 |----------|-----------|
 | `claude` | `~/.claude/skills/graphify/SKILL.md` |
-| `codex` | `~/.agents/skills/graphify/SKILL.md` |
+| `codex` | `~/.codex/skills/graphify/SKILL.md` |
 | `opencode` | `~/.config/opencode/skills/graphify/SKILL.md` |
 | `claw` | `~/.claw/skills/graphify/SKILL.md` |
 | `droid` | `~/.factory/skills/graphify/SKILL.md` |
@@ -583,6 +591,8 @@ Create a `graphify.toml` file in your project root (or run `graphify-rs init`) t
 | `no_llm` | `bool` | `false` | `--no-llm` | Disable LLM-based semantic extraction. |
 | `code_only` | `bool` | `false` | `--code-only` | Only process code files (skip docs/papers). |
 | `formats` | `String[]` | `[]` (all formats) | `--format` | Export formats to generate. |
+| `embed` | `bool` | `false` | `--embed` | Build the local Model2Vec semantic index. |
+| `embedding_model` | `String` | `minishlab/potion-code-16M` | `--embedding-model` | Model2Vec model ID or local model directory. |
 
 ### Precedence Rules
 
@@ -595,6 +605,8 @@ Specific merging rules:
 - `no_llm`: `true` if **either** CLI flag or config is `true` (OR logic).
 - `code_only`: `true` if **either** CLI flag or config is `true` (OR logic).
 - `formats`: CLI value is used if non-empty; otherwise falls back to config. Empty means all formats.
+- `embed`: `true` if **either** CLI flag or config is `true` (OR logic).
+- `embedding_model`: CLI value wins when explicitly set; otherwise config or the built-in default is used.
 
 ### Example
 
@@ -607,6 +619,10 @@ no_llm = true
 
 # Only generate JSON and HTML
 formats = ["json", "html"]
+
+# Keep local semantic search vectors enabled for agent installs
+embed = true
+embedding_model = "minishlab/potion-code-16M"
 ```
 
 ### Environment Variables
@@ -630,8 +646,8 @@ Complete guide for setting up `graphify-rs` as an AI coding agent skill.
 # 1. Install project-level integration
 graphify-rs claude install
 
-# 2. Build the graph
-graphify-rs build
+# 2. Build the graph with local semantic search
+graphify-rs build --no-llm --embed
 
 # 3. (Optional) Install global skill for /graphify slash command
 graphify-rs install --platform claude
@@ -647,8 +663,8 @@ What `claude install` creates:
 # 1. Install project-level integration
 graphify-rs codex install
 
-# 2. Build the graph
-graphify-rs build
+# 2. Build the graph with local semantic search
+graphify-rs build --no-llm --embed
 
 # 3. (Optional) Install global skill
 graphify-rs install --platform codex
@@ -664,8 +680,8 @@ What `codex install` creates:
 # 1. Install project-level integration
 graphify-rs opencode install
 
-# 2. Build the graph
-graphify-rs build
+# 2. Build the graph with local semantic search
+graphify-rs build --no-llm --embed
 
 # 3. (Optional) Install global skill
 graphify-rs install --platform opencode
@@ -682,8 +698,8 @@ What `opencode install` creates:
 # 1. Install project-level integration
 graphify-rs codebuddy install
 
-# 2. Build the graph
-graphify-rs build
+# 2. Build the graph with local semantic search
+graphify-rs build --no-llm --embed
 
 # 3. (Optional) Install global skill
 graphify-rs install --platform codebuddy
@@ -697,7 +713,7 @@ What `codebuddy install` creates:
 
 ```bash
 graphify-rs claw install       # or droid, trae, trae-cn
-graphify-rs build
+graphify-rs build --no-llm --embed
 ```
 
 These platforms use a generic integration that only writes the `## graphify` section to `./AGENTS.md`.
@@ -706,10 +722,11 @@ These platforms use a generic integration that only writes the `## graphify` sec
 
 Once installed, the agent follows these rules (injected into `CLAUDE.md` or `AGENTS.md`):
 
-1. **Before answering architecture or codebase questions** — read `.graphify/GRAPH_REPORT.md` for god nodes and community structure.
-2. **If `.graphify/wiki/index.md` exists** — navigate the wiki instead of reading raw files.
-3. **For specific questions** — run `graphify-rs query "<question>"` to get relevant subgraph context.
-4. **After modifying code files** — run `graphify-rs build --path . --output .graphify --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s).
+1. **Before answering architecture or codebase questions** — prefer `graphifyq query "<question>"`; it uses the local Model2Vec semantic index by default.
+2. **For broad orientation** — read `.graphify/GRAPH_REPORT.md` for god nodes and community structure.
+3. **If `.graphify/wiki/index.md` exists** — navigate the wiki instead of reading raw files.
+4. **For strict AST-only/offline startup** — pass `--no-embed` to `graphifyq ensure/query`.
+5. **After modifying code files** — run `graphify-rs build --path . --output .graphify --no-llm --update --embed` to keep graph.json and semantic-index.json current.
 
 The `PreToolUse` hook automatically fires when the agent uses `Glob` or `Grep` tools (Claude/CodeBuddy) or `Bash` (Codex), injecting a reminder to check the graph first.
 
@@ -753,7 +770,7 @@ The agent can then call tools like `query_graph`, `get_node`, `get_neighbors`, `
 
 ```bash
 # Fast incremental rebuild (AST-only, ~2-5 seconds)
-graphify-rs build --no-llm --update
+graphify-rs build --no-llm --update --embed
 
 # Or use watch mode for automatic rebuilds
 graphify-rs watch

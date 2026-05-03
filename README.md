@@ -34,22 +34,23 @@ Three things it does that an **LLM alone cannot**:
 ## Quick Start
 
 ```bash
-# Install
-cargo install graphify-rs
+# Install (macOS/Linux; this fork ships pure-Rust Model2Vec support)
+cargo install --git https://github.com/xenking/graphify-rs --locked
 
-# Build a knowledge graph (free, fast, no API key needed)
-graphify-rs build --no-llm
+# Build a knowledge graph with local semantic search (free, no API key needed)
+graphify-rs build --no-llm --embed
 
 # Explore interactively
 open .graphify/graph.html         # macOS
 # xdg-open .graphify/graph.html   # Linux
 
 # Query the graph
-    graphify-rs query "how does auth work?"
+graphify-rs query "how does auth work?"
 
-    # Short-lived Codex-friendly query helper
-    graphifyq ensure
-    graphifyq query "how does auth work?"
+# Short-lived Codex-friendly query helper.
+# Model2Vec semantic search is on by default; use --no-embed for fast/offline AST-only mode.
+graphifyq ensure
+graphifyq query "how does auth work?"
 
 # (Optional) Add semantic extraction via Claude API
 export ANTHROPIC_API_KEY=sk-...
@@ -66,7 +67,8 @@ Rust rewrite of [graphify](https://github.com/safishamsi/graphify) (Python) — 
 | **Memory** | ~48MB | **~1MB** (48x less) |
 | **AST parsing** | Regex only | 11 native tree-sitter + regex fallback |
 | **Community detection** | Louvain | **Leiden** (with refinement) |
-| **MCP server** | - | **15 tools** over JSON-RPC 2.0 |
+| **MCP server** | - | **16 tools** over JSON-RPC 2.0 |
+| **Semantic query** | - | **Local Model2Vec index** (`--embed`; default for `graphifyq`) |
 | **Export formats** | 7 | **9** (+ Obsidian, split HTML) |
 | **Extraction** | Sequential | **Parallel** (`rayon`, configurable `-j`) |
 
@@ -82,6 +84,7 @@ Rust rewrite of [graphify](https://github.com/safishamsi/graphify) (Python) — 
                             v
                   .graphify/
                   ├── graph.json          queryable graph data
+                  ├── semantic-index.json local Model2Vec search index (default for graphifyq)
                   ├── graph.html          interactive visualization
                   ├── GRAPH_REPORT.md     analysis report
                   ├── wiki/               per-community wiki pages
@@ -91,6 +94,12 @@ Rust rewrite of [graphify](https://github.com/safishamsi/graphify) (Python) — 
 **Pass 1 — AST extraction** (free, always runs): tree-sitter parses 21 languages into functions, classes, imports, calls. All edges tagged `EXTRACTED` (confidence 1.0).
 
 **Pass 2 — Semantic extraction** (optional, `--no-llm` to skip): Claude API discovers conceptual links, shared assumptions, design rationale. Edges tagged `INFERRED` (confidence 0.4–0.9).
+
+**Local semantic query index** (`--embed`, default for `graphifyq ensure/query`): Model2Vec
+embeddings are stored in `.graphify/semantic-index.json` so `query_graph` / `semantic_query`
+can rank graph nodes by natural-language meaning before returning relationship-aware graph
+context. It runs locally and does not require an API key; use `graphifyq ensure --no-embed` or `graphifyq query --no-embed ...` when
+you explicitly need AST-only/offline startup.
 
 ## Graph Algorithms
 
@@ -118,16 +127,16 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#graph-algorithms) for complexity
 
 ```bash
 graphify-rs install              # install skill for AI coding agents
-graphify-rs serve                # start MCP server (15 tools)
+graphify-rs serve                # start MCP server (16 tools)
 ```
 
 Agents auto-check the graph before architecture questions and rebuild after code changes. Works with Claude Code, CodeBuddy, Codex, OpenCode, and more.
 
-15 MCP tools: `query_graph`, `pagerank`, `detect_cycles`, `smart_summary`, `find_similar`, `shortest_path`, and [9 more](docs/ARCHITECTURE.md#mcp-server-tools-15).
+16 MCP tools: `query_graph`, `semantic_query`, `pagerank`, `detect_cycles`, `smart_summary`, `find_similar`, `shortest_path`, and [9 more](docs/ARCHITECTURE.md#mcp-server-tools-16).
 
 ## Architecture
 
-14-crate Cargo workspace — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
+15-crate Cargo workspace — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 
 | Crate | Role |
 |-------|------|
@@ -135,7 +144,8 @@ Agents auto-check the graph before architecture questions and rebuild after code
 | `graphify-extract` | AST extraction (21 languages), Claude API semantic extraction |
 | `graphify-cluster` | Leiden community detection, incremental re-clustering |
 | `graphify-analyze` | PageRank, cycles, embeddings, god nodes, temporal risk |
-| `graphify-serve` | MCP server (15 tools), smart summarization |
+| `graphify-embed` | Model2Vec semantic index build/query |
+| `graphify-serve` | MCP server (16 tools), smart summarization |
 | `graphify-export` | 9 formats: JSON, HTML, SVG, GraphML, Cypher, Wiki, Obsidian, Report |
 | + 8 more | Cache, security, ingestion, watch, hooks, benchmark, detect, build |
 
@@ -154,12 +164,12 @@ Agents auto-check the graph before architecture questions and rebuild after code
 ## CLI at a Glance
 
 ```bash
-graphify-rs build [--path .] [--no-llm] [--format json,html]   # build graph
+graphify-rs build [--path .] [--no-llm] [--embed] [--format json,html] # build graph; --embed adds local semantic search
 graphify-rs query "question" [--dfs] [--budget 2000]            # query
 graphify-rs watch --path .                                       # auto-rebuild
     graphify-rs serve                                                 # MCP stdio server
     graphify-rs serve --transport http --registry-path .graphify/.graphifyq-server.json
-    graphifyq query "where is auth wired?"                            # reuse local HTTP sidecar
+    graphifyq query "where is auth wired?"                            # semantic by default; reuse local HTTP sidecar
 graphify-rs diff old.json new.json                               # compare
 graphify-rs stats graph.json                                     # statistics
 ```

@@ -27,7 +27,7 @@ graphify-rs codex install
 ```
 
 This writes `AGENTS.md` guidance and a `.codex/hooks.json` hook-check entry.
-Use `graphifyq` from Codex for short-lived graph access.
+Use `graphifyq` from Codex for short-lived graph access. `graphifyq ensure/query` builds and uses the local Model2Vec semantic index by default; pass `--no-embed` for strict AST-only/offline startup.
 
 ## Claude Code
 

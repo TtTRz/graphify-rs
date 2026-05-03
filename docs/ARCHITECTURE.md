@@ -1,6 +1,6 @@
 # Architecture
 
-graphify-rs is organized as a 14-crate Cargo workspace. Each crate has a single responsibility and communicates through shared types defined in `graphify-core`.
+graphify-rs is organized as a 15-crate Cargo workspace. Each crate has a single responsibility and communicates through shared types defined in `graphify-core`.
 
 ## Pipeline
 
@@ -11,6 +11,7 @@ Source Files → detect → extract → build → cluster → analyze → export
              .graphify  tree-sitter        Leiden    PageRank   JSON, HTML,
               ignore    + regex AST       + merge   + Tarjan    SVG, Report,
                         + Claude API                + embed    Obsidian, ...
+                                                     + Model2Vec query index
 ```
 
 ## Crate Map
@@ -23,11 +24,12 @@ Source Files → detect → extract → build → cluster → analyze → export
 | `graphify-build` | Graph assembly from extraction results, node/edge deduplication | `build_from_extraction()` |
 | `graphify-cluster` | Leiden community detection, cohesion scoring, incremental re-clustering | `cluster()`, `cluster_incremental()`, `cohesion_score()` |
 | `graphify-analyze` | PageRank, dependency cycles, god nodes, surprising connections, graph embeddings, temporal risk | `pagerank()`, `detect_cycles()`, `god_nodes()` |
+| `graphify-embed` | Optional Model2Vec semantic index for natural-language graph search | `build_model2vec_index()`, `score_hybrid()` |
 | `graphify-export` | 9 formats: JSON, HTML, split HTML, SVG, GraphML, Cypher, Wiki, Report, Obsidian | `export_json()`, `export_html()` |
 | `graphify-cache` | SHA256 content-hash caching for incremental rebuilds | `load_cached_from()`, `save_cached_to()` |
 | `graphify-security` | URL validation (SSRF), path traversal protection, label injection defense | `validate_url()`, `sanitize_path()` |
 | `graphify-ingest` | URL fetching: arXiv, tweets (oEmbed), PDFs, webpages | `ingest_url()` |
-| `graphify-serve` | MCP server with 15 query tools over JSON-RPC 2.0 stdio | `dispatch()`, `smart_summary()` |
+| `graphify-serve` | MCP server with 16 query tools over JSON-RPC 2.0 stdio | `dispatch()`, `smart_summary()` |
 | `graphify-watch` | File monitoring with debounce, incremental rebuild | `watch()` |
 | `graphify-hooks` | Git hook install/uninstall (post-commit, post-checkout) | `install()`, `uninstall()` |
 | `graphify-benchmark` | Token efficiency measurement | `benchmark()` |
@@ -41,15 +43,17 @@ Source Files → detect → extract → build → cluster → analyze → export
 | **PageRank** | `graphify-analyze` | Identify structurally critical nodes (not just high-degree) | O(20·(n+m)) |
 | **Tarjan's SCC** | `graphify-analyze` | Detect circular dependency chains | O(n+m) |
 | **Node2Vec embedding** | `graphify-analyze` | Learn node representations for similarity search | O(walks·n·dim) |
+| **Model2Vec semantic index** | `graphify-embed` | Rank graph nodes by natural-language meaning plus lexical/degree boosts | O(n·dim) per query |
 | **Temporal risk** | `graphify-analyze` | Correlate git churn with graph connectivity | O(n·git_log) |
 | **Dijkstra weighted path** | `graphify-serve` | Shortest path weighted by edge confidence | O((n+m) log n) |
 | **Smart summarization** | `graphify-serve` | Three-level abstraction for LLM token budgets | O(n+m) |
 
-## MCP Server Tools (15)
+## MCP Server Tools (16)
 
 | Tool | Category | Description |
 |------|----------|-------------|
-| `query_graph` | Search | Search nodes by keywords, return subgraph context |
+| `query_graph` | Search | Search nodes by keywords or semantic index, return subgraph context |
+| `semantic_query` | Search | Return ranked Model2Vec semantic node matches |
 | `get_node` | Explore | Get detailed info about a specific node |
 | `get_neighbors` | Explore | Get a node's neighbors and connecting edges |
 | `get_community` | Explore | List all nodes in a community |

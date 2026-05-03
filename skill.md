@@ -28,8 +28,8 @@ Turn any folder of files into a navigable knowledge graph with community detecti
 /graphify add <url>                                   # fetch URL, save to ./raw, update graph
 /graphify watch <path>                                # watch folder, auto-rebuild on code changes
 /graphify serve                                       # start MCP stdio server for agent access
-graphifyq ensure                                      # build missing graph and start/reuse local HTTP MCP sidecar
-graphifyq query "how does auth work?"                 # short-lived HTTP query helper
+graphifyq ensure                                      # build graph + local Model2Vec semantic index; start/reuse HTTP MCP sidecar
+graphifyq query "how does auth work?"                 # short-lived semantic HTTP query helper
 graphifyq summary architecture                        # architecture summary via MCP smart_summary
 ```
 
@@ -71,18 +71,19 @@ If the binary is found, print nothing extra and move straight to Step 2.
 Run the full pipeline. graphify-rs handles detection, extraction, building, clustering, analysis, and export in a single command:
 
 ```bash
-graphify-rs build --path INPUT_PATH --output .graphify
+graphify-rs build --path INPUT_PATH --output .graphify --embed
 ```
 
 Replace INPUT_PATH with the actual path the user provided.
 
 Available flags:
-- `--no-llm`: skip Claude API semantic extraction (AST-only, free, fast)
+- `--no-llm`: skip Claude API semantic extraction (AST-only graph build; Model2Vec `--embed` still stays local)
 - `--code-only`: only process code files
 - `--update`: incremental rebuild, only re-extract changed files
 - `--format json,html,report,wiki,svg,graphml,cypher,obsidian`: select export formats (default: all)
 - `--jobs N`: control parallelism
 - `--max-viz-nodes N`: maximum nodes in HTML visualization (default: 2000, increase for larger projects)
+- `--no-embed`: for `graphifyq`, opt out of the default local Model2Vec semantic index when startup must be strictly AST-only/offline
 
 The command outputs progress with a progress bar and colored status messages.
 
@@ -128,11 +129,11 @@ Walk them through the answer using the graph structure. Each answer should end w
 After you finish a batch of code changes (new files, edited functions, refactored modules), run:
 
 ```bash
-graphify-rs build --path . --output .graphify --no-llm --update
+graphify-rs build --path . --output .graphify --no-llm --update --embed
 ```
 
 - `--update`: only re-extract changed files (fast, uses SHA256 cache)
-- `--no-llm`: skip Claude API (AST-only rebuild is free and fast, ~2-5s)
+- `--no-llm`: skip Claude API; `--embed` keeps local semantic search current without an API key
 - This updates `graph.json`, `GRAPH_REPORT.md`, and all exports
 
 ### When to rebuild
@@ -212,7 +213,7 @@ Code changes trigger AST re-extraction + rebuild automatically (no LLM needed). 
 
 ## For MCP server
 
-Start a stdio MCP server exposing 15 query tools:
+Start a stdio MCP server exposing 16 query tools:
 
 ```bash
 graphify-rs serve --graph .graphify/graph.json
@@ -228,14 +229,16 @@ For Codex-style short-lived calls, prefer `graphifyq`:
 
 ```bash
 graphifyq ensure
+graphifyq ensure --no-embed      # opt out only for strict AST-only/offline startup
 graphifyq query "where is authentication wired?"
+graphifyq query --no-embed "where is queue backpressure handled?"
 graphifyq stats
 graphifyq summary architecture --budget 3000
 ```
 
 `graphifyq` is intentionally like `fffq`: it starts/reuses a per-project local sidecar, stores the registry under `.graphify/.graphifyq-server.json`, and exits after printing the requested context.
 
-Tools: `query_graph`, `get_node`, `get_neighbors`, `get_community`, `god_nodes`, `graph_stats`, `shortest_path`, `find_all_paths`, `weighted_path`, `community_bridges`, `graph_diff`, `pagerank`, `detect_cycles`, `smart_summary`, `find_similar`.
+Tools: `query_graph`, `semantic_query`, `get_node`, `get_neighbors`, `get_community`, `god_nodes`, `graph_stats`, `shortest_path`, `find_all_paths`, `weighted_path`, `community_bridges`, `graph_diff`, `pagerank`, `detect_cycles`, `smart_summary`, `find_similar`.
 
 To configure in Claude Desktop, add to `claude_desktop_config.json`:
 ```json

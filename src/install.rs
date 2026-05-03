@@ -95,9 +95,10 @@ const CLAUDE_MD_SECTION: &str = r#"## graphify
 This project has a graphify-rs knowledge graph at .graphify/.
 
 Rules:
-- Before answering architecture or codebase questions, read .graphify/GRAPH_REPORT.md for god nodes and community structure
+- Before answering architecture or codebase questions, run `graphifyq query "<question>"` when available; it builds/uses the local Model2Vec semantic index by default
+- Read .graphify/GRAPH_REPORT.md for god nodes and community structure when you need broader orientation
 - If .graphify/wiki/index.md exists, navigate it instead of reading raw files
-- After modifying code files in this session, run `graphify-rs build --path . --output .graphify --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s)
+- After modifying code files in this session, run `graphify-rs build --path . --output .graphify --no-llm --update --embed` to keep graph.json and semantic-index.json current
 "#;
 
 const CLAUDE_MD_MARKER: &str = "## graphify";
@@ -109,10 +110,10 @@ const AGENTS_MD_SECTION: &str = r#"## graphify
 This project has a graphify-rs knowledge graph at .graphify/.
 
 Rules:
-- Before answering architecture or codebase questions, read .graphify/GRAPH_REPORT.md for god nodes and community structure
-- Prefer `graphifyq query "<question>"` or `graphifyq summary architecture` when available; it starts/reuses a local HTTP MCP sidecar for graph queries
+- Before answering architecture or codebase questions, prefer `graphifyq query "<question>"` or `graphifyq summary architecture` when available; `graphifyq query` builds/uses the local Model2Vec semantic index by default
+- Read .graphify/GRAPH_REPORT.md for god nodes and community structure when you need broader orientation
 - If .graphify/wiki/index.md exists, navigate it instead of reading raw files
-- After modifying code files in this session, run `graphify-rs build --path . --output .graphify --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s)
+- After modifying code files in this session, run `graphify-rs build --path . --output .graphify --no-llm --update --embed` to keep graph.json and semantic-index.json current
 "#;
 
 const AGENTS_MD_MARKER: &str = "## graphify";
@@ -793,7 +794,8 @@ mod tests {
         let hooks_json = fs::read_to_string(dir.path().join(".codex/hooks.json")).unwrap();
 
         assert!(agents_md.contains("graphifyq query"));
-        assert!(agents_md.contains("HTTP MCP sidecar"));
+        assert!(agents_md.contains("Model2Vec semantic index"));
+        assert!(agents_md.contains("--embed"));
         assert!(hooks_json.contains("hook-check"));
     }
 }

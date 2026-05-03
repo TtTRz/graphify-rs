@@ -15,14 +15,18 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{debug, info};
 
-use crate::mcp::handle_jsonrpc;
-use crate::{ServeError, graph_stats, load_graph};
+use crate::{SemanticState, ServeError, graph_stats, load_graph, load_semantic_state};
 
 #[derive(Debug, Clone)]
 pub struct HttpServerConfig {
     pub bind: String,
     pub mcp_path: String,
     pub registry_path: Option<PathBuf>,
+}
+
+struct ServeState {
+    graph: KnowledgeGraph,
+    semantic: Option<SemanticState>,
 }
 
 impl Default for HttpServerConfig {
@@ -39,7 +43,9 @@ pub async fn start_http_server(
     graph_path: &Path,
     config: HttpServerConfig,
 ) -> Result<(), ServeError> {
-    let graph = Arc::new(load_graph(graph_path)?);
+    let graph = load_graph(graph_path)?;
+    let semantic = load_semantic_state(graph_path, &graph);
+    let state = Arc::new(ServeState { graph, semantic });
     let listener = TcpListener::bind(&config.bind).await?;
     let addr = listener.local_addr()?;
     let http_url = format!("http://{addr}");
@@ -49,7 +55,7 @@ pub async fn start_http_server(
         write_registry(registry_path, graph_path, &http_url, &mcp_path)?;
     }
 
-    let stats = graph_stats(&graph);
+    let stats = graph_stats(&state.graph);
     let node_count = stats
         .get("node_count")
         .map_or_else(|| "null".to_string(), ToString::to_string);
@@ -63,10 +69,10 @@ pub async fn start_http_server(
 
     loop {
         let (stream, _) = listener.accept().await?;
-        let graph = Arc::clone(&graph);
+        let state = Arc::clone(&state);
         let mcp_path = mcp_path.clone();
         tokio::spawn(async move {
-            if let Err(err) = handle_connection(stream, graph, &mcp_path).await {
+            if let Err(err) = handle_connection(stream, state, &mcp_path).await {
                 debug!("HTTP connection failed: {err}");
             }
         });
@@ -108,7 +114,7 @@ fn write_registry(
 
 async fn handle_connection(
     mut stream: TcpStream,
-    graph: Arc<KnowledgeGraph>,
+    state: Arc<ServeState>,
     mcp_path: &str,
 ) -> std::io::Result<()> {
     let mut buf = Vec::with_capacity(8192);
@@ -157,22 +163,28 @@ async fn handle_connection(
 
     match (method.as_str(), path.as_str()) {
         ("GET", "/health") => {
-            let stats = graph_stats(&graph);
+            let stats = graph_stats(&state.graph);
             let payload = json!({
                 "ok": true,
                 "server": "graphify-rs",
                 "version": env!("CARGO_PKG_VERSION"),
                 "stats": stats,
+                "semantic": state.semantic.as_ref().map(SemanticState::description),
             });
             write_json(&mut stream, 200, &payload).await
         }
         ("GET", "/graphifyq/stats") => {
-            let payload = json!(graph_stats(&graph));
+            let mut stats = graph_stats(&state.graph);
+            stats.insert(
+                "semantic".to_string(),
+                json!(state.semantic.as_ref().map(SemanticState::description)),
+            );
+            let payload = json!(stats);
             write_json(&mut stream, 200, &payload).await
         }
-        ("POST", p) if p == mcp_path => handle_mcp_post(&mut stream, &graph, body).await,
-        ("POST", "/graphifyq/query") => handle_query_post(&mut stream, &graph, body).await,
-        ("POST", "/graphifyq/tool") => handle_tool_post(&mut stream, &graph, body).await,
+        ("POST", p) if p == mcp_path => handle_mcp_post(&mut stream, &state, body).await,
+        ("POST", "/graphifyq/query") => handle_query_post(&mut stream, &state, body).await,
+        ("POST", "/graphifyq/tool") => handle_tool_post(&mut stream, &state, body).await,
         ("OPTIONS", _) => write_response(&mut stream, 204, "No Content", "text/plain", b"").await,
         _ => {
             let payload = json!({
@@ -186,7 +198,7 @@ async fn handle_connection(
 
 async fn handle_mcp_post(
     stream: &mut TcpStream,
-    graph: &KnowledgeGraph,
+    state: &ServeState,
     body: &[u8],
 ) -> std::io::Result<()> {
     let request: Value = match serde_json::from_slice(body) {
@@ -204,14 +216,22 @@ async fn handle_mcp_post(
     if let Some(items) = request.as_array() {
         let responses: Vec<Value> = items
             .iter()
-            .filter_map(|item| handle_jsonrpc(graph, item))
+            .filter_map(|item| {
+                crate::mcp::handle_jsonrpc_with_semantic(
+                    &state.graph,
+                    state.semantic.as_ref(),
+                    item,
+                )
+            })
             .collect();
         if responses.is_empty() {
             write_response(stream, 202, "Accepted", "text/plain", b"").await
         } else {
             write_json(stream, 200, &Value::Array(responses)).await
         }
-    } else if let Some(response) = handle_jsonrpc(graph, &request) {
+    } else if let Some(response) =
+        crate::mcp::handle_jsonrpc_with_semantic(&state.graph, state.semantic.as_ref(), &request)
+    {
         write_json(stream, 200, &response).await
     } else {
         write_response(stream, 202, "Accepted", "text/plain", b"").await
@@ -220,7 +240,7 @@ async fn handle_mcp_post(
 
 async fn handle_query_post(
     stream: &mut TcpStream,
-    graph: &KnowledgeGraph,
+    state: &ServeState,
     body: &[u8],
 ) -> std::io::Result<()> {
     let request: Value = serde_json::from_slice(body).unwrap_or_else(|_| json!({}));
@@ -237,12 +257,12 @@ async fn handle_query_post(
         "question": question,
         "budget": request["budget"].as_u64().unwrap_or(2000),
     });
-    call_tool(stream, graph, "query_graph", arguments).await
+    call_tool(stream, state, "query_graph", arguments).await
 }
 
 async fn handle_tool_post(
     stream: &mut TcpStream,
-    graph: &KnowledgeGraph,
+    state: &ServeState,
     body: &[u8],
 ) -> std::io::Result<()> {
     let request: Value = serde_json::from_slice(body).unwrap_or_else(|_| json!({}));
@@ -259,12 +279,12 @@ async fn handle_tool_post(
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
-    call_tool(stream, graph, name, arguments).await
+    call_tool(stream, state, name, arguments).await
 }
 
 async fn call_tool(
     stream: &mut TcpStream,
-    graph: &KnowledgeGraph,
+    state: &ServeState,
     name: &str,
     arguments: Value,
 ) -> std::io::Result<()> {
@@ -277,7 +297,9 @@ async fn call_tool(
             "arguments": arguments,
         }
     });
-    let response = handle_jsonrpc(graph, &request).unwrap_or_else(|| json!({}));
+    let response =
+        crate::mcp::handle_jsonrpc_with_semantic(&state.graph, state.semantic.as_ref(), &request)
+            .unwrap_or_else(|| json!({}));
     write_json(stream, 200, &response).await
 }
 
