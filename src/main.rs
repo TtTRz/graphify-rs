@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell, generate};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -140,7 +140,22 @@ enum Commands {
     Serve {
         #[arg(long, default_value = "graphify-out/graph.json")]
         graph: String,
+        /// Transport to use for the MCP server.
+        #[arg(long, value_enum, default_value_t = McpTransport::Stdio)]
+        transport: McpTransport,
+        /// HTTP bind address when --transport=http. Use port 0 for an ephemeral local port.
+        #[arg(long, default_value = "127.0.0.1:0")]
+        http_bind: String,
+        /// HTTP MCP endpoint path when --transport=http.
+        #[arg(long, default_value = "/mcp")]
+        http_path: String,
+        /// Optional JSON file written after the HTTP server binds. Used by graphifyq.
+        #[arg(long)]
+        registry_path: Option<String>,
     },
+    /// Codex hook compatibility check. Intentionally emits no output.
+    #[command(hide = true)]
+    HookCheck,
     /// Watch for file changes and rebuild
     Watch {
         #[arg(short, long, default_value = ".")]
@@ -195,6 +210,12 @@ enum PlatformAction {
     Install,
     /// Uninstall platform integration
     Uninstall,
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+enum McpTransport {
+    Stdio,
+    Http,
 }
 
 /// Verbosity level derived from --quiet / --verbose flags.
@@ -405,9 +426,24 @@ async fn main() -> Result<()> {
             )?;
             println!("Saved to {}", out.display());
         }
-        Commands::Serve { graph } => {
-            graphify_serve::start_server(Path::new(&graph)).await?;
-        }
+        Commands::Serve {
+            graph,
+            transport,
+            http_bind,
+            http_path,
+            registry_path,
+        } => match transport {
+            McpTransport::Stdio => graphify_serve::start_server(Path::new(&graph)).await?,
+            McpTransport::Http => {
+                let config = graphify_serve::HttpServerConfig {
+                    bind: http_bind,
+                    mcp_path: http_path,
+                    registry_path: registry_path.map(PathBuf::from),
+                };
+                graphify_serve::start_http_server(Path::new(&graph), config).await?;
+            }
+        },
+        Commands::HookCheck => {}
         Commands::Watch { path, output } => {
             graphify_watch::watch_directory(Path::new(&path), Path::new(&output)).await?;
         }

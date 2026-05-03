@@ -3,6 +3,7 @@
 //! Provides graph traversal and scoring functions used by the query
 //! engine and MCP protocol server. Port of Python query tools.
 
+pub mod http;
 pub mod mcp;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -408,10 +409,17 @@ pub fn graph_stats(graph: &KnowledgeGraph) -> HashMap<String, Value> {
     let mut stats = HashMap::new();
     stats.insert("node_count".to_string(), Value::from(graph.node_count()));
     stats.insert("edge_count".to_string(), Value::from(graph.edge_count()));
-    stats.insert(
-        "community_count".to_string(),
-        Value::from(graph.communities.len()),
-    );
+    let community_count = if graph.communities.is_empty() {
+        graph
+            .nodes()
+            .iter()
+            .filter_map(|node| node.community)
+            .collect::<HashSet<_>>()
+            .len()
+    } else {
+        graph.communities.len()
+    };
+    stats.insert("community_count".to_string(), Value::from(community_count));
 
     // Degree statistics
     let node_ids = graph.node_ids();
@@ -442,6 +450,8 @@ pub async fn start_server(graph_path: &Path) -> Result<(), ServeError> {
         .map_err(|e| ServeError::Io(std::io::Error::other(e)))??;
     Ok(())
 }
+
+pub use http::{HttpServerConfig, start_http_server};
 
 // ---------------------------------------------------------------------------
 // Advanced graph algorithms
@@ -758,6 +768,24 @@ mod tests {
         let stats = graph_stats(&g);
         assert_eq!(stats["node_count"], 4);
         assert_eq!(stats["edge_count"], 4);
+    }
+
+    #[test]
+    fn test_graph_stats_counts_node_communities_when_top_level_metadata_is_absent() {
+        let mut g = KnowledgeGraph::new();
+        let mut auth = make_node("auth", "AuthService");
+        auth.community = Some(10);
+        let mut db = make_node("db", "Database");
+        db.community = Some(20);
+        let mut cache = make_node("cache", "CacheLayer");
+        cache.community = Some(20);
+
+        g.add_node(auth).unwrap();
+        g.add_node(db).unwrap();
+        g.add_node(cache).unwrap();
+
+        let stats = graph_stats(&g);
+        assert_eq!(stats["community_count"], 2);
     }
 
     #[test]

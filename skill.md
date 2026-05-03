@@ -28,13 +28,16 @@ Turn any folder of files into a navigable knowledge graph with community detecti
 /graphify add <url>                                   # fetch URL, save to ./raw, update graph
 /graphify watch <path>                                # watch folder, auto-rebuild on code changes
 /graphify serve                                       # start MCP stdio server for agent access
+graphifyq ensure                                      # build missing graph and start/reuse local HTTP MCP sidecar
+graphifyq query "how does auth work?"                 # short-lived HTTP query helper
+graphifyq summary architecture                        # architecture summary via MCP smart_summary
 ```
 
 ## What graphify is for
 
 graphify is built around Andrej Karpathy's /raw folder workflow: drop anything into a folder - papers, tweets, screenshots, code, notes - and get a structured knowledge graph that shows you what you didn't know was connected.
 
-Three things it does that Claude alone cannot:
+Three things it does that an AI coding agent alone cannot:
 1. **Persistent graph** - relationships are stored in `graphify-out/graph.json` and survive across sessions. Ask questions weeks later without re-reading everything.
 2. **Honest audit trail** - every edge is tagged EXTRACTED, INFERRED, or AMBIGUOUS. You know what was found vs invented.
 3. **Cross-document surprise** - community detection finds connections between concepts in different files that you would never think to ask about directly.
@@ -214,6 +217,23 @@ Start a stdio MCP server exposing 15 query tools:
 ```bash
 graphify-rs serve --graph graphify-out/graph.json
 ```
+
+Start a local HTTP MCP server instead:
+
+```bash
+graphify-rs serve --transport http --http-bind 127.0.0.1:0 --registry-path graphify-out/.graphifyq-server.json --graph graphify-out/graph.json
+```
+
+For Codex-style short-lived calls, prefer `graphifyq`:
+
+```bash
+graphifyq ensure
+graphifyq query "where is authentication wired?"
+graphifyq stats
+graphifyq summary architecture --budget 3000
+```
+
+`graphifyq` is intentionally like `fffq`: it starts/reuses a per-project local sidecar, stores the registry under `graphify-out/.graphifyq-server.json`, and exits after printing the requested context.
 
 Tools: `query_graph`, `get_node`, `get_neighbors`, `get_community`, `god_nodes`, `graph_stats`, `shortest_path`, `find_all_paths`, `weighted_path`, `community_bridges`, `graph_diff`, `pagerank`, `detect_cycles`, `smart_summary`, `find_similar`.
 

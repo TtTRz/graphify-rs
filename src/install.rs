@@ -110,6 +110,7 @@ This project has a graphify-rs knowledge graph at graphify-out/.
 
 Rules:
 - Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
+- Prefer `graphifyq query "<question>"` or `graphifyq summary architecture` when available; it starts/reuses a local HTTP MCP sidecar for graph queries
 - If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
 - After modifying code files in this session, run `graphify-rs build --path . --output graphify-out --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s)
 "#;
@@ -600,21 +601,50 @@ fn write_codex_hooks(path: &Path) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
 
-    let hooks = serde_json::json!({
-        "hooks": {
-            "PreToolUse": [{
-                "matcher": "Bash",
-                "hooks": [{
-                    "type": "command",
-                    "command": "[ -f graphify-out/graph.json ] && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"systemMessage\":\"graphify-rs: Knowledge graph exists. Read graphify-out/GRAPH_REPORT.md for god nodes and community structure before searching raw files.\"}}' || true"
-                }]
-            }]
-        }
+    let mut hooks: serde_json::Value = if path.exists() {
+        let content = fs::read_to_string(path)?;
+        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    let command = format!("{} hook-check", resolve_graphify_rs_exe());
+    let hook_entry = serde_json::json!({
+        "matcher": "Bash",
+        "hooks": [{
+            "type": "command",
+            "command": command,
+        }]
     });
+
+    let hooks_obj = hooks
+        .as_object_mut()
+        .context("hooks root is not an object")?
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}));
+    let pre_tool_use = hooks_obj
+        .as_object_mut()
+        .context("hooks is not an object")?
+        .entry("PreToolUse")
+        .or_insert_with(|| serde_json::json!([]));
+    let arr = pre_tool_use
+        .as_array_mut()
+        .context("PreToolUse is not an array")?;
+
+    arr.retain(|entry| !entry.to_string().contains("graphify-rs"));
+    arr.push(hook_entry);
 
     let output = serde_json::to_string_pretty(&hooks)?;
     fs::write(path, output)?;
     Ok(())
+}
+
+fn resolve_graphify_rs_exe() -> String {
+    std::env::current_exe()
+        .ok()
+        .or_else(|| std::env::args_os().next().map(std::path::PathBuf::from))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "graphify-rs".to_string())
 }
 
 /// Write OpenCode plugin file.
@@ -692,4 +722,61 @@ fn unregister_opencode_config(path: &Path) -> Result<()> {
     let output = serde_json::to_string_pretty(&config)?;
     fs::write(path, output)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn codex_hook_preserves_existing_hooks_and_removes_unsupported_output() {
+        let dir = tempdir().unwrap();
+        let hooks_path = dir.path().join(".codex/hooks.json");
+        fs::create_dir_all(hooks_path.parent().unwrap()).unwrap();
+        fs::write(
+            &hooks_path,
+            r#"{
+              "hooks": {
+                "PreToolUse": [
+                  {
+                    "matcher": "Bash",
+                    "hooks": [{"type": "command", "command": "echo keep"}]
+                  },
+                  {
+                    "matcher": "Bash",
+                    "hooks": [{"type": "command", "command": "graphify-rs old permissionDecision additionalContext"}]
+                  }
+                ]
+              }
+            }"#,
+        )
+        .unwrap();
+
+        write_codex_hooks(&hooks_path).unwrap();
+        let output = fs::read_to_string(&hooks_path).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&output).unwrap();
+        let hooks = value["hooks"]["PreToolUse"].as_array().unwrap();
+
+        assert_eq!(hooks.len(), 2);
+        assert!(output.contains("echo keep"));
+        assert!(output.contains("hook-check"));
+        assert!(!output.contains("permissionDecision"));
+        assert!(!output.contains("additionalContext"));
+        assert!(!output.contains("graphify-rs old"));
+    }
+
+    #[test]
+    fn codex_install_writes_agents_guidance_for_graphifyq() {
+        let dir = tempdir().unwrap();
+
+        codex_install(dir.path()).unwrap();
+
+        let agents_md = fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+        let hooks_json = fs::read_to_string(dir.path().join(".codex/hooks.json")).unwrap();
+
+        assert!(agents_md.contains("graphifyq query"));
+        assert!(agents_md.contains("HTTP MCP sidecar"));
+        assert!(hooks_json.contains("hook-check"));
+    }
 }

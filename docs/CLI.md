@@ -197,13 +197,17 @@ graphify-rs watch --path src --output my-graph
 
 ### `graphify-rs serve`
 
-Start the MCP (Model Context Protocol) server over JSON-RPC 2.0 (stdio). Provides 15 tools that AI agents can call directly.
+Start the MCP (Model Context Protocol) server over JSON-RPC 2.0. Stdio remains the default; local HTTP is available for Codex and short-lived helper clients.
 
 #### Parameters
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--graph <PATH>` | `String` | `"graphify-out/graph.json"` | Path to the graph JSON file to serve. |
+| `--transport <stdio\|http>` | `String` | `"stdio"` | MCP transport. |
+| `--http-bind <ADDR>` | `String` | `"127.0.0.1:0"` | HTTP bind address when `--transport=http`. |
+| `--http-path <PATH>` | `String` | `"/mcp"` | HTTP MCP endpoint path. |
+| `--registry-path <PATH>` | `String` | unset | Optional JSON registry written after binding; used by `graphifyq`. |
 
 #### Available MCP Tools
 
@@ -233,6 +237,23 @@ graphify-rs serve
 
 # Serve a specific graph
 graphify-rs serve --graph /path/to/graph.json
+
+# Serve over local HTTP and write a graphifyq registry
+graphify-rs serve --transport http --http-bind 127.0.0.1:0 --registry-path graphify-out/.graphifyq-server.json --graph graphify-out/graph.json
+```
+
+---
+
+### `graphifyq`
+
+Short-lived query helper that manages a per-project local HTTP MCP sidecar, similar to `fffq`.
+
+```bash
+graphifyq ensure
+graphifyq query "how does auth work?"
+graphifyq stats
+graphifyq summary architecture --budget 3000
+graphifyq tool pagerank '{"top_n": 20}'
 ```
 
 ---

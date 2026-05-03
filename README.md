@@ -45,7 +45,11 @@ open graphify-out/graph.html         # macOS
 # xdg-open graphify-out/graph.html   # Linux
 
 # Query the graph
-graphify-rs query "how does auth work?"
+    graphify-rs query "how does auth work?"
+
+    # Short-lived Codex-friendly query helper
+    graphifyq ensure
+    graphifyq query "how does auth work?"
 
 # (Optional) Add semantic extraction via Claude API
 export ANTHROPIC_API_KEY=sk-...
@@ -153,7 +157,9 @@ Agents auto-check the graph before architecture questions and rebuild after code
 graphify-rs build [--path .] [--no-llm] [--format json,html]   # build graph
 graphify-rs query "question" [--dfs] [--budget 2000]            # query
 graphify-rs watch --path .                                       # auto-rebuild
-graphify-rs serve                                                 # MCP server
+    graphify-rs serve                                                 # MCP stdio server
+    graphify-rs serve --transport http --registry-path graphify-out/.graphifyq-server.json
+    graphifyq query "where is auth wired?"                            # reuse local HTTP sidecar
 graphify-rs diff old.json new.json                               # compare
 graphify-rs stats graph.json                                     # statistics
 ```
