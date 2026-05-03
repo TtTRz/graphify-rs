@@ -28,7 +28,7 @@ Turn any folder of files into a navigable knowledge graph with community detecti
 /graphify add <url>                                   # fetch URL, save to ./raw, update graph
 /graphify watch <path>                                # watch folder, auto-rebuild on code changes
 /graphify serve                                       # start MCP stdio server for agent access
-graphifyq ensure                                      # build graph + local Model2Vec semantic index; start/reuse HTTP MCP sidecar
+graphifyq ensure                                      # build graph + local Model2Vec semantic index; auto-refresh stale graph every 300s; start/reuse HTTP MCP sidecar
 graphifyq query "how does auth work?"                 # short-lived semantic HTTP query helper
 graphifyq summary architecture                        # architecture summary via MCP smart_summary
 ```
@@ -130,13 +130,20 @@ Walk them through the answer using the graph structure. Each answer should end w
 
 ### Rule: After modifying code, rebuild the graph
 
-After you finish a batch of code changes (new files, edited functions, refactored modules), run:
+After you finish a batch of code changes (new files, edited functions, refactored modules), prefer:
+
+```bash
+graphifyq ensure
+```
+
+`graphifyq` auto-refreshes stale per-repo graphs every 300s with a safe incremental build and restarts its local HTTP sidecar when needed.
+If you need to force the refresh immediately, run:
 
 ```bash
 graphify-rs build --path . --output .graphify --no-llm --update --embed
 ```
 
-- `--update`: only re-extract changed files (fast, uses SHA256 cache)
+- `--update`: scans the full current file set but only re-extracts changed file contents via SHA256 cache, keeping `graph.json` complete
 - `--no-llm`: skip Claude API; `--embed` keeps local semantic search current without an API key
 - This updates `graph.json`, `GRAPH_REPORT.md`, and all exports
 

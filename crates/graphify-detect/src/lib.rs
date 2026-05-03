@@ -191,8 +191,14 @@ pub fn detect(root: &Path) -> DetectResult {
     }
 }
 
-/// Incremental detection: compares against a stored manifest and returns only
-/// changed / new files.
+/// Incremental detection: refreshes the manifest while still returning the full
+/// current file set.
+///
+/// The build pipeline needs the full file set to produce a complete graph on
+/// every run. Incrementality is handled by the SHA256 extraction cache, which
+/// skips unchanged file contents. Older behavior returned only files missing
+/// from the manifest, which made `graphify-rs build --update` capable of
+/// overwriting `graph.json` with a partial graph.
 pub fn detect_incremental(root: &Path, manifest_path: Option<&str>) -> DetectResult {
     let manifest_file = root.join(manifest_path.unwrap_or(DEFAULT_MANIFEST_NAME));
     let old_manifest = load_manifest(&manifest_file).unwrap_or_default();
@@ -207,17 +213,12 @@ pub fn detect_incremental(root: &Path, manifest_path: Option<&str>) -> DetectRes
         }
     }
 
-    // Filter to only new or changed files
-    let mut filtered_files: HashMap<FileType, Vec<String>> = HashMap::new();
-    for (ft, paths) in &result.files {
-        for p in paths {
-            if !old_manifest.files.contains_key(p) {
-                filtered_files.entry(*ft).or_default().push(p.clone());
-            }
-        }
-    }
-
-    let filtered_total: usize = filtered_files.values().map(|v| v.len()).sum();
+    let new_total = result
+        .files
+        .values()
+        .flat_map(|paths| paths.iter())
+        .filter(|path| !old_manifest.files.contains_key(*path))
+        .count();
 
     // Save the new manifest
     if let Err(e) = save_manifest(&manifest_file, &new_manifest) {
@@ -225,19 +226,11 @@ pub fn detect_incremental(root: &Path, manifest_path: Option<&str>) -> DetectRes
     }
 
     info!(
-        "detect_incremental: {filtered_total} new files (total {total} on disk)",
+        "detect_incremental: {new_total} new files (total {total} on disk; unchanged extraction is skipped by SHA256 cache)",
         total = result.total_files,
     );
 
-    DetectResult {
-        files: filtered_files,
-        total_files: filtered_total,
-        total_words: result.total_words,
-        needs_graph: result.needs_graph,
-        warning: result.warning,
-        skipped_sensitive: result.skipped_sensitive,
-        graphifyignore_patterns: result.graphifyignore_patterns,
-    }
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -482,7 +475,7 @@ mod tests {
     }
 
     #[test]
-    fn detect_incremental_filters_known() {
+    fn detect_incremental_returns_full_file_set_for_complete_graphs() {
         let dir = make_test_tree();
         let root = dir.path();
 
@@ -490,14 +483,15 @@ mod tests {
         let r1 = detect_incremental(root, None);
         assert!(r1.total_files >= 3);
 
-        // Second run: nothing new
+        // Second run still returns all files: the extraction cache, not
+        // detection filtering, provides incrementality without partial graphs.
         let r2 = detect_incremental(root, None);
-        assert_eq!(r2.total_files, 0, "no new files expected on second run");
+        assert_eq!(r2.total_files, r1.total_files);
 
         // Add a new file
         fs::write(root.join("new_file.ts"), "const x = 1;").unwrap();
         let r3 = detect_incremental(root, None);
-        assert_eq!(r3.total_files, 1, "expected exactly 1 new file");
+        assert_eq!(r3.total_files, r1.total_files + 1);
         let code = r3.files.get(&FileType::Code).expect("expected code");
         assert!(code.iter().any(|p| p.contains("new_file.ts")));
     }

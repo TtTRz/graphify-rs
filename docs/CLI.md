@@ -54,7 +54,7 @@ Build the knowledge graph from files in a directory. This is the main pipeline: 
 | `--output <DIR>` | `-o` | `String` | `".graphify"` | Output directory for all generated files. |
 | `--no-llm` | | `bool` | `false` | Disable legacy LLM extraction. Local AST + document context extraction still runs. |
 | `--code-only` | | `bool` | `false` | Only process code files, skip docs and papers. |
-| `--update` | | `bool` | `false` | Incremental rebuild: only re-extract new/modified files since last build. |
+| `--update` | | `bool` | `false` | Safe incremental rebuild: scan the full current file set, but reuse SHA256 extraction cache for unchanged files so `graph.json` stays complete. |
 | `--format <FMT,...>` | | `String` (comma-separated) | all formats | Export formats to generate. Available: `json`, `html`, `graphml`, `cypher`, `svg`, `wiki`, `obsidian`, `report`, `context`. |
 | `--max-viz-nodes <N>` | | `usize` | `2000` | Maximum nodes in HTML visualization. Larger values show more detail but may slow the browser. |
 | `--embed` | | `bool` | `false` | Build `.graphify/semantic-index.json` for semantic graph search. `graphifyq ensure/query` enables this by default. |
@@ -265,14 +265,22 @@ graphify-rs serve --transport http --http-bind 127.0.0.1:0 --registry-path .grap
 Short-lived query helper that manages a per-project local HTTP MCP sidecar, similar to `fffq`.
 
 ```bash
-graphifyq ensure                         # semantic index is built by default
+graphifyq ensure                         # semantic index is built by default; stale graphs auto-refresh every 300s
 graphifyq ensure --no-embed              # opt out for strict AST-only/offline startup
+graphifyq ensure --no-auto-refresh       # read-only sidecar startup; never rebuild an existing graph
+graphifyq ensure --refresh-interval-secs 60
 graphifyq query "how does auth work?"     # semantic query context by default
 graphifyq query --no-embed "where is queue backpressure handled?"
 graphifyq stats
 graphifyq summary architecture --budget 3000
 graphifyq tool pagerank '{"top_n": 20}'
 ```
+
+`graphifyq` records its per-repo refresh state in `.graphify/.graphifyq-refresh.json`.
+When the interval expires it runs `graphify-rs build --path . --output .graphify --no-llm --update`
+and includes `--embed` when semantic search is enabled (the default for `ensure` and `query`).
+If a local HTTP sidecar is already running, graphifyq terminates and restarts it after refresh
+so subsequent MCP/query calls load the new graph.
 
 ---
 
@@ -732,11 +740,11 @@ These platforms use a generic integration that only writes the `## graphify` sec
 
 Once installed, the agent follows these rules (injected into `CLAUDE.md` or `AGENTS.md`):
 
-1. **Before answering architecture or codebase questions** — prefer `graphifyq query "<question>"`; it uses the local Model2Vec semantic index by default.
+1. **Before answering architecture or codebase questions** — prefer `graphifyq query "<question>"`; it uses the local Model2Vec semantic index by default and auto-refreshes stale graphs every 300s.
 2. **For broad orientation** — read `.graphify/GRAPH_REPORT.md` for god nodes and community structure.
 3. **If `.graphify/wiki/index.md` exists** — navigate the wiki instead of reading raw files.
 4. **For strict AST-only/offline startup** — pass `--no-embed` to `graphifyq ensure/query`.
-5. **After modifying code files** — run `graphify-rs build --path . --output .graphify --no-llm --update --embed` to keep graph.json and semantic-index.json current.
+5. **After modifying code files** — run `graphifyq ensure` to keep graph.json and semantic-index.json current; force `graphify-rs build --path . --output .graphify --no-llm --update --embed` only when an immediate rebuild is required.
 
 The `PreToolUse` hook automatically fires when the agent uses `Glob` or `Grep` tools (Claude/CodeBuddy) or `Bash` (Codex), injecting a reminder to check the graph first.
 

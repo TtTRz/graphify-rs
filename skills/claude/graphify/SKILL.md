@@ -17,7 +17,15 @@ Default full build from the current repository:
 graphify-rs build --path . --output .graphify
 ```
 
-Fast code-only update after code edits:
+After code edits, prefer graphifyq's per-repo auto-refresh path:
+
+```bash
+graphifyq ensure
+```
+
+It refreshes stale graphs every 300s using the safe incremental build path and
+restarts the local HTTP sidecar if the graph changed. To force the update
+immediately:
 
 ```bash
 graphify-rs build --path . --output .graphify --no-llm --update --format json,report
@@ -35,6 +43,7 @@ Short-lived HTTP MCP helper, useful in Claude Code and other terminal agents:
 
 ```bash
 graphifyq ensure
+graphifyq ensure --no-auto-refresh
 graphifyq query "QUESTION"
 graphifyq summary architecture --budget 3000
 graphifyq stats

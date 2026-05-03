@@ -95,10 +95,10 @@ const CLAUDE_MD_SECTION: &str = r#"## graphify
 This project has a graphify-rs knowledge graph at .graphify/.
 
 Rules:
-- Before answering architecture or codebase questions, run `graphifyq query "<question>"` when available; it builds/uses the local Model2Vec semantic index by default
+- Before answering architecture or codebase questions, run `graphifyq query "<question>"` when available; it builds/uses the local Model2Vec semantic index by default and auto-refreshes stale graphs every 300s
 - Read .graphify/GRAPH_REPORT.md for god nodes and community structure when you need broader orientation
 - If .graphify/wiki/index.md exists, navigate it instead of reading raw files
-- After modifying code files in this session, run `graphify-rs build --path . --output .graphify --no-llm --update --embed` to keep graph.json and semantic-index.json current
+- After modifying code files in this session, run `graphifyq ensure`; force `graphify-rs build --path . --output .graphify --no-llm --update --embed` only when you need an immediate rebuild
 "#;
 
 const CLAUDE_MD_MARKER: &str = "## graphify";
@@ -110,10 +110,10 @@ const AGENTS_MD_SECTION: &str = r#"## graphify
 This project has a graphify-rs knowledge graph at .graphify/.
 
 Rules:
-- Before answering architecture or codebase questions, prefer `graphifyq query "<question>"` or `graphifyq summary architecture` when available; `graphifyq query` builds/uses the local Model2Vec semantic index by default
+- Before answering architecture or codebase questions, prefer `graphifyq query "<question>"` or `graphifyq summary architecture` when available; `graphifyq query` builds/uses the local Model2Vec semantic index by default and auto-refreshes stale graphs every 300s
 - Read .graphify/GRAPH_REPORT.md for god nodes and community structure when you need broader orientation
 - If .graphify/wiki/index.md exists, navigate it instead of reading raw files
-- After modifying code files in this session, run `graphify-rs build --path . --output .graphify --no-llm --update --embed` to keep graph.json and semantic-index.json current
+- After modifying code files in this session, run `graphifyq ensure`; force `graphify-rs build --path . --output .graphify --no-llm --update --embed` only when you need an immediate rebuild
 "#;
 
 const AGENTS_MD_MARKER: &str = "## graphify";

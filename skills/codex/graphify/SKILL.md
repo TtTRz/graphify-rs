@@ -23,7 +23,15 @@ From the repository root:
 graphify-rs build --path . --output .graphify --no-llm --format json,report
 ```
 
-After code changes, update instead of rebuilding everything:
+After code changes, prefer the short-lived helper. It auto-refreshes a stale
+per-repo graph every 300s with a safe incremental build and restarts the local
+HTTP sidecar if the graph changed:
+
+```bash
+graphifyq ensure
+```
+
+To force the update immediately:
 
 ```bash
 graphify-rs build --path . --output .graphify --no-llm --update --format json,report
@@ -32,7 +40,7 @@ graphify-rs build --path . --output .graphify --no-llm --update --format json,re
 ## Query from Codex
 
 Prefer `graphifyq`; it behaves like `fffq`: it starts or reuses a per-project
-local HTTP MCP sidecar, writes its registry to
+local HTTP MCP sidecar, auto-refreshes stale graphs, writes its registry to
 `.graphify/.graphifyq-server.json`, prints the answer, and exits.
 
 ```bash
@@ -65,5 +73,5 @@ Codex hook output; use `graphifyq` explicitly for graph context.
 
 - If `.graphify/GRAPH_REPORT.md` exists, consult it before broad architecture answers.
 - Prefer `graphifyq query` or `graphifyq summary architecture` for concise context.
-- Keep `.graphify/` current after meaningful code edits with `--no-llm --update`.
+- Keep `.graphify/` current after meaningful code edits with `graphifyq ensure`; use `--no-llm --update` only to force an immediate rebuild.
 - Do not paste entire reports; summarize god nodes, communities, cycles, and next questions.

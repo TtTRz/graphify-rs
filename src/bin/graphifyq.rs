@@ -1,12 +1,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+
+const DEFAULT_REFRESH_INTERVAL_SECS: u64 = 300;
 
 #[derive(Parser)]
 #[command(
@@ -41,6 +43,12 @@ enum CommandKind {
         /// Embedding model ID/name for the semantic index.
         #[arg(long, default_value = graphify_embed::DEFAULT_MODEL)]
         embedding_model: String,
+        /// Minimum age before graphifyq refreshes an existing graph with `graphify-rs build --update`.
+        #[arg(long, default_value_t = DEFAULT_REFRESH_INTERVAL_SECS)]
+        refresh_interval_secs: u64,
+        /// Disable graphifyq's per-repository auto-refresh check.
+        #[arg(long)]
+        no_auto_refresh: bool,
     },
     /// Print sidecar health and registry state.
     Doctor,
@@ -61,6 +69,12 @@ enum CommandKind {
         /// Embedding model ID/name for the semantic index.
         #[arg(long, default_value = graphify_embed::DEFAULT_MODEL)]
         embedding_model: String,
+        /// Minimum age before graphifyq refreshes an existing graph with `graphify-rs build --update`.
+        #[arg(long, default_value_t = DEFAULT_REFRESH_INTERVAL_SECS)]
+        refresh_interval_secs: u64,
+        /// Disable graphifyq's per-repository auto-refresh check.
+        #[arg(long)]
+        no_auto_refresh: bool,
     },
     /// Print graph statistics via the local sidecar.
     Stats,
@@ -119,6 +133,8 @@ async fn main() -> Result<()> {
             no_embed,
             embedding_provider,
             embedding_model,
+            refresh_interval_secs,
+            no_auto_refresh,
         } => {
             let registry = ensure(
                 rebuild,
@@ -126,6 +142,7 @@ async fn main() -> Result<()> {
                 semantic_enabled(embed, no_embed),
                 &embedding_provider,
                 &embedding_model,
+                RefreshPolicy::new(!no_auto_refresh, refresh_interval_secs),
             )
             .await?;
             println!("{}", serde_json::to_string_pretty(&registry)?);
@@ -157,6 +174,8 @@ async fn main() -> Result<()> {
             no_embed,
             embedding_provider,
             embedding_model,
+            refresh_interval_secs,
+            no_auto_refresh,
         } => {
             let registry = ensure(
                 false,
@@ -164,6 +183,7 @@ async fn main() -> Result<()> {
                 semantic_enabled(embed, no_embed),
                 &embedding_provider,
                 &embedding_model,
+                RefreshPolicy::new(!no_auto_refresh, refresh_interval_secs),
             )
             .await?;
             let response = post_json(
@@ -180,6 +200,7 @@ async fn main() -> Result<()> {
                 false,
                 graphify_embed::DEFAULT_PROVIDER,
                 graphify_embed::DEFAULT_MODEL,
+                RefreshPolicy::default(),
             )
             .await?;
             let response = get_json(&format!("{}/graphifyq/stats", registry.http_url)).await?;
@@ -192,6 +213,7 @@ async fn main() -> Result<()> {
                 false,
                 graphify_embed::DEFAULT_PROVIDER,
                 graphify_embed::DEFAULT_MODEL,
+                RefreshPolicy::default(),
             )
             .await?;
             let response = call_tool(
@@ -210,6 +232,7 @@ async fn main() -> Result<()> {
                 require_semantic,
                 graphify_embed::DEFAULT_PROVIDER,
                 graphify_embed::DEFAULT_MODEL,
+                RefreshPolicy::default(),
             )
             .await?;
             let args: Value = serde_json::from_str(&arguments)
@@ -235,16 +258,21 @@ async fn ensure(
     embed: bool,
     embedding_provider: &str,
     embedding_model: &str,
+    refresh: RefreshPolicy,
 ) -> Result<Registry> {
     let paths = Paths::discover()?;
-    ensure_graph(
+    let outcome = ensure_graph(
         &paths,
         rebuild,
         no_build,
         embed,
         embedding_provider,
         embedding_model,
+        refresh,
     )?;
+    if outcome.ran_build {
+        stop_sidecar_if_running(&paths).await;
+    }
 
     if let Ok(registry) = read_registry(&paths.registry_path) {
         if health_ok(&registry, embed).await {
@@ -256,6 +284,45 @@ async fn ensure(
     wait_for_registry(&paths.registry_path, embed).await
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RefreshPolicy {
+    enabled: bool,
+    interval_secs: u64,
+}
+
+impl RefreshPolicy {
+    fn new(enabled: bool, interval_secs: u64) -> Self {
+        Self {
+            enabled,
+            interval_secs,
+        }
+    }
+}
+
+impl Default for RefreshPolicy {
+    fn default() -> Self {
+        Self::new(true, DEFAULT_REFRESH_INTERVAL_SECS)
+    }
+}
+
+#[derive(Debug, Default, Eq, PartialEq)]
+struct BuildOutcome {
+    ran_build: bool,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum BuildReason {
+    MissingGraph,
+    RebuildRequested,
+    MissingSemanticIndex,
+    AutoRefresh,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RefreshState {
+    last_refresh_ms: u128,
+}
+
 fn ensure_graph(
     paths: &Paths,
     rebuild: bool,
@@ -263,28 +330,86 @@ fn ensure_graph(
     embed: bool,
     embedding_provider: &str,
     embedding_model: &str,
-) -> Result<()> {
+    refresh: RefreshPolicy,
+) -> Result<BuildOutcome> {
     let embedding_model = normalize_embedding_model(embedding_provider, embedding_model);
     let semantic_path = paths.out_dir.join(graphify_embed::DEFAULT_INDEX_FILE);
     let needs_semantic = embed && !semantic_path.exists();
-    if paths.graph_path.exists() && !rebuild && !needs_semantic {
-        return Ok(());
-    }
+    let refresh_due = !no_build
+        && should_auto_refresh(
+            paths.graph_path.exists(),
+            &paths.refresh_state_path,
+            refresh,
+            current_time_ms(),
+        );
+    let Some(reason) = choose_build_reason(
+        paths.graph_path.exists(),
+        rebuild,
+        needs_semantic,
+        refresh_due,
+    ) else {
+        return Ok(BuildOutcome { ran_build: false });
+    };
     if no_build {
-        if !paths.graph_path.exists() {
-            bail!(
-                "graph not found at {}. Run `graphify-rs build --path . --no-llm` first",
-                paths.graph_path.display()
-            );
-        }
-        if needs_semantic {
-            bail!(
-                "semantic index not found at {}. Run `graphify-rs build --path . --no-llm --embed` first",
-                semantic_path.display()
-            );
-        }
+        handle_no_build(paths, needs_semantic, &semantic_path)?;
+        return Ok(BuildOutcome { ran_build: false });
     }
 
+    let use_update = matches!(reason, BuildReason::AutoRefresh);
+    let should_embed = embed;
+    run_build(
+        paths,
+        use_update,
+        should_embed,
+        embedding_provider,
+        &embedding_model,
+    )?;
+    write_refresh_state(&paths.refresh_state_path, current_time_ms())?;
+    Ok(BuildOutcome { ran_build: true })
+}
+
+fn choose_build_reason(
+    graph_exists: bool,
+    rebuild: bool,
+    needs_semantic: bool,
+    refresh_due: bool,
+) -> Option<BuildReason> {
+    if !graph_exists {
+        Some(BuildReason::MissingGraph)
+    } else if rebuild {
+        Some(BuildReason::RebuildRequested)
+    } else if needs_semantic {
+        Some(BuildReason::MissingSemanticIndex)
+    } else if refresh_due {
+        Some(BuildReason::AutoRefresh)
+    } else {
+        None
+    }
+}
+
+fn handle_no_build(paths: &Paths, needs_semantic: bool, semantic_path: &Path) -> Result<()> {
+    if !paths.graph_path.exists() {
+        bail!(
+            "graph not found at {}. Run `graphify-rs build --path . --no-llm` first",
+            paths.graph_path.display()
+        );
+    }
+    if needs_semantic {
+        bail!(
+            "semantic index not found at {}. Run `graphify-rs build --path . --no-llm --embed` first",
+            semantic_path.display()
+        );
+    }
+    Ok(())
+}
+
+fn run_build(
+    paths: &Paths,
+    update: bool,
+    embed: bool,
+    embedding_provider: &str,
+    embedding_model: &str,
+) -> Result<()> {
     fs::create_dir_all(paths.graph_path.parent().unwrap_or(&paths.root))?;
     let build_log_path = paths.out_dir.join("graphifyq-build.log");
     let build_log = fs::OpenOptions::new()
@@ -293,28 +418,10 @@ fn ensure_graph(
         .open(&build_log_path)
         .with_context(|| format!("open {}", build_log_path.display()))?;
     let build_log_err = build_log.try_clone()?;
-    let mut args = vec![
-        "build",
-        "--path",
-        ".",
-        "--output",
-        ".graphify",
-        "--no-llm",
-        "--format",
-        "json,report,context",
-    ];
-    if embed {
-        args.extend([
-            "--embed",
-            "--embedding-provider",
-            embedding_provider,
-            "--embedding-model",
-            &embedding_model,
-        ]);
-    }
+    let args = build_command_args(update, embed, embedding_provider, embedding_model);
     let status = Command::new(graphify_rs_exe())
         .current_dir(&paths.root)
-        .args(args)
+        .args(&args)
         .stdout(Stdio::from(build_log))
         .stderr(Stdio::from(build_log_err))
         .status()
@@ -323,6 +430,76 @@ fn ensure_graph(
         bail!("graphify-rs build failed with status {status}");
     }
     Ok(())
+}
+
+fn build_command_args(
+    update: bool,
+    embed: bool,
+    embedding_provider: &str,
+    embedding_model: &str,
+) -> Vec<String> {
+    let mut args = vec![
+        "build".to_string(),
+        "--path".to_string(),
+        ".".to_string(),
+        "--output".to_string(),
+        ".graphify".to_string(),
+        "--no-llm".to_string(),
+        "--format".to_string(),
+        "json,report,context".to_string(),
+    ];
+    if update {
+        args.push("--update".to_string());
+    }
+    if embed {
+        args.extend([
+            "--embed".to_string(),
+            "--embedding-provider".to_string(),
+            embedding_provider.to_string(),
+            "--embedding-model".to_string(),
+            embedding_model.to_string(),
+        ]);
+    }
+    args
+}
+
+fn should_auto_refresh(
+    graph_exists: bool,
+    refresh_state_path: &Path,
+    refresh: RefreshPolicy,
+    now_ms: u128,
+) -> bool {
+    if !graph_exists || !refresh.enabled {
+        return false;
+    }
+    let Some(state) = read_refresh_state(refresh_state_path) else {
+        return true;
+    };
+    let interval_ms = u128::from(refresh.interval_secs).saturating_mul(1000);
+    now_ms.saturating_sub(state.last_refresh_ms) >= interval_ms
+}
+
+fn read_refresh_state(path: &Path) -> Option<RefreshState> {
+    let content = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+fn write_refresh_state(path: &Path, now_ms: u128) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let state = RefreshState {
+        last_refresh_ms: now_ms,
+    };
+    fs::write(path, serde_json::to_vec_pretty(&state)?)?;
+    Ok(())
+}
+
+fn current_time_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
 }
 
 fn normalize_embedding_model(provider: &str, model: &str) -> String {
@@ -374,6 +551,41 @@ fn start_sidecar(paths: &Paths) -> Result<()> {
 
     command.spawn().context("start graphify-rs HTTP sidecar")?;
 
+    Ok(())
+}
+
+async fn stop_sidecar_if_running(paths: &Paths) {
+    let Ok(registry) = read_registry(&paths.registry_path) else {
+        return;
+    };
+
+    let health = get_json(&format!("{}/health", registry.http_url)).await;
+    if health
+        .ok()
+        .and_then(|value| value["server"].as_str().map(str::to_string))
+        .as_deref()
+        == Some("graphify-rs")
+    {
+        let _ = terminate_process(registry.pid);
+    }
+    let _ = fs::remove_file(&paths.registry_path);
+}
+
+fn terminate_process(pid: u32) -> Result<()> {
+    #[cfg(unix)]
+    {
+        Command::new("kill")
+            .arg(pid.to_string())
+            .status()
+            .context("terminate graphify-rs sidecar")?;
+    }
+    #[cfg(windows)]
+    {
+        Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .status()
+            .context("terminate graphify-rs sidecar")?;
+    }
     Ok(())
 }
 
@@ -473,6 +685,7 @@ struct Paths {
     out_dir: PathBuf,
     graph_path: PathBuf,
     registry_path: PathBuf,
+    refresh_state_path: PathBuf,
 }
 
 impl Paths {
@@ -485,6 +698,7 @@ impl Paths {
         Ok(Self {
             graph_path: out_dir.join("graph.json"),
             registry_path: out_dir.join(".graphifyq-server.json"),
+            refresh_state_path: out_dir.join(".graphifyq-refresh.json"),
             out_dir,
             root,
         })
@@ -528,5 +742,66 @@ mod tests {
             registry.graph_path,
             PathBuf::from("/tmp/project/.graphify/graph.json")
         );
+    }
+
+    #[test]
+    fn build_command_args_use_update_only_for_refresh_path() {
+        let args = build_command_args(true, true, "ollama", "embeddinggemma");
+
+        assert!(args.iter().any(|arg| arg == "--update"));
+        assert!(args.iter().any(|arg| arg == "--embed"));
+        assert!(
+            args.windows(2)
+                .any(|pair| pair[0] == "--embedding-provider" && pair[1] == "ollama")
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair[0] == "--embedding-model" && pair[1] == "embeddinggemma")
+        );
+
+        let args = build_command_args(false, false, "model2vec", "minishlab/potion-base-8M");
+        assert!(!args.iter().any(|arg| arg == "--update"));
+        assert!(!args.iter().any(|arg| arg == "--embed"));
+    }
+
+    #[test]
+    fn auto_refresh_is_due_on_missing_or_expired_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_path = dir.path().join("refresh.json");
+        let refresh = RefreshPolicy::new(true, 300);
+
+        assert!(should_auto_refresh(true, &state_path, refresh, 1_000));
+
+        write_refresh_state(&state_path, 1_000).unwrap();
+        assert!(!should_auto_refresh(true, &state_path, refresh, 299_999));
+        assert!(should_auto_refresh(true, &state_path, refresh, 301_000));
+        assert!(!should_auto_refresh(
+            true,
+            &state_path,
+            RefreshPolicy::new(false, 300),
+            301_000
+        ));
+        assert!(!should_auto_refresh(false, &state_path, refresh, 301_000));
+    }
+
+    #[test]
+    fn build_reason_prioritizes_correctness_before_refresh() {
+        assert_eq!(
+            choose_build_reason(false, false, false, true),
+            Some(BuildReason::MissingGraph)
+        );
+        assert_eq!(
+            choose_build_reason(true, true, true, true),
+            Some(BuildReason::RebuildRequested)
+        );
+        assert_eq!(
+            choose_build_reason(true, false, true, true),
+            Some(BuildReason::MissingSemanticIndex)
+        );
+        assert_eq!(
+            choose_build_reason(true, false, false, true),
+            Some(BuildReason::AutoRefresh)
+        );
+        assert_eq!(choose_build_reason(true, false, false, false), None);
     }
 }
