@@ -23,6 +23,7 @@ const IGNORE_PATTERNS: &[&str] = &[
     "__pycache__",
     ".pyc",
     "target",
+    ".graphify",
     "graphify-out",
     ".DS_Store",
 ];
@@ -339,6 +340,7 @@ mod tests {
         assert!(should_ignore(Path::new("/repo/node_modules/foo.js")));
         assert!(should_ignore(Path::new("/repo/__pycache__/mod.pyc")));
         assert!(should_ignore(Path::new("/repo/target/debug/build")));
+        assert!(should_ignore(Path::new("/repo/.graphify/graph.json")));
         assert!(should_ignore(Path::new("/repo/graphify-out/graph.json")));
     }
 

@@ -12,7 +12,7 @@ use thiserror::Error;
 use tracing::debug;
 
 /// Default cache directory relative to the working directory.
-const CACHE_DIR: &str = "graphify-out/cache";
+const CACHE_DIR: &str = ".graphify/cache";
 
 /// Errors from the cache layer.
 #[derive(Debug, Error)]

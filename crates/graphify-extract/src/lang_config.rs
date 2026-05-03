@@ -478,7 +478,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_21_languages_have_configs() {
+    fn all_regex_languages_have_configs() {
         let languages = [
             "python",
             "javascript",

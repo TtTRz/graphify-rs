@@ -23,7 +23,7 @@ struct Cli {
 enum CommandKind {
     /// Build graph if needed and start/reuse the local HTTP sidecar.
     Ensure {
-        /// Rebuild graphify-out/graph.json even if it already exists.
+        /// Rebuild .graphify/graph.json even if it already exists.
         #[arg(long)]
         rebuild: bool,
         /// Do not build a missing graph; fail instead.
@@ -32,7 +32,7 @@ enum CommandKind {
     },
     /// Print sidecar health and registry state.
     Doctor,
-    /// Query graphify-out/graph.json via the local sidecar.
+    /// Query .graphify/graph.json via the local sidecar.
     Query {
         question: String,
         #[arg(long, default_value_t = 2000)]
@@ -188,7 +188,7 @@ fn ensure_graph(paths: &Paths, rebuild: bool, no_build: bool) -> Result<()> {
             "--path",
             ".",
             "--output",
-            "graphify-out",
+            ".graphify",
             "--no-llm",
             "--format",
             "json,report",
@@ -346,7 +346,7 @@ impl Paths {
             .context("current directory")?
             .canonicalize()
             .context("canonicalize current directory")?;
-        let out_dir = root.join("graphify-out");
+        let out_dir = root.join(".graphify");
         Ok(Self {
             graph_path: out_dir.join("graph.json"),
             registry_path: out_dir.join(".graphifyq-server.json"),
@@ -375,7 +375,7 @@ mod tests {
             "http_url": "http://127.0.0.1:12345",
             "mcp_url": "http://127.0.0.1:12345/mcp",
             "graphifyq_url": "http://127.0.0.1:12345/graphifyq",
-            "graph_path": "/tmp/project/graphify-out/graph.json",
+            "graph_path": "/tmp/project/.graphify/graph.json",
             "started_at_ms": 42
         }))
         .unwrap();
@@ -384,7 +384,7 @@ mod tests {
         assert_eq!(registry.mcp_url, "http://127.0.0.1:12345/mcp");
         assert_eq!(
             registry.graph_path,
-            PathBuf::from("/tmp/project/graphify-out/graph.json")
+            PathBuf::from("/tmp/project/.graphify/graph.json")
         );
     }
 }

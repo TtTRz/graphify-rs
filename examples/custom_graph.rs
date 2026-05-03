@@ -127,9 +127,9 @@ fn main() -> anyhow::Result<()> {
     println!("\nDependency cycles: {}", cycles.len());
 
     // Export
-    let output = PathBuf::from("graphify-out");
+    let output = PathBuf::from(".graphify");
     graphify_export::export_json(&graph, &output)?;
-    println!("\nExported to graphify-out/graph.json");
+    println!("\nExported to .graphify/graph.json");
 
     Ok(())
 }

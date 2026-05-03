@@ -29,7 +29,7 @@ Reference inspected: `safishamsi/graphify` default branch `v6` at the time this 
 - Added `graphifyq`, a short-lived helper inspired by `fffq`:
   - builds a missing AST-only graph,
   - starts/reuses a per-project HTTP sidecar,
-  - stores registry under `graphify-out/.graphifyq-server.json`,
+  - stores registry under `.graphify/.graphifyq-server.json`,
   - provides `ensure`, `doctor`, `query`, `stats`, `summary`, and raw `tool`.
 - Hardened Codex install:
   - hook command is `graphify-rs hook-check`,
@@ -38,9 +38,18 @@ Reference inspected: `safishamsi/graphify` default branch `v6` at the time this 
   - stale graphify-rs hook entries are replaced,
   - unsupported `permissionDecision` is not emitted.
 
+## SQL extractor port
+
+The original graphify optional SQL extractor used `tree-sitter-sql` to find tables, views, functions, foreign keys, and `FROM`/`JOIN` relationships. The Rust fork now ports that capability with the pure-Rust `sqlparser` crate instead:
+
+- `.sql` is collected as code.
+- `graphify-extract` exposes an optional default-enabled `sql` feature.
+- Dialect parsing tries `ClickHouseDialect`, then `PostgreSqlDialect`, then `GenericDialect`.
+- Extracted SQL nodes include tables, views/materialized views, functions/procedures, columns, external referenced tables, and relationship edges (`defines`, `has_column`, `references`, `reads_from`, `writes_to`, `alters`).
+- ClickHouse DDL/topology extraction handles common parser gaps around table-tail clauses without falling back to regex-only extraction.
+
 ## Deliberately not ported yet
 
 - Python original's multimodal video/audio/office pipeline.
 - Python original's large platform-specific skill variants.
-- SQL optional extractor from original graphify.
 - Hook behavior that injects context into Codex. Codex Desktop rejected previous extra context forms, so graph guidance is kept in `AGENTS.md`/skill and queried explicitly through `graphifyq`.

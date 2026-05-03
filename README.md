@@ -13,7 +13,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
-[中文文档](README_CN.md) | [CLI Reference](docs/CLI.md) | [Architecture](docs/ARCHITECTURE.md) | [Changelog](CHANGELOG.md)
+[CLI Reference](docs/CLI.md) | [Architecture](docs/ARCHITECTURE.md) | [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -41,8 +41,8 @@ cargo install graphify-rs
 graphify-rs build --no-llm
 
 # Explore interactively
-open graphify-out/graph.html         # macOS
-# xdg-open graphify-out/graph.html   # Linux
+open .graphify/graph.html         # macOS
+# xdg-open .graphify/graph.html   # Linux
 
 # Query the graph
     graphify-rs query "how does auth work?"
@@ -80,7 +80,7 @@ Rust rewrite of [graphify](https://github.com/safishamsi/graphify) (Python) — 
  │ .md .pdf │    │                                                      │
  └──────────┘    └──────────┬───────────────────────────────────────────┘
                             v
-                  graphify-out/
+                  .graphify/
                   ├── graph.json          queryable graph data
                   ├── graph.html          interactive visualization
                   ├── GRAPH_REPORT.md     analysis report
@@ -108,11 +108,11 @@ Rust rewrite of [graphify](https://github.com/safishamsi/graphify) (Python) — 
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#graph-algorithms) for complexity analysis.
 
-## Supported Languages (21)
+## Supported Languages (22)
 
-| Native tree-sitter | Regex fallback |
-|---------------------|----------------|
-| Python, JavaScript, TypeScript, Rust, Go, Java, C, C++, Ruby, C#, Dart | Kotlin, Scala, PHP, Swift, Lua, Zig, PowerShell, Elixir, Obj-C, Julia |
+| Native tree-sitter | SQL parser | Regex fallback |
+|---------------------|------------|----------------|
+| Python, JavaScript, TypeScript, Rust, Go, Java, C, C++, Ruby, C#, Dart | PostgreSQL + ClickHouse `.sql` via `sqlparser` | Kotlin, Scala, PHP, Swift, Lua, Zig, PowerShell, Elixir, Obj-C, Julia |
 
 ## Agent Integration
 
@@ -158,7 +158,7 @@ graphify-rs build [--path .] [--no-llm] [--format json,html]   # build graph
 graphify-rs query "question" [--dfs] [--budget 2000]            # query
 graphify-rs watch --path .                                       # auto-rebuild
     graphify-rs serve                                                 # MCP stdio server
-    graphify-rs serve --transport http --registry-path graphify-out/.graphifyq-server.json
+    graphify-rs serve --transport http --registry-path .graphify/.graphifyq-server.json
     graphifyq query "where is auth wired?"                            # reuse local HTTP sidecar
 graphify-rs diff old.json new.json                               # compare
 graphify-rs stats graph.json                                     # statistics

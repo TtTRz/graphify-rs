@@ -13,6 +13,10 @@ mod config;
 mod install;
 mod skill;
 
+const DEFAULT_OUTPUT_DIR: &str = ".graphify";
+const DEFAULT_GRAPH_PATH: &str = ".graphify/graph.json";
+const DEFAULT_MEMORY_DIR: &str = ".graphify/memory";
+
 #[derive(Parser)]
 #[command(
     name = "graphify-rs",
@@ -42,7 +46,7 @@ enum Commands {
     Build {
         #[arg(short, long, default_value = ".")]
         path: String,
-        #[arg(short, long, default_value = "graphify-out")]
+        #[arg(short, long, default_value = DEFAULT_OUTPUT_DIR)]
         output: String,
         #[arg(long)]
         no_llm: bool,
@@ -70,12 +74,12 @@ enum Commands {
         dfs: bool,
         #[arg(long, default_value_t = 2000)]
         budget: usize,
-        #[arg(long, default_value = "graphify-out/graph.json")]
+        #[arg(long, default_value = DEFAULT_GRAPH_PATH)]
         graph: String,
     },
     /// Run benchmark
     Benchmark {
-        #[arg(default_value = "graphify-out/graph.json")]
+        #[arg(default_value = DEFAULT_GRAPH_PATH)]
         graph_path: String,
     },
     /// Git hook management
@@ -133,12 +137,12 @@ enum Commands {
         r#type: String,
         #[arg(long)]
         nodes: Vec<String>,
-        #[arg(long, default_value = "graphify-out/memory")]
+        #[arg(long, default_value = DEFAULT_MEMORY_DIR)]
         memory_dir: String,
     },
     /// Start MCP server
     Serve {
-        #[arg(long, default_value = "graphify-out/graph.json")]
+        #[arg(long, default_value = DEFAULT_GRAPH_PATH)]
         graph: String,
         /// Transport to use for the MCP server.
         #[arg(long, value_enum, default_value_t = McpTransport::Stdio)]
@@ -160,13 +164,13 @@ enum Commands {
     Watch {
         #[arg(short, long, default_value = ".")]
         path: String,
-        #[arg(short, long, default_value = "graphify-out")]
+        #[arg(short, long, default_value = DEFAULT_OUTPUT_DIR)]
         output: String,
     },
     /// Ingest URL content
     Ingest {
         url: String,
-        #[arg(short, long, default_value = "graphify-out")]
+        #[arg(short, long, default_value = DEFAULT_OUTPUT_DIR)]
         output: String,
     },
     /// Compare two graph snapshots
@@ -182,7 +186,7 @@ enum Commands {
     /// Show graph statistics without rebuilding
     Stats {
         /// Path to graph.json
-        #[arg(default_value = "graphify-out/graph.json")]
+        #[arg(default_value = DEFAULT_GRAPH_PATH)]
         graph: String,
     },
     /// Generate shell completions
@@ -305,7 +309,7 @@ async fn main() -> Result<()> {
             // Merge config file defaults with CLI args
             let cfg = config::load_config(Path::new(&path));
             let effective_path = path;
-            let effective_output = if output == "graphify-out" {
+            let effective_output = if output == DEFAULT_OUTPUT_DIR {
                 cfg.output.unwrap_or(output)
             } else {
                 output
@@ -445,9 +449,11 @@ async fn main() -> Result<()> {
         },
         Commands::HookCheck => {}
         Commands::Watch { path, output } => {
+            ensure_local_output_excluded(Path::new(&path), Path::new(&output));
             graphify_watch::watch_directory(Path::new(&path), Path::new(&output)).await?;
         }
         Commands::Ingest { url, output } => {
+            ensure_local_output_excluded(Path::new("."), Path::new(&output));
             let out = graphify_ingest::ingest_url(&url, Path::new(&output)).await?;
             println!("Ingested to {}", out.display());
         }
@@ -468,7 +474,41 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Full build pipeline: detect -> extract (with cache) -> build -> cluster -> analyze -> export
+// Full build pipeline: detect -> extract (with cache) -> build -> cluster -> analyze -> export
+
+/// Keep graphify's default generated state local. We prefer .git/info/exclude
+/// over mutating the repository's tracked .gitignore.
+fn ensure_local_output_excluded(project_root: &Path, output_dir: &Path) {
+    if output_dir != Path::new(DEFAULT_OUTPUT_DIR) {
+        return;
+    }
+
+    let git_dir = project_root.join(".git");
+    if !git_dir.is_dir() {
+        return;
+    }
+
+    let info_dir = git_dir.join("info");
+    let exclude_path = info_dir.join("exclude");
+    if std::fs::create_dir_all(&info_dir).is_err() {
+        return;
+    }
+
+    let entry = format!("{DEFAULT_OUTPUT_DIR}/");
+    let existing = std::fs::read_to_string(&exclude_path).unwrap_or_default();
+    if existing.lines().any(|line| line.trim() == entry) {
+        return;
+    }
+
+    let mut output = existing;
+    if !output.is_empty() && !output.ends_with('\n') {
+        output.push('\n');
+    }
+    output.push_str(&entry);
+    output.push('\n');
+    let _ = std::fs::write(exclude_path, output);
+}
+
 #[allow(clippy::too_many_arguments)]
 fn cmd_build(
     path: &str,
@@ -483,6 +523,7 @@ fn cmd_build(
 ) -> Result<()> {
     let root = PathBuf::from(path);
     let output_dir = PathBuf::from(output);
+    ensure_local_output_excluded(&root, &output_dir);
     let cache_dir = output_dir.join("cache");
 
     // Determine which formats to export (empty = all)
@@ -1256,7 +1297,7 @@ fn cmd_init() -> Result<()> {
 # These values serve as defaults and can be overridden by CLI flags.
 
 # Output directory for graph files
-# output = "graphify-out"
+# output = ".graphify"
 
 # Disable LLM-based semantic extraction
 # no_llm = false
@@ -1271,4 +1312,36 @@ fn cmd_init() -> Result<()> {
     )?;
     println!("{} Created graphify.toml", "✓".green());
     Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_output_is_added_to_local_git_exclude() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join(".git")).expect("create .git");
+
+        ensure_local_output_excluded(dir.path(), Path::new(DEFAULT_OUTPUT_DIR));
+
+        let exclude =
+            std::fs::read_to_string(dir.path().join(".git/info/exclude")).expect("read exclude");
+        assert!(exclude.lines().any(|line| line.trim() == ".graphify/"));
+    }
+
+    #[test]
+    fn explicit_legacy_output_is_not_added_to_local_git_exclude() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join(".git/info")).expect("create .git/info");
+
+        ensure_local_output_excluded(dir.path(), Path::new("graphify-out"));
+
+        let exclude_path = dir.path().join(".git/info/exclude");
+        assert!(
+            !exclude_path.exists()
+                || !std::fs::read_to_string(exclude_path)
+                    .expect("read exclude")
+                    .contains("graphify-out/")
+        );
+    }
 }

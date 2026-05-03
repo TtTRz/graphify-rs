@@ -12,6 +12,8 @@ pub mod dedup;
 pub mod lang_config;
 pub mod parser;
 pub mod semantic;
+#[cfg(feature = "sql")]
+pub mod sql_extract;
 pub mod treesitter;
 
 use std::collections::{HashMap, HashSet};
@@ -59,6 +61,7 @@ pub const DISPATCH: &[(&str, &str)] = &[
     (".mm", "objc"),
     (".jl", "julia"),
     (".dart", "dart"),
+    (".sql", "sql"),
 ];
 
 /// Build a hashmap for fast extension lookup.
@@ -152,8 +155,22 @@ pub fn extract(paths: &[PathBuf]) -> ExtractionResult {
 
             debug!("extracting {} ({})", path.display(), lang);
 
-            // Try tree-sitter first, fall back to regex
-            let mut result = if let Some(ts_result) = treesitter::try_extract(path, &source, lang) {
+            // Try deterministic SQL/sqlparser first, then tree-sitter, then regex.
+            #[cfg(feature = "sql")]
+            let sql_result = if lang == "sql" {
+                let source_str = String::from_utf8_lossy(&source);
+                Some(sql_extract::extract_sql(path, source_str.as_ref()))
+            } else {
+                None
+            };
+
+            #[cfg(not(feature = "sql"))]
+            let sql_result: Option<ExtractionResult> = None;
+
+            let mut result = if let Some(sql_result) = sql_result {
+                debug!("used sqlparser for {} ({})", path.display(), lang);
+                sql_result
+            } else if let Some(ts_result) = treesitter::try_extract(path, &source, lang) {
                 debug!("used tree-sitter for {} ({})", path.display(), lang);
                 ts_result
             } else {

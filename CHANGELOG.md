@@ -55,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **README redesigned** — centered header, streamlined sections, Quick Start with `--no-llm` first, performance table, slim architecture overview with links to detailed docs
 - **CONTRIBUTING.md expanded** — architecture overview, test expectations, PR checklist, release process
-- **CLI docs with TOC** — both CLI.md and CLI_CN.md now have table of contents for navigation
+- **CLI docs with TOC** — CLI.md now has a table of contents for navigation
 
 ## [0.4.0] - 2026-04-13
 
@@ -105,7 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Command name consistency** — all user-facing strings now use `graphify-rs` instead of `graphify` (git hooks, skill, install messages, hook JSON, OpenCode plugin, report footer, benchmark banner)
 - **Claude Code hook format** — aligned with Python original: `hookEventName` + `additionalContext` instead of `prefix`
 - **Codex hooks.json format** — aligned with Python original: `PreToolUse` array + `systemMessage`
-- **CLAUDE.md rebuild rule** — full command `graphify-rs build --path . --output graphify-out --no-llm --update`
+- **CLAUDE.md rebuild rule** — full command `graphify-rs build --path . --output .graphify --no-llm --update`
 
 ### Fixed
 - **God Nodes degree=0** — report showed degree 0 for all god nodes due to JSON field name mismatch (`"edges"` → `"degree"`)

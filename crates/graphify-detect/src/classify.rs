@@ -164,7 +164,7 @@ mod tests {
     fn classify_code_extensions() {
         for ext in &[
             ".py", ".rs", ".ts", ".go", ".java", ".cpp", ".js", ".jsx", ".tsx", ".c", ".h", ".rb",
-            ".swift", ".kt", ".cs", ".lua", ".zig", ".jl", ".ex", ".mm",
+            ".swift", ".kt", ".cs", ".lua", ".zig", ".jl", ".ex", ".mm", ".sql",
         ] {
             let p = PathBuf::from(format!("foo{ext}"));
             assert_eq!(

@@ -2,6 +2,7 @@
 *.swp
 *.swo
 .DS_Store
+.graphify/
 graphify-out/
 *.env
 .idea/

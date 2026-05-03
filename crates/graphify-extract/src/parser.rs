@@ -36,7 +36,7 @@ impl Parser for RegexParser {
         &[
             ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java", ".c", ".h", ".cpp", ".cc",
             ".cxx", ".hpp", ".rb", ".cs", ".kt", ".kts", ".scala", ".php", ".swift", ".lua",
-            ".toc", ".zig", ".ps1", ".ex", ".exs", ".m", ".mm", ".jl",
+            ".toc", ".zig", ".ps1", ".ex", ".exs", ".m", ".mm", ".jl", ".sql",
         ]
     }
 }

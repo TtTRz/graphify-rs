@@ -75,12 +75,12 @@ Every edge carries a confidence tag:
 | `INFERRED` | Reasonable inference from context | 0.4–0.9 | Claude API / cross-file resolution |
 | `AMBIGUOUS` | Uncertain — flagged for human review | 0.1–0.3 | Claude API |
 
-## Supported Languages (21)
+## Supported Languages (22)
 
-| Native (tree-sitter) | Regex Fallback |
-|----------------------|----------------|
-| Python, JavaScript, TypeScript, Rust, Go, Java | Kotlin, Scala, PHP, Swift, Lua |
-| C, C++, Ruby, C#, Dart | Zig, PowerShell, Elixir, Obj-C, Julia |
+| Native (tree-sitter) | SQL parser | Regex Fallback |
+|----------------------|------------|----------------|
+| Python, JavaScript, TypeScript, Rust, Go, Java | PostgreSQL + ClickHouse `.sql` via `sqlparser` | Kotlin, Scala, PHP, Swift, Lua |
+| C, C++, Ruby, C#, Dart |  | Zig, PowerShell, Elixir, Obj-C, Julia |
 
 ## Dependency Graph
 

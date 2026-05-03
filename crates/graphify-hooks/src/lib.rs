@@ -17,7 +17,7 @@ const HOOK_SCRIPT: &str = r#"
 # graphify-hook-start
 # Auto-run graphify-rs AST extraction on commit (code-only, no LLM)
 if command -v graphify-rs >/dev/null 2>&1; then
-  graphify-rs build --code-only --output graphify-out &
+  graphify-rs build --code-only --output .graphify &
 fi
 # graphify-hook-end
 "#;
