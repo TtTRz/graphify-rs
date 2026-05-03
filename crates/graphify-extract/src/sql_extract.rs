@@ -54,14 +54,27 @@ pub fn extract_sql(path: &Path, source: &str) -> ExtractionResult {
     match parse_sql(source) {
         Ok(parsed) => SqlExtractor::new(path, source, parsed.dialect).extract(&parsed.statements),
         Err(error) => {
-            warn!("cannot parse SQL {}: {error}", path.display());
-            let mut result = ExtractionResult::default();
-            let mut file = make_file_node(path, None);
-            file.extra.insert(
-                "sql_parse_error".to_string(),
-                serde_json::Value::String(error),
-            );
-            result.nodes.push(file);
+            let mut result =
+                SqlExtractor::new(path, source, SqlDialectKind::ClickHouse).extract(&[]);
+            if let Some(file) = result
+                .nodes
+                .iter_mut()
+                .find(|node| node.node_type == NodeType::File)
+            {
+                file.extra.insert(
+                    "sql_parse_error".to_string(),
+                    serde_json::Value::String(error.clone()),
+                );
+            }
+            if result.nodes.len() <= 1 {
+                warn!("cannot parse SQL {}: {error}", path.display());
+            } else {
+                debug!(
+                    "SQL AST parse failed for {}, recovered {} topology nodes using ClickHouse fallback",
+                    path.display(),
+                    result.nodes.len().saturating_sub(1)
+                );
+            }
             result
         }
     }
@@ -1086,38 +1099,35 @@ CREATE VIEW user_view AS SELECT * FROM users;
 CREATE FUNCTION IF NOT EXISTS normalizeKey AS (x) -> lower(x);
 
 -- dictionary is not fully represented by sqlparser's ClickHouse AST yet
-CREATE DICTIONARY tournament_data_by_id_dict
+CREATE DICTIONARY entity_data_by_id_dict
 (
-    tournament_id UUID,
+    entity_id UUID,
     title String
 )
-PRIMARY KEY tournament_id
-SOURCE(CLICKHOUSE(TABLE 'tournament_settings_global'))
+PRIMARY KEY entity_id
+SOURCE(CLICKHOUSE(TABLE 'entity_settings_global'))
 LAYOUT(HASHED())
 LIFETIME(300);
 
 -- leading comments must not hide the following CREATE statement
 -- from topology extraction.
-CREATE MATERIALIZED VIEW sm_assign_series_id_to_rounds_mv TO sm_rounds_local AS
-SELECT * FROM sm_tx_per_round_id_null;
+CREATE MATERIALIZED VIEW assign_batch_id_mv TO processed_events_local AS
+SELECT * FROM raw_events_null;
 "#;
 
         let result = extract_sql(Path::new("clickhouse.sql"), source);
         let labels = labels(&result);
         assert!(labels.contains("normalizeKey"), "labels: {labels:?}");
         assert!(
-            labels.contains("tournament_data_by_id_dict"),
+            labels.contains("entity_data_by_id_dict"),
             "labels: {labels:?}"
         );
+        assert!(labels.contains("assign_batch_id_mv"), "labels: {labels:?}");
         assert!(
-            labels.contains("sm_assign_series_id_to_rounds_mv"),
+            labels.contains("processed_events_local"),
             "labels: {labels:?}"
         );
-        assert!(labels.contains("sm_rounds_local"), "labels: {labels:?}");
-        assert!(
-            labels.contains("sm_tx_per_round_id_null"),
-            "labels: {labels:?}"
-        );
+        assert!(labels.contains("raw_events_null"), "labels: {labels:?}");
 
         let relations = relations(&result);
         assert!(relations.contains("defines"), "relations: {relations:?}");
@@ -1134,6 +1144,40 @@ SELECT * FROM sm_tx_per_round_id_null;
             parsed.dialect,
             SqlDialectKind::ClickHouse | SqlDialectKind::PostgreSql
         ));
+    }
+
+    #[test]
+    fn parse_failure_still_extracts_clickhouse_create_topology() {
+        let source = r#"
+CREATE TABLE processed_events_local
+(
+    id UUID CODEC(ZSTD(1)),
+    amount Decimal(18, 2) CODEC(DoubleDelta, ZSTD)
+)
+ENGINE = MergeTree
+ORDER BY id;
+"#;
+
+        let result = extract_sql(Path::new("clickhouse_codec.sql"), source);
+        let file = result
+            .nodes
+            .iter()
+            .find(|node| node.node_type == NodeType::File)
+            .unwrap();
+        assert!(
+            file.extra.contains_key("sql_parse_error"),
+            "expected parse error metadata for fallback-only extraction"
+        );
+
+        let labels = labels(&result);
+        assert!(
+            labels.contains("processed_events_local"),
+            "labels: {labels:?}"
+        );
+
+        let relations = relations(&result);
+        assert!(relations.contains("defines"), "relations: {relations:?}");
+        assert_no_dangling_edges(&result);
     }
 
     fn assert_no_dangling_edges(result: &ExtractionResult) {
