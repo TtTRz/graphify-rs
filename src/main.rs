@@ -307,7 +307,8 @@ async fn main() -> Result<()> {
                 verb,
                 cli.jobs,
                 max_viz_nodes,
-            )?;
+            )
+            .await?;
         }
         Commands::Install { platform } => {
             install::install_skill(&platform)?;
@@ -434,7 +435,7 @@ async fn main() -> Result<()> {
 
 /// Full build pipeline: detect -> extract (with cache) -> build -> cluster -> analyze -> export
 #[allow(clippy::too_many_arguments)]
-fn cmd_build(
+async fn cmd_build(
     path: &str,
     output: &str,
     no_llm: bool,
@@ -706,7 +707,7 @@ fn cmd_build(
 
                 // Collect results
                 for handle in handles {
-                    match rt.block_on(handle) {
+                    match handle.await {
                         Ok(Ok((doc_p, sem_result))) => {
                             verbose_print!(
                                 verb,
