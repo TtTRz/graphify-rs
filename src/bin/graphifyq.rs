@@ -347,6 +347,7 @@ enum BuildReason {
     RebuildRequested,
     MissingSemanticIndex,
     AutoRefresh,
+    LlmRefreshRequested,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -380,6 +381,7 @@ fn ensure_graph(
         rebuild,
         needs_semantic,
         refresh_due,
+        llm.is_some(),
     ) else {
         return Ok(BuildOutcome { ran_build: false });
     };
@@ -388,7 +390,10 @@ fn ensure_graph(
         return Ok(BuildOutcome { ran_build: false });
     }
 
-    let use_update = matches!(reason, BuildReason::AutoRefresh);
+    let use_update = matches!(
+        reason,
+        BuildReason::AutoRefresh | BuildReason::LlmRefreshRequested
+    );
     let should_embed = embed;
     run_build(
         paths,
@@ -407,6 +412,7 @@ fn choose_build_reason(
     rebuild: bool,
     needs_semantic: bool,
     refresh_due: bool,
+    llm_refresh_requested: bool,
 ) -> Option<BuildReason> {
     if !graph_exists {
         Some(BuildReason::MissingGraph)
@@ -416,6 +422,8 @@ fn choose_build_reason(
         Some(BuildReason::MissingSemanticIndex)
     } else if refresh_due {
         Some(BuildReason::AutoRefresh)
+    } else if llm_refresh_requested {
+        Some(BuildReason::LlmRefreshRequested)
     } else {
         None
     }
@@ -871,21 +879,25 @@ mod tests {
     #[test]
     fn build_reason_prioritizes_correctness_before_refresh() {
         assert_eq!(
-            choose_build_reason(false, false, false, true),
+            choose_build_reason(false, false, false, true, false),
             Some(BuildReason::MissingGraph)
         );
         assert_eq!(
-            choose_build_reason(true, true, true, true),
+            choose_build_reason(true, true, true, true, true),
             Some(BuildReason::RebuildRequested)
         );
         assert_eq!(
-            choose_build_reason(true, false, true, true),
+            choose_build_reason(true, false, true, true, true),
             Some(BuildReason::MissingSemanticIndex)
         );
         assert_eq!(
-            choose_build_reason(true, false, false, true),
+            choose_build_reason(true, false, false, true, true),
             Some(BuildReason::AutoRefresh)
         );
-        assert_eq!(choose_build_reason(true, false, false, false), None);
+        assert_eq!(
+            choose_build_reason(true, false, false, false, true),
+            Some(BuildReason::LlmRefreshRequested)
+        );
+        assert_eq!(choose_build_reason(true, false, false, false, false), None);
     }
 }

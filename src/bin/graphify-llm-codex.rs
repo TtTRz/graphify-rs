@@ -74,11 +74,11 @@ fn codex_prompt(source_prompt: &str) -> String {
 }
 
 fn run_codex(args: &Args, prompt: &str) -> Result<String> {
-    let prompt_path = temp_path("graphify-codex-prompt");
-    let output_path = temp_path("graphify-codex-output");
-    std::fs::write(&prompt_path, prompt).context("write temporary Codex prompt")?;
+    let temp_files = TempFiles::new();
+    std::fs::write(&temp_files.prompt_path, prompt).context("write temporary Codex prompt")?;
 
-    let prompt_file = std::fs::File::open(&prompt_path).context("open temporary Codex prompt")?;
+    let prompt_file =
+        std::fs::File::open(&temp_files.prompt_path).context("open temporary Codex prompt")?;
     let mut child = Command::new("codex")
         .arg("exec")
         .arg("--ephemeral")
@@ -92,7 +92,7 @@ fn run_codex(args: &Args, prompt: &str) -> Result<String> {
         .arg("-s")
         .arg("read-only")
         .arg("-o")
-        .arg(&output_path)
+        .arg(&temp_files.output_path)
         .arg("-")
         .stdin(Stdio::from(prompt_file))
         .stdout(Stdio::null())
@@ -107,22 +107,39 @@ fn run_codex(args: &Args, prompt: &str) -> Result<String> {
                 .wait_with_output()
                 .context("collect `codex exec` output")?;
             if !status.success() {
-                cleanup(&prompt_path, &output_path);
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 bail!("codex exec failed with status {status}: {}", stderr.trim());
             }
-            let raw = read_limited(&output_path, args.max_output_bytes)
+            let raw = read_limited(&temp_files.output_path, args.max_output_bytes)
                 .context("read Codex final message")?;
-            cleanup(&prompt_path, &output_path);
             return Ok(raw);
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            cleanup(&prompt_path, &output_path);
             bail!("codex exec timed out after {}s", args.timeout_secs);
         }
         thread::sleep(Duration::from_millis(100));
+    }
+}
+
+struct TempFiles {
+    prompt_path: std::path::PathBuf,
+    output_path: std::path::PathBuf,
+}
+
+impl TempFiles {
+    fn new() -> Self {
+        Self {
+            prompt_path: temp_path("graphify-codex-prompt"),
+            output_path: temp_path("graphify-codex-output"),
+        }
+    }
+}
+
+impl Drop for TempFiles {
+    fn drop(&mut self) {
+        cleanup(&self.prompt_path, &self.output_path);
     }
 }
 
@@ -238,5 +255,19 @@ mod tests {
         let prompt = codex_prompt("hello docs");
         assert!(prompt.contains("hello docs"));
         assert!(prompt.contains("existing_extraction"));
+    }
+
+    #[test]
+    fn temp_files_are_removed_on_drop() {
+        let temp_files = TempFiles::new();
+        let prompt_path = temp_files.prompt_path.clone();
+        let output_path = temp_files.output_path.clone();
+        std::fs::write(&prompt_path, "prompt").unwrap();
+        std::fs::write(&output_path, "output").unwrap();
+
+        drop(temp_files);
+
+        assert!(!prompt_path.exists());
+        assert!(!output_path.exists());
     }
 }
