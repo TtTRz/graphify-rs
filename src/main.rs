@@ -4,13 +4,14 @@ use clap_complete::{Shell, generate};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod config;
 mod install;
+mod llm;
 mod skill;
 
 const DEFAULT_OUTPUT_DIR: &str = ".graphify";
@@ -48,8 +49,19 @@ enum Commands {
         path: String,
         #[arg(short, long, default_value = DEFAULT_OUTPUT_DIR)]
         output: String,
+        /// Disable new LLM calls; local extraction still runs and cached LLM output is preserved.
         #[arg(long)]
         no_llm: bool,
+        /// Enable external local LLM CLI extraction. Requires --llm-command or graphify.toml llm_command.
+        #[arg(long)]
+        llm: bool,
+        /// Shell command for local LLM extraction. Prompt is sent on stdin; JSON extraction must be printed to stdout.
+        #[arg(long)]
+        llm_command: Option<String>,
+        /// Stable provider/cache label for --llm-command output.
+        #[arg(long)]
+        llm_provider: Option<String>,
+        /// Only process code files, skip docs and papers.
         #[arg(long)]
         code_only: bool,
         /// Only re-extract new/modified files since last build
@@ -316,6 +328,9 @@ async fn main() -> Result<()> {
             path,
             output,
             no_llm,
+            llm,
+            llm_command,
+            llm_provider,
             code_only,
             update,
             format,
@@ -334,6 +349,23 @@ async fn main() -> Result<()> {
                 output
             };
             let effective_no_llm = no_llm || cfg.no_llm.unwrap_or(false);
+            let effective_llm_command = llm_command.or(cfg.llm_command);
+            let effective_llm_enabled = !effective_no_llm
+                && (llm || cfg.llm.unwrap_or(false) || effective_llm_command.is_some());
+            if effective_llm_enabled && effective_llm_command.is_none() {
+                anyhow::bail!("--llm requires --llm-command or graphify.toml llm_command");
+            }
+            let effective_llm_provider = llm_provider
+                .or(cfg.llm_provider)
+                .unwrap_or_else(|| "cli".to_string());
+            let effective_llm_cli = if effective_llm_enabled {
+                effective_llm_command.map(|command| llm::LlmCliConfig {
+                    provider: effective_llm_provider,
+                    command,
+                })
+            } else {
+                None
+            };
             let effective_code_only = code_only || cfg.code_only.unwrap_or(false);
             let effective_embed = embed || cfg.embed.unwrap_or(false);
             let effective_embedding_provider =
@@ -363,6 +395,7 @@ async fn main() -> Result<()> {
                 &effective_path,
                 &effective_output,
                 effective_no_llm,
+                effective_llm_cli.as_ref(),
                 effective_code_only,
                 update,
                 &effective_formats,
@@ -373,7 +406,8 @@ async fn main() -> Result<()> {
                 &effective_embedding_provider,
                 &effective_embedding_model,
                 effective_anthropic_semantic,
-            )?;
+            )
+            .await?;
         }
         Commands::Install { platform } => {
             install::install_skill(&platform)?;
@@ -551,11 +585,246 @@ fn ensure_local_output_excluded(project_root: &Path, output_dir: &Path) {
     let _ = std::fs::write(exclude_path, output);
 }
 
+fn semantic_file_type(path: &Path) -> &'static str {
+    if path.extension().and_then(|e| e.to_str()) == Some("pdf") {
+        "paper"
+    } else {
+        "document"
+    }
+}
+
+async fn run_cli_semantic_extraction(
+    doc_files: &[PathBuf],
+    root: &Path,
+    output_dir: &Path,
+    cli: &llm::LlmCliConfig,
+    verb: Verbosity,
+    jobs: Option<usize>,
+) -> Vec<graphify_core::model::ExtractionResult> {
+    info_print!(
+        verb,
+        "  {} via local LLM CLI '{}' on {} doc/paper files...",
+        "Semantic extraction".cyan(),
+        cli.provider,
+        doc_files.len()
+    );
+    let cache_dir = llm::provider_cache_dir(output_dir, &cli.provider);
+    let concurrency = jobs.unwrap_or(4).min(8);
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
+    let mut results = Vec::new();
+
+    let pb_sem = if !verb.is_quiet() {
+        let pb = ProgressBar::new(doc_files.len() as u64);
+        pb.set_style(
+            ProgressStyle::with_template("  {bar:40.green/dim} {pos}/{len} docs ({eta} remaining)")
+                .unwrap()
+                .progress_chars("██░"),
+        );
+        Some(pb)
+    } else {
+        None
+    };
+
+    let mut handles = Vec::new();
+    for doc_path in doc_files {
+        if let Some(cached) = llm::load_current_entry(doc_path, root, &cache_dir, cli) {
+            let _ = llm::save_entry(doc_path, root, &cache_dir, cli, &cached);
+            results.push(cached);
+            if let Some(ref pb) = pb_sem {
+                pb.inc(1);
+            }
+            continue;
+        }
+
+        let content = match std::fs::read_to_string(doc_path) {
+            Ok(c) => c,
+            Err(_) => {
+                if let Some(ref pb) = pb_sem {
+                    pb.inc(1);
+                }
+                continue;
+            }
+        };
+        let existing = llm::load_latest_for_prompt(doc_path, root, &cache_dir);
+        let doc_p = doc_path.clone();
+        let root_p = root.to_path_buf();
+        let command = cli.command.clone();
+        let file_type = semantic_file_type(doc_path).to_string();
+        let sem_clone = sem.clone();
+        let handle = tokio::spawn(async move {
+            let _permit = sem_clone
+                .acquire()
+                .await
+                .map_err(|e| anyhow::anyhow!("semaphore closed: {e}"))?;
+            tokio::task::spawn_blocking(move || {
+                graphify_extract::semantic::extract_semantic_with_cli(
+                    &doc_p,
+                    &content,
+                    &file_type,
+                    &command,
+                    existing.as_ref(),
+                )
+                .map(|result| (doc_p, root_p, result))
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("LLM command task join error: {e}"))?
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        match handle.await {
+            Ok(Ok((doc_p, root_p, sem_result))) => {
+                verbose_print!(
+                    verb,
+                    "    {} → {} nodes, {} edges",
+                    doc_p.file_name().unwrap_or_default().to_string_lossy(),
+                    sem_result.nodes.len(),
+                    sem_result.edges.len()
+                );
+                let _ = llm::save_entry(
+                    &doc_p,
+                    &root_p,
+                    &cache_dir,
+                    &llm::LlmCliConfig {
+                        provider: cli.provider.clone(),
+                        command: cli.command.clone(),
+                    },
+                    &sem_result,
+                );
+                results.push(sem_result);
+            }
+            Ok(Err(e)) => {
+                verbose_print!(verb, "    {} semantic extraction: {}", "⚠".yellow(), e);
+            }
+            Err(e) => {
+                verbose_print!(verb, "    {} task join error: {}", "⚠".yellow(), e);
+            }
+        }
+        if let Some(ref pb) = pb_sem {
+            pb.inc(1);
+        }
+    }
+    if let Some(pb) = pb_sem {
+        pb.finish_and_clear();
+    }
+
+    results
+}
+
+async fn run_anthropic_semantic_extraction(
+    doc_files: &[PathBuf],
+    root: &Path,
+    output_dir: &Path,
+    api_key: &str,
+    verb: Verbosity,
+    jobs: Option<usize>,
+) -> Vec<graphify_core::model::ExtractionResult> {
+    info_print!(
+        verb,
+        "  {} via legacy Anthropic on {} doc/paper files...",
+        "Semantic extraction".cyan(),
+        doc_files.len()
+    );
+    let cache_dir = llm::provider_cache_dir(output_dir, "anthropic");
+    let legacy_cache_dir = output_dir.join("cache");
+    let concurrency = jobs.unwrap_or(4).min(8);
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
+    let mut results = Vec::new();
+
+    let pb_sem = if !verb.is_quiet() {
+        let pb = ProgressBar::new(doc_files.len() as u64);
+        pb.set_style(
+            ProgressStyle::with_template("  {bar:40.green/dim} {pos}/{len} docs ({eta} remaining)")
+                .unwrap()
+                .progress_chars("██░"),
+        );
+        Some(pb)
+    } else {
+        None
+    };
+
+    let mut handles = Vec::new();
+    for doc_path in doc_files {
+        let anthropic_cli = llm::LlmCliConfig {
+            provider: "anthropic".to_string(),
+            command: "anthropic".to_string(),
+        };
+        if let Some(cached) = llm::load_current_entry(doc_path, root, &cache_dir, &anthropic_cli)
+            .or_else(|| graphify_cache::load_cached_from(doc_path, root, &legacy_cache_dir))
+        {
+            let _ = llm::save_legacy_entry(doc_path, root, &cache_dir, "anthropic", &cached);
+            results.push(cached);
+            if let Some(ref pb) = pb_sem {
+                pb.inc(1);
+            }
+            continue;
+        }
+
+        let content = match std::fs::read_to_string(doc_path) {
+            Ok(c) => c,
+            Err(_) => {
+                if let Some(ref pb) = pb_sem {
+                    pb.inc(1);
+                }
+                continue;
+            }
+        };
+        let doc_p = doc_path.clone();
+        let key_clone = api_key.to_string();
+        let file_type = semantic_file_type(doc_path).to_string();
+        let sem_clone = sem.clone();
+        let handle = tokio::spawn(async move {
+            let _permit = sem_clone
+                .acquire()
+                .await
+                .map_err(|e| anyhow::anyhow!("semaphore closed: {e}"))?;
+            graphify_extract::semantic::extract_semantic(&doc_p, &content, &file_type, &key_clone)
+                .await
+                .map(|result| (doc_p, result))
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        match handle.await {
+            Ok(Ok((doc_p, sem_result))) => {
+                verbose_print!(
+                    verb,
+                    "    {} → {} nodes, {} edges",
+                    doc_p.file_name().unwrap_or_default().to_string_lossy(),
+                    sem_result.nodes.len(),
+                    sem_result.edges.len()
+                );
+                let _ = llm::save_legacy_entry(&doc_p, root, &cache_dir, "anthropic", &sem_result);
+                let _ =
+                    graphify_cache::save_cached_to(&doc_p, &sem_result, root, &legacy_cache_dir);
+                results.push(sem_result);
+            }
+            Ok(Err(e)) => {
+                verbose_print!(verb, "    {} semantic extraction: {}", "⚠".yellow(), e);
+            }
+            Err(e) => {
+                verbose_print!(verb, "    {} task join error: {}", "⚠".yellow(), e);
+            }
+        }
+        if let Some(ref pb) = pb_sem {
+            pb.inc(1);
+        }
+    }
+    if let Some(pb) = pb_sem {
+        pb.finish_and_clear();
+    }
+
+    results
+}
+
 #[allow(clippy::too_many_arguments)]
-fn cmd_build(
+async fn cmd_build(
     path: &str,
     output: &str,
     no_llm: bool,
+    llm_cli: Option<&llm::LlmCliConfig>,
     code_only: bool,
     update: bool,
     formats: &[String],
@@ -570,6 +839,7 @@ fn cmd_build(
     let root = PathBuf::from(path);
     let output_dir = PathBuf::from(output);
     ensure_local_output_excluded(&root, &output_dir);
+    std::fs::create_dir_all(&output_dir)?;
     let cache_dir = output_dir.join("cache");
 
     // Determine which formats to export (empty = all)
@@ -743,151 +1013,91 @@ fn cmd_build(
     );
 
     let mut extractions = vec![ast_result];
-
-    // ── Step 2b: Local document extraction (LLM-free) ──
-    if !code_only {
-        let doc_files: Vec<PathBuf> = detection
+    let doc_files: Vec<PathBuf> = if code_only {
+        Vec::new()
+    } else {
+        detection
             .files
             .get(&graphify_detect::FileType::Document)
             .into_iter()
             .chain(detection.files.get(&graphify_detect::FileType::Paper))
             .flat_map(|v| v.iter().map(|f| root.join(f)))
-            .collect();
-        if !doc_files.is_empty() {
+            .collect()
+    };
+
+    // ── Step 2b: Local document extraction (LLM-free) ──
+    if !doc_files.is_empty() {
+        info_print!(
+            verb,
+            "  {} local document context from {} doc/paper files...",
+            "Extracting".cyan(),
+            doc_files.len()
+        );
+        let doc_result = graphify_extract::doc_extract::extract_documents(&doc_files);
+        info_print!(
+            verb,
+            "  Pass 1b (docs): {} nodes, {} edges",
+            doc_result.nodes.len().to_string().bold(),
+            doc_result.edges.len().to_string().bold()
+        );
+        extractions.push(doc_result);
+    }
+
+    // ── Step 2c: Preserve cached LLM enrichments, even for --no-llm rebuilds ──
+    if !doc_files.is_empty() {
+        let mut active_llm_dirs = HashSet::new();
+        if let Some(cli) = llm_cli {
+            active_llm_dirs.insert(llm::provider_cache_dir(&output_dir, &cli.provider));
+        }
+        if anthropic_semantic && !no_llm {
+            active_llm_dirs.insert(llm::provider_cache_dir(&output_dir, "anthropic"));
+            active_llm_dirs.insert(cache_dir.clone());
+        }
+
+        let preserved =
+            llm::load_preserved_extractions(&doc_files, &root, &output_dir, &active_llm_dirs);
+        if !preserved.is_empty() {
+            let stale = preserved
+                .iter()
+                .filter(|entry| entry.stale_preserved)
+                .count();
             info_print!(
                 verb,
-                "  {} local document context from {} doc/paper files...",
-                "Extracting".cyan(),
-                doc_files.len()
+                "  Preserved {} cached LLM extraction(s){}",
+                preserved.len().to_string().cyan(),
+                if stale > 0 {
+                    format!(" ({} stale by source hash)", stale)
+                } else {
+                    String::new()
+                }
             );
-            let doc_result = graphify_extract::doc_extract::extract_documents(&doc_files);
-            info_print!(
-                verb,
-                "  Pass 1b (docs): {} nodes, {} edges",
-                doc_result.nodes.len().to_string().bold(),
-                doc_result.edges.len().to_string().bold()
-            );
-            extractions.push(doc_result);
+            extractions.extend(preserved.into_iter().map(|entry| entry.extraction));
         }
     }
 
-    // ── Step 2c: Optional legacy Anthropic extraction (explicit opt-in) ──
-    if anthropic_semantic && !no_llm && !code_only {
+    // ── Step 2d: Optional external local LLM CLI extraction ──
+    if let Some(cli) = llm_cli
+        && !doc_files.is_empty()
+    {
+        let cli_results =
+            run_cli_semantic_extraction(&doc_files, &root, &output_dir, cli, verb, jobs).await;
+        extractions.extend(cli_results);
+    } else if !no_llm && llm_cli.is_none() && !doc_files.is_empty() {
+        verbose_print!(
+            verb,
+            "  {} external LLM CLI extraction not configured; use --llm-command",
+            "ℹ".blue()
+        );
+    }
+
+    // ── Step 2e: Optional legacy Anthropic extraction (explicit opt-in) ──
+    if anthropic_semantic && !no_llm && !doc_files.is_empty() {
         let api_key = std::env::var("ANTHROPIC_API_KEY").ok();
         if let Some(key) = api_key {
-            let doc_files: Vec<PathBuf> = detection
-                .files
-                .get(&graphify_detect::FileType::Document)
-                .into_iter()
-                .chain(detection.files.get(&graphify_detect::FileType::Paper))
-                .flat_map(|v| v.iter().map(|f| root.join(f)))
-                .collect();
-
-            if !doc_files.is_empty() {
-                info_print!(
-                    verb,
-                    "  {} on {} doc/paper files...",
-                    "Semantic extraction".cyan(),
-                    doc_files.len()
-                );
-                let concurrency = jobs.unwrap_or(4).min(8);
-                let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
-                let rt = tokio::runtime::Handle::current();
-
-                let pb_sem = if !verb.is_quiet() {
-                    let pb = ProgressBar::new(doc_files.len() as u64);
-                    pb.set_style(
-                        ProgressStyle::with_template(
-                            "  {bar:40.green/dim} {pos}/{len} docs ({eta} remaining)",
-                        )
-                        .unwrap()
-                        .progress_chars("██░"),
-                    );
-                    Some(pb)
-                } else {
-                    None
-                };
-
-                // Collect tasks for concurrent execution
-                let mut handles = Vec::new();
-                for doc_path in &doc_files {
-                    // Check cache first (synchronous, on main thread)
-                    if let Some(cached) = graphify_cache::load_cached_from::<
-                        graphify_core::model::ExtractionResult,
-                    >(doc_path, &root, &cache_dir)
-                    {
-                        extractions.push(cached);
-                        if let Some(ref pb) = pb_sem {
-                            pb.inc(1);
-                        }
-                        continue;
-                    }
-                    let content = match std::fs::read_to_string(doc_path) {
-                        Ok(c) => c,
-                        Err(_) => {
-                            if let Some(ref pb) = pb_sem {
-                                pb.inc(1);
-                            }
-                            continue;
-                        }
-                    };
-                    let file_type = if doc_path.extension().and_then(|e| e.to_str()) == Some("pdf")
-                    {
-                        "paper"
-                    } else {
-                        "document"
-                    };
-                    let doc_p = doc_path.clone();
-                    let key_clone = key.clone();
-                    let sem_clone = sem.clone();
-                    let handle = rt.spawn(async move {
-                        let _permit = sem_clone
-                            .acquire()
-                            .await
-                            .map_err(|e| anyhow::anyhow!("semaphore closed: {e}"))?;
-                        graphify_extract::semantic::extract_semantic(
-                            &doc_p, &content, file_type, &key_clone,
-                        )
-                        .await
-                        .map(|r| (doc_p, r))
-                    });
-                    handles.push(handle);
-                }
-
-                // Collect results
-                for handle in handles {
-                    match rt.block_on(handle) {
-                        Ok(Ok((doc_p, sem_result))) => {
-                            verbose_print!(
-                                verb,
-                                "    {} → {} nodes, {} edges",
-                                doc_p.file_name().unwrap_or_default().to_string_lossy(),
-                                sem_result.nodes.len(),
-                                sem_result.edges.len()
-                            );
-                            let _ = graphify_cache::save_cached_to(
-                                &doc_p,
-                                &sem_result,
-                                &root,
-                                &cache_dir,
-                            );
-                            extractions.push(sem_result);
-                        }
-                        Ok(Err(e)) => {
-                            verbose_print!(verb, "    {} semantic extraction: {}", "⚠".yellow(), e);
-                        }
-                        Err(e) => {
-                            verbose_print!(verb, "    {} task join error: {}", "⚠".yellow(), e);
-                        }
-                    }
-                    if let Some(ref pb) = pb_sem {
-                        pb.inc(1);
-                    }
-                }
-                if let Some(pb) = pb_sem {
-                    pb.finish_and_clear();
-                }
-            }
+            let anthropic_results =
+                run_anthropic_semantic_extraction(&doc_files, &root, &output_dir, &key, verb, jobs)
+                    .await;
+            extractions.extend(anthropic_results);
         } else if n_doc + n_paper > 0 {
             info_print!(
                 verb,
@@ -1448,6 +1658,12 @@ fn cmd_init() -> Result<()> {
 
 # Disable LLM-based semantic extraction
 # no_llm = false
+
+# Optional external local LLM CLI extraction. The command receives a prompt on stdin
+# and must write semantic JSON with entities/relationships to stdout.
+# llm = false
+# llm_command = "graphify-llm-codex --model gpt-5.4-mini"
+# llm_provider = "codex-cli"
 
 # Only process code files (skip docs/papers)
 # code_only = false

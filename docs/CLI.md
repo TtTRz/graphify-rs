@@ -44,7 +44,7 @@ graphify-rs -q -j 2 serve               # quiet mode, 2 threads
 
 ### `graphify-rs build`
 
-Build the knowledge graph from files in a directory. This is the main pipeline: detect files -> extract AST (pass 1) -> semantic extraction via Claude API (pass 2) -> build graph -> cluster communities -> analyze -> export.
+Build the knowledge graph from files in a directory. This is the main pipeline: detect files -> extract AST (pass 1) -> local document context (pass 1b) -> optional local LLM CLI or legacy Anthropic semantic extraction -> build graph -> cluster communities -> analyze -> export.
 
 #### Parameters
 
@@ -52,7 +52,10 @@ Build the knowledge graph from files in a directory. This is the main pipeline: 
 |------|-------|------|---------|-------------|
 | `--path <PATH>` | `-p` | `String` | `"."` | Root directory to scan for source files. |
 | `--output <DIR>` | `-o` | `String` | `".graphify"` | Output directory for all generated files. |
-| `--no-llm` | | `bool` | `false` | Disable legacy LLM extraction. Local AST + document context extraction still runs. |
+| `--no-llm` | | `bool` | `false` | Disable new LLM calls. Local AST + document context extraction still runs, and cached LLM enrichments are preserved in rebuilds. |
+| `--llm` | | `bool` | `false` | Enable configured external local LLM CLI extraction. Requires `--llm-command` or `graphify.toml` `llm_command`. |
+| `--llm-command <CMD>` | | `String` | | Shell command for external LLM extraction. The prompt is sent on stdin; JSON extraction must be printed to stdout. |
+| `--llm-provider <NAME>` | | `String` | `"cli"` | Stable cache label for the external LLM command output. |
 | `--code-only` | | `bool` | `false` | Only process code files, skip docs and papers. |
 | `--update` | | `bool` | `false` | Safe incremental rebuild: scan the full current file set, but reuse SHA256 extraction cache for unchanged files so `graph.json` stays complete. |
 | `--format <FMT,...>` | | `String` (comma-separated) | all formats | Export formats to generate. Available: `json`, `html`, `graphml`, `cypher`, `svg`, `wiki`, `obsidian`, `report`, `context`. |
@@ -76,6 +79,10 @@ graphify-rs build --no-llm
 
 # Fast local-only build plus local semantic query index and LLM_CONTEXT.md
 graphify-rs build --no-llm --embed
+
+# Enrich docs with an installed local LLM CLI instead of an API key.
+# The command reads graphify's extraction prompt on stdin and prints JSON to stdout.
+graphify-rs build --llm-command 'graphify-llm-codex --model gpt-5.4-mini' --llm-provider codex-cli
 
 # Local Ollama embeddings instead of Model2Vec
 ollama pull embeddinggemma
@@ -105,11 +112,34 @@ graphify-rs build --update --code-only --no-llm --format json,report
 1. **Detect** — Scans `--path` for code, doc, paper, and image files (respects root `.gitignore`, `.git/info/exclude`, and `.graphifyignore`, skips sensitive files).
 2. **Extract AST (Pass 1)** — Deterministic tree-sitter + regex extraction for code files. Per-file SHA256 cache in `<output>/cache/`.
 3. **Local Document Context (Pass 1b)** — Markdown/RST/text headings and prose become concept nodes. This is LLM-free and runs unless `--code-only` is set.
-4. **Optional Legacy Anthropic Extraction** — Only runs with `--anthropic-semantic` and `ANTHROPIC_API_KEY`; skipped by default.
-5. **Build Graph** — Assemble nodes and edges, deduplicate, and annotate source quality (`source`, `generated`, `minified`, `test`, `build_artifact`, `dependency`, `project_context`).
-6. **Cluster** — Leiden community detection + cohesion scoring.
-7. **Analyze** — God nodes, surprising connections, suggested questions with generated/minified/test/build artifacts downranked.
-8. **Export** — Write selected formats to `--output`, including compact `LLM_CONTEXT.md` by default.
+4. **Cached LLM Preservation** — Reuses `<output>/llm-cache/<provider>/` and legacy `<output>/cache/` semantic results so `--no-llm` rebuilds do not erase prior LLM enrichments from the emitted graph.
+5. **Optional External LLM CLI Extraction** — Runs with `--llm-command`/`llm_command`; graphify sends a strict JSON extraction prompt on stdin, caches results by content hash plus provider/command/prompt metadata, and passes the previous per-path extraction back into the prompt when a file changed. `graphify-llm-codex` is the bundled adapter for installed Codex CLI.
+6. **Optional Legacy Anthropic Extraction** — Only runs with `--anthropic-semantic` and `ANTHROPIC_API_KEY`; skipped by default.
+7. **Build Graph** — Assemble nodes and edges, deduplicate, and annotate source quality (`source`, `generated`, `minified`, `test`, `build_artifact`, `dependency`, `project_context`).
+8. **Cluster** — Leiden community detection + cohesion scoring.
+9. **Analyze** — God nodes, surprising connections, suggested questions with generated/minified/test/build artifacts downranked.
+10. **Export** — Write selected formats to `--output`, including compact `LLM_CONTEXT.md` by default.
+
+---
+
+### `graphify-llm-codex`
+
+External LLM adapter for `graphify-rs build --llm-command`. It reads graphify's semantic extraction prompt from stdin, invokes installed `codex exec`, validates the final JSON, and prints only compact JSON to stdout.
+
+```bash
+graphify-llm-codex --model gpt-5.4-mini --reasoning-effort low < prompt.txt
+graphify-rs build --llm-command "graphify-llm-codex --model gpt-5.4-mini" --llm-provider codex-cli --embed
+```
+
+Useful flags: `--timeout-secs`, `--max-prompt-bytes`, `--max-output-bytes`, and `--dry-run`.
+
+### `graphifyq` and LLM refresh
+
+`graphifyq ensure/query` still defaults to no new LLM calls (`--no-llm`) so normal auto-refresh is cheap and predictable while preserving cached LLM enrichments. To explicitly spend local CLI LLM work during a refresh, pass:
+
+```bash
+graphifyq ensure --with-llm --llm-command "graphify-llm-codex --model gpt-5.4-mini" --llm-provider codex-cli
+```
 
 ---
 
@@ -606,7 +636,10 @@ Create a `graphify.toml` file in your project root (or run `graphify-rs init`) t
 | Field | Type | Default | CLI Override | Description |
 |-------|------|---------|-------------|-------------|
 | `output` | `String` | `".graphify"` | `--output` | Output directory for graph files. |
-| `no_llm` | `bool` | `false` | `--no-llm` | Disable LLM-based semantic extraction. |
+| `no_llm` | `bool` | `false` | `--no-llm` | Disable new LLM calls while preserving cached LLM enrichments in rebuilds. |
+| `llm` | `bool` | `false` | `--llm` | Enable configured external local LLM CLI extraction. |
+| `llm_command` | `String` | | `--llm-command` | Shell command that reads the extraction prompt on stdin and writes semantic JSON to stdout. |
+| `llm_provider` | `String` | `"cli"` | `--llm-provider` | Stable cache label under `<output>/llm-cache/`. |
 | `code_only` | `bool` | `false` | `--code-only` | Only process code files (skip docs/papers). |
 | `formats` | `String[]` | `[]` (all formats) | `--format` | Export formats to generate. |
 | `embed` | `bool` | `false` | `--embed` | Build the local Model2Vec semantic index. |
@@ -621,6 +654,9 @@ Create a `graphify.toml` file in your project root (or run `graphify-rs init`) t
 Specific merging rules:
 - `output`: CLI value is used if it differs from the built-in default (`".graphify"`); otherwise falls back to config.
 - `no_llm`: `true` if **either** CLI flag or config is `true` (OR logic).
+- `llm`: enabled when `--llm`, `llm = true`, or `llm_command` is configured, unless `no_llm` is true.
+- `llm_command`: required when external LLM extraction is enabled; stdout must contain the semantic JSON object.
+- `llm_provider`: identifies the cache namespace. Keep it stable so unchanged files reuse existing CLI LLM output.
 - `code_only`: `true` if **either** CLI flag or config is `true` (OR logic).
 - `formats`: CLI value is used if non-empty; otherwise falls back to config. Empty means all formats.
 - `embed`: `true` if **either** CLI flag or config is `true` (OR logic).
@@ -635,6 +671,12 @@ output = "knowledge-graph"
 # Skip Claude API calls by default
 no_llm = true
 
+# Or enrich documents through installed Codex CLI instead of an API key
+# no_llm = false
+# llm = true
+# llm_command = "graphify-llm-codex --model gpt-5.4-mini"
+# llm_provider = "codex-cli"
+
 # Only generate JSON and HTML
 formats = ["json", "html"]
 
@@ -647,7 +689,7 @@ embedding_model = "minishlab/potion-code-16M"
 
 | Variable | Description |
 |----------|-------------|
-| `ANTHROPIC_API_KEY` | Required for semantic extraction (pass 2). Without it, only AST extraction runs for doc/paper files. |
+| `ANTHROPIC_API_KEY` | Required only for `--anthropic-semantic`. External CLI LLM extraction uses `--llm-command` instead. |
 | `RUST_LOG` | Log level filter (default: `warn`). Overridden by `-v` (`debug`) or `-q` (`error`). |
 
 ---

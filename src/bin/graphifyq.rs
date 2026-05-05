@@ -49,6 +49,15 @@ enum CommandKind {
         /// Disable graphifyq's per-repository auto-refresh check.
         #[arg(long)]
         no_auto_refresh: bool,
+        /// Allow graphifyq refresh to run configured external LLM extraction. Default is no new LLM calls.
+        #[arg(long)]
+        with_llm: bool,
+        /// Shell command for external LLM extraction when --with-llm is set.
+        #[arg(long)]
+        llm_command: Option<String>,
+        /// Stable cache label for --llm-command output.
+        #[arg(long)]
+        llm_provider: Option<String>,
     },
     /// Print sidecar health and registry state.
     Doctor,
@@ -75,6 +84,15 @@ enum CommandKind {
         /// Disable graphifyq's per-repository auto-refresh check.
         #[arg(long)]
         no_auto_refresh: bool,
+        /// Allow graphifyq refresh to run configured external LLM extraction. Default is no new LLM calls.
+        #[arg(long)]
+        with_llm: bool,
+        /// Shell command for external LLM extraction when --with-llm is set.
+        #[arg(long)]
+        llm_command: Option<String>,
+        /// Stable cache label for --llm-command output.
+        #[arg(long)]
+        llm_provider: Option<String>,
     },
     /// Print graph statistics via the local sidecar.
     Stats,
@@ -135,6 +153,9 @@ async fn main() -> Result<()> {
             embedding_model,
             refresh_interval_secs,
             no_auto_refresh,
+            with_llm,
+            llm_command,
+            llm_provider,
         } => {
             let registry = ensure(
                 rebuild,
@@ -143,6 +164,7 @@ async fn main() -> Result<()> {
                 &embedding_provider,
                 &embedding_model,
                 RefreshPolicy::new(!no_auto_refresh, refresh_interval_secs),
+                build_llm_options(with_llm, llm_command, llm_provider),
             )
             .await?;
             println!("{}", serde_json::to_string_pretty(&registry)?);
@@ -176,6 +198,9 @@ async fn main() -> Result<()> {
             embedding_model,
             refresh_interval_secs,
             no_auto_refresh,
+            with_llm,
+            llm_command,
+            llm_provider,
         } => {
             let registry = ensure(
                 false,
@@ -184,6 +209,7 @@ async fn main() -> Result<()> {
                 &embedding_provider,
                 &embedding_model,
                 RefreshPolicy::new(!no_auto_refresh, refresh_interval_secs),
+                build_llm_options(with_llm, llm_command, llm_provider),
             )
             .await?;
             let response = post_json(
@@ -201,6 +227,7 @@ async fn main() -> Result<()> {
                 graphify_embed::DEFAULT_PROVIDER,
                 graphify_embed::DEFAULT_MODEL,
                 RefreshPolicy::default(),
+                None,
             )
             .await?;
             let response = get_json(&format!("{}/graphifyq/stats", registry.http_url)).await?;
@@ -214,6 +241,7 @@ async fn main() -> Result<()> {
                 graphify_embed::DEFAULT_PROVIDER,
                 graphify_embed::DEFAULT_MODEL,
                 RefreshPolicy::default(),
+                None,
             )
             .await?;
             let response = call_tool(
@@ -233,6 +261,7 @@ async fn main() -> Result<()> {
                 graphify_embed::DEFAULT_PROVIDER,
                 graphify_embed::DEFAULT_MODEL,
                 RefreshPolicy::default(),
+                None,
             )
             .await?;
             let args: Value = serde_json::from_str(&arguments)
@@ -259,6 +288,7 @@ async fn ensure(
     embedding_provider: &str,
     embedding_model: &str,
     refresh: RefreshPolicy,
+    llm: Option<BuildLlmOptions>,
 ) -> Result<Registry> {
     let paths = Paths::discover()?;
     let outcome = ensure_graph(
@@ -269,6 +299,7 @@ async fn ensure(
         embedding_provider,
         embedding_model,
         refresh,
+        llm.as_ref(),
     )?;
     if outcome.ran_build {
         stop_sidecar_if_running(&paths).await;
@@ -323,6 +354,7 @@ struct RefreshState {
     last_refresh_ms: u128,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn ensure_graph(
     paths: &Paths,
     rebuild: bool,
@@ -331,6 +363,7 @@ fn ensure_graph(
     embedding_provider: &str,
     embedding_model: &str,
     refresh: RefreshPolicy,
+    llm: Option<&BuildLlmOptions>,
 ) -> Result<BuildOutcome> {
     let embedding_model = normalize_embedding_model(embedding_provider, embedding_model);
     let semantic_path = paths.out_dir.join(graphify_embed::DEFAULT_INDEX_FILE);
@@ -363,6 +396,7 @@ fn ensure_graph(
         should_embed,
         embedding_provider,
         &embedding_model,
+        llm,
     )?;
     write_refresh_state(&paths.refresh_state_path, current_time_ms())?;
     Ok(BuildOutcome { ran_build: true })
@@ -409,6 +443,7 @@ fn run_build(
     embed: bool,
     embedding_provider: &str,
     embedding_model: &str,
+    llm: Option<&BuildLlmOptions>,
 ) -> Result<()> {
     fs::create_dir_all(paths.graph_path.parent().unwrap_or(&paths.root))?;
     let build_log_path = paths.out_dir.join("graphifyq-build.log");
@@ -418,7 +453,7 @@ fn run_build(
         .open(&build_log_path)
         .with_context(|| format!("open {}", build_log_path.display()))?;
     let build_log_err = build_log.try_clone()?;
-    let args = build_command_args(update, embed, embedding_provider, embedding_model);
+    let args = build_command_args(update, embed, embedding_provider, embedding_model, llm);
     let status = Command::new(graphify_rs_exe())
         .current_dir(&paths.root)
         .args(&args)
@@ -432,11 +467,29 @@ fn run_build(
     Ok(())
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct BuildLlmOptions {
+    command: String,
+    provider: Option<String>,
+}
+
+fn build_llm_options(
+    with_llm: bool,
+    command: Option<String>,
+    provider: Option<String>,
+) -> Option<BuildLlmOptions> {
+    with_llm.then(|| BuildLlmOptions {
+        command: command.unwrap_or_else(|| "graphify-llm-codex".to_string()),
+        provider,
+    })
+}
+
 fn build_command_args(
     update: bool,
     embed: bool,
     embedding_provider: &str,
     embedding_model: &str,
+    llm: Option<&BuildLlmOptions>,
 ) -> Vec<String> {
     let mut args = vec![
         "build".to_string(),
@@ -444,10 +497,17 @@ fn build_command_args(
         ".".to_string(),
         "--output".to_string(),
         ".graphify".to_string(),
-        "--no-llm".to_string(),
         "--format".to_string(),
         "json,report,context".to_string(),
     ];
+    if let Some(llm) = llm {
+        args.extend(["--llm-command".to_string(), llm.command.clone()]);
+        if let Some(provider) = &llm.provider {
+            args.extend(["--llm-provider".to_string(), provider.clone()]);
+        }
+    } else {
+        args.push("--no-llm".to_string());
+    }
     if update {
         args.push("--update".to_string());
     }
@@ -746,7 +806,7 @@ mod tests {
 
     #[test]
     fn build_command_args_use_update_only_for_refresh_path() {
-        let args = build_command_args(true, true, "ollama", "embeddinggemma");
+        let args = build_command_args(true, true, "ollama", "embeddinggemma", None);
 
         assert!(args.iter().any(|arg| arg == "--update"));
         assert!(args.iter().any(|arg| arg == "--embed"));
@@ -759,9 +819,33 @@ mod tests {
                 .any(|pair| pair[0] == "--embedding-model" && pair[1] == "embeddinggemma")
         );
 
-        let args = build_command_args(false, false, "model2vec", "minishlab/potion-base-8M");
+        let args = build_command_args(false, false, "model2vec", "minishlab/potion-base-8M", None);
         assert!(!args.iter().any(|arg| arg == "--update"));
         assert!(!args.iter().any(|arg| arg == "--embed"));
+    }
+
+    #[test]
+    fn build_command_args_supports_explicit_llm_refresh() {
+        let llm = BuildLlmOptions {
+            command: "graphify-llm-codex --model gpt-5.4-mini".to_string(),
+            provider: Some("codex".to_string()),
+        };
+        let args = build_command_args(
+            false,
+            true,
+            "model2vec",
+            "minishlab/potion-code-16M",
+            Some(&llm),
+        );
+        assert!(!args.iter().any(|arg| arg == "--no-llm"));
+        assert!(
+            args.windows(2)
+                .any(|pair| pair[0] == "--llm-command" && pair[1] == llm.command)
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair[0] == "--llm-provider" && pair[1] == "codex")
+        );
     }
 
     #[test]

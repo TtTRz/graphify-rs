@@ -10,6 +10,12 @@
 # Explicitly enable legacy Anthropic document extraction (requires ANTHROPIC_API_KEY)
 # anthropic_semantic = false
 
+# Or enrich documents through an installed local LLM CLI instead of an API key.
+# The command receives graphify's extraction prompt on stdin and must print JSON to stdout.
+# llm = true
+# llm_command = "graphify-llm-codex --model gpt-5.4-mini"
+# llm_provider = "codex-cli"
+
 # Only process code files (skip docs/papers)
 # code_only = false
 

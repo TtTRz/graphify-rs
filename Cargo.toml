@@ -103,6 +103,10 @@ path = "src/main.rs"
 name = "graphifyq"
 path = "src/bin/graphifyq.rs"
 
+[[bin]]
+name = "graphify-llm-codex"
+path = "src/bin/graphify-llm-codex.rs"
+
 [dependencies]
 graphify-core.workspace = true
 graphify-detect.workspace = true

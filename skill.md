@@ -14,7 +14,8 @@ Turn any folder of files into a navigable knowledge graph with community detecti
 /graphify                                             # full pipeline on current directory
 /graphify <path>                                      # full pipeline on specific path
 /graphify <path> --code-only                          # code files only, no LLM needed
-/graphify <path> --no-llm                             # skip semantic extraction (AST only)
+/graphify <path> --no-llm                             # no new LLM calls; preserve cached LLM output
+/graphify <path> --llm-command "graphify-llm-codex --model gpt-5.4-mini" --llm-provider codex-cli  # enrich docs via installed Codex CLI
 /graphify <path> --update                             # incremental - re-extract only new/changed files
 /graphify <path> --format json,html,report            # select specific export formats
 /graphify <path> --format graphml                     # export graph.graphml (Gephi, yEd)
@@ -29,6 +30,7 @@ Turn any folder of files into a navigable knowledge graph with community detecti
 /graphify watch <path>                                # watch folder, auto-rebuild on code changes
 /graphify serve                                       # start MCP stdio server for agent access
 graphifyq ensure                                      # build graph + local Model2Vec semantic index; auto-refresh stale graph every 300s; start/reuse HTTP MCP sidecar
+graphifyq ensure --with-llm --llm-command "graphify-llm-codex --model gpt-5.4-mini" --llm-provider codex-cli  # explicit LLM refresh
 graphifyq query "how does auth work?"                 # short-lived semantic HTTP query helper
 graphifyq summary architecture                        # architecture summary via MCP smart_summary
 ```
@@ -77,7 +79,9 @@ graphify-rs build --path INPUT_PATH --output .graphify --no-llm --embed
 Replace INPUT_PATH with the actual path the user provided.
 
 Available flags:
-- `--no-llm`: disable legacy LLM extraction; local AST + Markdown/RST/text document context still runs
+- `--no-llm`: make no new LLM calls; local AST + Markdown/RST/text document context still runs, and existing cached LLM output is preserved
+- `--llm-command "graphify-llm-codex --model gpt-5.4-mini"`: enrich docs/prose through an installed Codex CLI instead of asking for an API key
+- `--llm-provider codex-cli`: label/cache the external LLM backend so stale output is detected correctly
 - `--code-only`: only process code files
 - `--update`: incremental rebuild, only re-extract changed files
 - `--format json,html,report,context,wiki,svg,graphml,cypher,obsidian`: select export formats (default: all)
@@ -86,6 +90,13 @@ Available flags:
 - graphify respects root `.gitignore`, `.git/info/exclude`, and `.graphifyignore`; use `.graphifyignore` `!path` rules to re-include gitignored files for graphing
 - `--embedding-provider model2vec|ollama|voyage`: choose semantic index backend; default is local Model2Vec. Ollama uses `/api/embed`; Voyage needs `VOYAGE_API_KEY`
 - `--no-embed`: for `graphifyq`, opt out of the default semantic index when startup must be strictly AST-only/offline
+
+LLM enrichment rules for agents:
+- Default to `--no-llm` / `graphifyq ensure` unless the user explicitly asks for LLM enrichment.
+- `--no-llm` must not be treated as "delete LLM output"; graphify preserves cached LLM annotations in `.graphify/llm-cache.json`.
+- When running with `--llm-command`, graphify passes previous extraction back into the prompt for changed files, so follow-up builds are incremental/reiterative.
+- If the LLM provider/command/prompt contract changes, old LLM output is marked stale-preserved rather than silently overwritten.
+- Pass the repo or requested corpus root to `--path`; use `.graphifyignore` to narrow/re-include `src`, `bin`, docs, or generated directories.
 
 The command outputs progress with a progress bar and colored status messages.
 

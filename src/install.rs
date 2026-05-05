@@ -98,7 +98,8 @@ Rules:
 - Before answering architecture or codebase questions, run `graphifyq query "<question>"` when available; it builds/uses the local Model2Vec semantic index by default and auto-refreshes stale graphs every 300s
 - Read .graphify/GRAPH_REPORT.md for god nodes and community structure when you need broader orientation
 - If .graphify/wiki/index.md exists, navigate it instead of reading raw files
-- After modifying code files in this session, run `graphifyq ensure`; force `graphify-rs build --path . --output .graphify --no-llm --update --embed` only when you need an immediate rebuild
+- After modifying code files in this session, run `graphifyq ensure`; force `graphify-rs build --path . --output .graphify --no-llm --update --embed` only when you need an immediate rebuild without new LLM calls
+- `--no-llm` preserves existing cached LLM output; for explicit LLM refresh via installed Codex CLI, run `graphifyq ensure --with-llm --llm-command "graphify-llm-codex --model gpt-5.4-mini --reasoning-effort low" --llm-provider codex-cli`
 "#;
 
 const CLAUDE_MD_MARKER: &str = "## graphify";
@@ -113,7 +114,8 @@ Rules:
 - Before answering architecture or codebase questions, prefer `graphifyq query "<question>"` or `graphifyq summary architecture` when available; `graphifyq query` builds/uses the local Model2Vec semantic index by default and auto-refreshes stale graphs every 300s
 - Read .graphify/GRAPH_REPORT.md for god nodes and community structure when you need broader orientation
 - If .graphify/wiki/index.md exists, navigate it instead of reading raw files
-- After modifying code files in this session, run `graphifyq ensure`; force `graphify-rs build --path . --output .graphify --no-llm --update --embed` only when you need an immediate rebuild
+- After modifying code files in this session, run `graphifyq ensure`; force `graphify-rs build --path . --output .graphify --no-llm --update --embed` only when you need an immediate rebuild without new LLM calls
+- `--no-llm` preserves existing cached LLM output; for explicit LLM refresh via installed Codex CLI, run `graphifyq ensure --with-llm --llm-command "graphify-llm-codex --model gpt-5.4-mini --reasoning-effort low" --llm-provider codex-cli`
 "#;
 
 const AGENTS_MD_MARKER: &str = "## graphify";

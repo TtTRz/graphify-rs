@@ -29,6 +29,18 @@ graphify-rs codex install
 This writes `AGENTS.md` guidance and a `.codex/hooks.json` hook-check entry.
 Use `graphifyq` from Codex for short-lived graph access. `graphifyq ensure/query` builds and uses the local Model2Vec semantic index by default, auto-refreshes stale per-repo graphs every 300s, and restarts its local HTTP sidecar after refresh; pass `--no-embed` for strict AST-only/offline startup or `--no-auto-refresh` for read-only checks.
 
+LLM enrichment is explicit and can use installed CLIs instead of API keys. For
+Codex-backed extraction:
+
+```bash
+graphifyq ensure --with-llm \
+  --llm-command "graphify-llm-codex --model gpt-5.4-mini --reasoning-effort low" \
+  --llm-provider codex-cli
+```
+
+Regular `graphifyq ensure` / `graphify-rs build --no-llm` makes no new LLM calls
+and preserves existing cached LLM output.
+
 ## Claude Code
 
 Recommended global install path:

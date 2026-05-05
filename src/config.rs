@@ -18,6 +18,9 @@ pub struct Config {
     pub embedding_provider: Option<String>,
     pub embedding_model: Option<String>,
     pub anthropic_semantic: Option<bool>,
+    pub llm: Option<bool>,
+    pub llm_command: Option<String>,
+    pub llm_provider: Option<String>,
 }
 
 /// Load configuration from `graphify.toml` in the given directory.
@@ -48,6 +51,9 @@ mod tests {
         assert!(cfg.embedding_provider.is_none());
         assert!(cfg.embedding_model.is_none());
         assert!(cfg.anthropic_semantic.is_none());
+        assert!(cfg.llm.is_none());
+        assert!(cfg.llm_command.is_none());
+        assert!(cfg.llm_provider.is_none());
     }
 
     #[test]
@@ -66,6 +72,9 @@ embed = true
 embedding_provider = "model2vec"
 embedding_model = "minishlab/potion-code-16M"
 anthropic_semantic = false
+llm = true
+llm_command = "cat"
+llm_provider = "test-cli"
 "#;
         let cfg: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.output.as_deref(), Some("my-output"));
@@ -77,6 +86,9 @@ anthropic_semantic = false
         assert_eq!(cfg.embed, Some(true));
         assert_eq!(cfg.embedding_provider.as_deref(), Some("model2vec"));
         assert_eq!(cfg.anthropic_semantic, Some(false));
+        assert_eq!(cfg.llm, Some(true));
+        assert_eq!(cfg.llm_command.as_deref(), Some("cat"));
+        assert_eq!(cfg.llm_provider.as_deref(), Some("test-cli"));
         assert_eq!(
             cfg.embedding_model.as_deref(),
             Some("minishlab/potion-code-16M")
