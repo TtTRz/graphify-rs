@@ -162,9 +162,7 @@ pub fn extract_semantic_with_cli(
 
     debug!("running semantic extraction command for {}", file_str);
 
-    let mut child = Command::new("sh")
-        .arg("-c")
-        .arg(command)
+    let mut child = platform_shell_command(command)
         .env("GRAPHIFY_FILE", file_str.as_ref())
         .env("GRAPHIFY_FILE_TYPE", file_type)
         .stdin(Stdio::piped())
@@ -194,6 +192,22 @@ pub fn extract_semantic_with_cli(
 
     let stdout = String::from_utf8(output.stdout).context("LLM command stdout was not UTF-8")?;
     parse_semantic_response(&stdout, &file_str)
+}
+
+fn platform_shell_command(command: &str) -> Command {
+    #[cfg(windows)]
+    {
+        let mut child = Command::new("cmd");
+        child.arg("/C").arg(command);
+        child
+    }
+
+    #[cfg(not(windows))]
+    {
+        let mut child = Command::new("sh");
+        child.arg("-c").arg(command);
+        child
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -456,5 +470,28 @@ mod tests {
         assert!(prompt.contains("existing_extraction"));
         assert!(prompt.contains("\"label\": \"Old\""));
         assert!(prompt.contains("Return ONLY the JSON object"));
+    }
+
+    #[test]
+    fn cli_command_uses_platform_shell() {
+        let command = platform_shell_command("echo ok");
+        #[cfg(windows)]
+        {
+            assert_eq!(command.get_program().to_string_lossy(), "cmd");
+            let args: Vec<_> = command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect();
+            assert_eq!(args, vec!["/C", "echo ok"]);
+        }
+        #[cfg(not(windows))]
+        {
+            assert_eq!(command.get_program().to_string_lossy(), "sh");
+            let args: Vec<_> = command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect();
+            assert_eq!(args, vec!["-c", "echo ok"]);
+        }
     }
 }

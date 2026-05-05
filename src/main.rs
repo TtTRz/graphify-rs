@@ -1043,17 +1043,53 @@ async fn cmd_build(
         extractions.push(doc_result);
     }
 
-    // ── Step 2c: Preserve cached LLM enrichments, even for --no-llm rebuilds ──
-    if !doc_files.is_empty() {
-        let mut active_llm_dirs = HashSet::new();
-        if let Some(cli) = llm_cli {
-            active_llm_dirs.insert(llm::provider_cache_dir(&output_dir, &cli.provider));
-        }
-        if anthropic_semantic && !no_llm {
-            active_llm_dirs.insert(llm::provider_cache_dir(&output_dir, "anthropic"));
-            active_llm_dirs.insert(cache_dir.clone());
-        }
+    let mut active_llm_dirs = HashSet::new();
+    if let Some(cli) = llm_cli {
+        active_llm_dirs.insert(llm::provider_cache_dir(&output_dir, &cli.provider));
+    }
+    if anthropic_semantic && !no_llm {
+        active_llm_dirs.insert(llm::provider_cache_dir(&output_dir, "anthropic"));
+        active_llm_dirs.insert(cache_dir.clone());
+    }
 
+    // ── Step 2c: Optional external local LLM CLI extraction ──
+    if let Some(cli) = llm_cli
+        && !doc_files.is_empty()
+    {
+        let cli_results =
+            run_cli_semantic_extraction(&doc_files, &root, &output_dir, cli, verb, jobs).await;
+        extractions.extend(cli_results);
+    } else if !no_llm && llm_cli.is_none() && !doc_files.is_empty() {
+        verbose_print!(
+            verb,
+            "  {} external LLM CLI extraction not configured; use --llm-command",
+            "ℹ".blue()
+        );
+    }
+
+    // ── Step 2d: Optional legacy Anthropic extraction (explicit opt-in) ──
+    if anthropic_semantic && !no_llm && !doc_files.is_empty() {
+        let api_key = std::env::var("ANTHROPIC_API_KEY").ok();
+        if let Some(key) = api_key {
+            let anthropic_results =
+                run_anthropic_semantic_extraction(&doc_files, &root, &output_dir, &key, verb, jobs)
+                    .await;
+            extractions.extend(anthropic_results);
+        } else if n_doc + n_paper > 0 {
+            info_print!(
+                verb,
+                "  {} --anthropic-semantic was requested but ANTHROPIC_API_KEY is not set; local document context was still indexed",
+                "ℹ".blue()
+            );
+        }
+    }
+
+    // ── Step 2e: Preserve cached LLM enrichments, even for --no-llm rebuilds ──
+    //
+    // Keep this after fresh LLM extraction. graphify-build keeps the first node
+    // for duplicate IDs, so preserved stale/inactive provider output must never
+    // mask freshly generated annotations for the same file/entity IDs.
+    if !doc_files.is_empty() {
         let preserved =
             llm::load_preserved_extractions(&doc_files, &root, &output_dir, &active_llm_dirs);
         if !preserved.is_empty() {
@@ -1072,38 +1108,6 @@ async fn cmd_build(
                 }
             );
             extractions.extend(preserved.into_iter().map(|entry| entry.extraction));
-        }
-    }
-
-    // ── Step 2d: Optional external local LLM CLI extraction ──
-    if let Some(cli) = llm_cli
-        && !doc_files.is_empty()
-    {
-        let cli_results =
-            run_cli_semantic_extraction(&doc_files, &root, &output_dir, cli, verb, jobs).await;
-        extractions.extend(cli_results);
-    } else if !no_llm && llm_cli.is_none() && !doc_files.is_empty() {
-        verbose_print!(
-            verb,
-            "  {} external LLM CLI extraction not configured; use --llm-command",
-            "ℹ".blue()
-        );
-    }
-
-    // ── Step 2e: Optional legacy Anthropic extraction (explicit opt-in) ──
-    if anthropic_semantic && !no_llm && !doc_files.is_empty() {
-        let api_key = std::env::var("ANTHROPIC_API_KEY").ok();
-        if let Some(key) = api_key {
-            let anthropic_results =
-                run_anthropic_semantic_extraction(&doc_files, &root, &output_dir, &key, verb, jobs)
-                    .await;
-            extractions.extend(anthropic_results);
-        } else if n_doc + n_paper > 0 {
-            info_print!(
-                verb,
-                "  {} --anthropic-semantic was requested but ANTHROPIC_API_KEY is not set; local document context was still indexed",
-                "ℹ".blue()
-            );
         }
     }
 
