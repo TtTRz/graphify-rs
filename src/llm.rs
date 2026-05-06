@@ -108,7 +108,7 @@ pub fn load_current_entry(
     let source_hash = source_hash(path)?;
     let source_path = source_path_key(path, root);
     let cache_path = cache_dir.join(format!("{source_hash}.json"));
-    load_entry_file(&cache_path, path, root).and_then(|loaded| {
+    load_entry_file(&cache_path).and_then(|loaded| {
         let meta = loaded.metadata?;
         let matches = meta.schema_version == LLM_CACHE_SCHEMA_VERSION
             && meta.provider == cli.provider
@@ -125,7 +125,8 @@ pub fn load_latest_for_prompt(
     root: &Path,
     cache_dir: &Path,
 ) -> Option<ExtractionResult> {
-    load_entry_file(&latest_cache_path(path, root, cache_dir), path, root)
+    load_entry_file(&latest_cache_path(path, root, cache_dir))
+        .filter(|entry| entry.matches_source_path(path, root))
         .map(|entry| entry.extraction)
 }
 
@@ -135,7 +136,7 @@ pub fn load_current_or_latest_for_preservation(
     cache_dir: &Path,
 ) -> Option<LoadedLlmExtraction> {
     if let Some(current) = current_cache_path(path, cache_dir)
-        && let Some(loaded) = load_entry_file(&current, path, root)
+        && let Some(loaded) = load_entry_file(&current)
         && loaded.matches_source_path(path, root)
     {
         return Some(LoadedLlmExtraction {
@@ -143,12 +144,12 @@ pub fn load_current_or_latest_for_preservation(
             stale_preserved: false,
         });
     }
-    load_entry_file(&latest_cache_path(path, root, cache_dir), path, root).map(|loaded| {
-        LoadedLlmExtraction {
+    load_entry_file(&latest_cache_path(path, root, cache_dir))
+        .filter(|loaded| loaded.matches_source_path(path, root))
+        .map(|loaded| LoadedLlmExtraction {
             extraction: mark_stale(loaded.extraction, true),
             stale_preserved: true,
-        }
-    })
+        })
 }
 
 pub fn load_preserved_extractions(
@@ -215,7 +216,7 @@ pub fn save_legacy_entry(
     save_entry(path, root, cache_dir, &cli, extraction)
 }
 
-fn load_entry_file(path: &Path, source_path: &Path, root: &Path) -> Option<LoadedEntry> {
+fn load_entry_file(path: &Path) -> Option<LoadedEntry> {
     let data = std::fs::read_to_string(path).ok()?;
     if let Ok(entry) = serde_json::from_str::<LlmCacheEntry>(&data) {
         return Some(LoadedEntry {
@@ -224,24 +225,12 @@ fn load_entry_file(path: &Path, source_path: &Path, root: &Path) -> Option<Loade
         });
     }
     // Backward compatibility with the pre-metadata MVP and legacy Anthropic cache.
+    // Legacy files do not carry cache metadata, so path safety must be derived
+    // from the source_file fields inside the extraction instead of fabricating a
+    // requested-path metadata record at read time.
     if let Ok(extraction) = serde_json::from_str::<ExtractionResult>(&data) {
-        let source_hash = source_hash(source_path).unwrap_or_default();
-        let source_path = source_path
-            .strip_prefix(root)
-            .unwrap_or(source_path)
-            .to_string_lossy()
-            .to_string();
         return Some(LoadedEntry {
-            metadata: Some(LlmCacheMetadata {
-                schema_version: 0,
-                provider: "legacy".to_string(),
-                command_fingerprint: "legacy".to_string(),
-                prompt_version: "legacy".to_string(),
-                source_hash,
-                source_path,
-                generated_at_unix_secs: 0,
-                stale_preserved: false,
-            }),
+            metadata: None,
             extraction,
         });
     }
@@ -255,10 +244,26 @@ struct LoadedEntry {
 
 impl LoadedEntry {
     fn matches_source_path(&self, path: &Path, root: &Path) -> bool {
-        self.metadata
-            .as_ref()
-            .is_none_or(|meta| meta.source_path == source_path_key(path, root))
+        self.metadata.as_ref().map_or_else(
+            || extraction_sources_match_path(&self.extraction, path, root),
+            |meta| meta.source_path == source_path_key(path, root),
+        )
     }
+}
+
+fn extraction_sources_match_path(extraction: &ExtractionResult, path: &Path, root: &Path) -> bool {
+    let relative = source_path_key(path, root);
+    let requested = path.to_string_lossy();
+    let matches_path = |source_file: &str| source_file == relative || source_file == requested;
+
+    extraction
+        .nodes
+        .iter()
+        .all(|node| matches_path(&node.source_file))
+        && extraction
+            .edges
+            .iter()
+            .all(|edge| matches_path(&edge.source_file))
 }
 
 fn write_entry(path: &Path, entry: &LlmCacheEntry) -> bool {
@@ -327,11 +332,15 @@ mod tests {
     use std::collections::HashMap;
 
     fn extraction(label: &str) -> ExtractionResult {
+        extraction_with_source(label, "doc.md")
+    }
+
+    fn extraction_with_source(label: &str, source_file: &str) -> ExtractionResult {
         ExtractionResult {
             nodes: vec![GraphNode {
                 id: label.into(),
                 label: label.into(),
-                source_file: "doc.md".into(),
+                source_file: source_file.into(),
                 source_location: None,
                 node_type: NodeType::Concept,
                 community: None,
@@ -386,6 +395,24 @@ mod tests {
 
         assert!(load_current_entry(&first, root, &cache, &cli).is_some());
         assert!(load_current_entry(&second, root, &cache, &cli).is_none());
+        assert!(load_current_or_latest_for_preservation(&second, root, &cache).is_none());
+    }
+
+    #[test]
+    fn legacy_hash_cache_requires_matching_extraction_source_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let first = root.join("first.md");
+        let second = root.join("second.md");
+        std::fs::write(&first, "same bytes").unwrap();
+        std::fs::write(&second, "same bytes").unwrap();
+        let cache = root.join(".graphify").join("cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        let legacy = extraction_with_source("A", &source_path_key(&first, root));
+        let cache_path = current_cache_path(&first, &cache).unwrap();
+        std::fs::write(&cache_path, serde_json::to_string(&legacy).unwrap()).unwrap();
+
+        assert!(load_current_or_latest_for_preservation(&first, root, &cache).is_some());
         assert!(load_current_or_latest_for_preservation(&second, root, &cache).is_none());
     }
 
