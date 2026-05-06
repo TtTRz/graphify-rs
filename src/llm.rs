@@ -106,6 +106,7 @@ pub fn load_current_entry(
     cli: &LlmCliConfig,
 ) -> Option<ExtractionResult> {
     let source_hash = source_hash(path)?;
+    let source_path = source_path_key(path, root);
     let cache_path = cache_dir.join(format!("{source_hash}.json"));
     load_entry_file(&cache_path, path, root).and_then(|loaded| {
         let meta = loaded.metadata?;
@@ -113,7 +114,8 @@ pub fn load_current_entry(
             && meta.provider == cli.provider
             && meta.command_fingerprint == command_fingerprint(&cli.command)
             && meta.prompt_version == LLM_PROMPT_VERSION
-            && meta.source_hash == source_hash;
+            && meta.source_hash == source_hash
+            && meta.source_path == source_path;
         matches.then_some(loaded.extraction)
     })
 }
@@ -134,6 +136,7 @@ pub fn load_current_or_latest_for_preservation(
 ) -> Option<LoadedLlmExtraction> {
     if let Some(current) = current_cache_path(path, cache_dir)
         && let Some(loaded) = load_entry_file(&current, path, root)
+        && loaded.matches_source_path(path, root)
     {
         return Some(LoadedLlmExtraction {
             extraction: mark_stale(loaded.extraction, false),
@@ -180,11 +183,7 @@ pub fn save_entry(
     let Some(source_hash) = source_hash(path) else {
         return false;
     };
-    let source_path = path
-        .strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .to_string();
+    let source_path = source_path_key(path, root);
     let entry = LlmCacheEntry {
         metadata: LlmCacheMetadata {
             schema_version: LLM_CACHE_SCHEMA_VERSION,
@@ -254,6 +253,14 @@ struct LoadedEntry {
     extraction: ExtractionResult,
 }
 
+impl LoadedEntry {
+    fn matches_source_path(&self, path: &Path, root: &Path) -> bool {
+        self.metadata
+            .as_ref()
+            .is_none_or(|meta| meta.source_path == source_path_key(path, root))
+    }
+}
+
 fn write_entry(path: &Path, entry: &LlmCacheEntry) -> bool {
     if let Some(parent) = path.parent()
         && std::fs::create_dir_all(parent).is_err()
@@ -287,8 +294,15 @@ fn set_stale_edge(edge: &mut GraphEdge, stale: bool) {
 }
 
 fn stable_path_key(path: &Path, root: &Path) -> String {
-    let rel = path.strip_prefix(root).unwrap_or(path).to_string_lossy();
+    let rel = source_path_key(path, root);
     format!("{}.json", stable_hash_hex(rel.as_bytes()))
+}
+
+fn source_path_key(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string()
 }
 
 fn stable_hash_hex(bytes: &[u8]) -> String {
@@ -352,6 +366,27 @@ mod tests {
             command: "codex-b".into(),
         };
         assert!(load_current_entry(&doc, root, &cache, &other).is_none());
+    }
+
+    #[test]
+    fn current_cache_requires_matching_source_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let first = root.join("first.md");
+        let second = root.join("second.md");
+        std::fs::write(&first, "same bytes").unwrap();
+        std::fs::write(&second, "same bytes").unwrap();
+        let cache = provider_cache_dir(&root.join(".graphify"), "codex");
+        let cli = LlmCliConfig {
+            provider: "codex".into(),
+            command: "codex".into(),
+        };
+
+        assert!(save_entry(&first, root, &cache, &cli, &extraction("A")));
+
+        assert!(load_current_entry(&first, root, &cache, &cli).is_some());
+        assert!(load_current_entry(&second, root, &cache, &cli).is_none());
+        assert!(load_current_or_latest_for_preservation(&second, root, &cache).is_none());
     }
 
     #[test]

@@ -646,6 +646,7 @@ async fn run_cli_semantic_extraction(
             }
         };
         let existing = llm::load_latest_for_prompt(doc_path, root, &cache_dir);
+        let fallback = llm::load_current_or_latest_for_preservation(doc_path, root, &cache_dir);
         let doc_p = doc_path.clone();
         let root_p = root.to_path_buf();
         let command = cli.command.clone();
@@ -657,14 +658,22 @@ async fn run_cli_semantic_extraction(
                 .await
                 .map_err(|e| anyhow::anyhow!("semaphore closed: {e}"))?;
             tokio::task::spawn_blocking(move || {
-                graphify_extract::semantic::extract_semantic_with_cli(
+                match graphify_extract::semantic::extract_semantic_with_cli(
                     &doc_p,
                     &content,
                     &file_type,
                     &command,
                     existing.as_ref(),
-                )
-                .map(|result| (doc_p, root_p, result))
+                ) {
+                    Ok(result) => Ok((doc_p, root_p, result, false)),
+                    Err(err) => {
+                        if let Some(fallback) = fallback {
+                            Ok((doc_p, root_p, fallback.extraction, true))
+                        } else {
+                            Err(err)
+                        }
+                    }
+                }
             })
             .await
             .map_err(|e| anyhow::anyhow!("LLM command task join error: {e}"))?
@@ -674,24 +683,31 @@ async fn run_cli_semantic_extraction(
 
     for handle in handles {
         match handle.await {
-            Ok(Ok((doc_p, root_p, sem_result))) => {
+            Ok(Ok((doc_p, root_p, sem_result, used_fallback))) => {
                 verbose_print!(
                     verb,
-                    "    {} → {} nodes, {} edges",
+                    "    {} → {} nodes, {} edges{}",
                     doc_p.file_name().unwrap_or_default().to_string_lossy(),
                     sem_result.nodes.len(),
-                    sem_result.edges.len()
+                    sem_result.edges.len(),
+                    if used_fallback {
+                        " (cached fallback)"
+                    } else {
+                        ""
+                    }
                 );
-                let _ = llm::save_entry(
-                    &doc_p,
-                    &root_p,
-                    &cache_dir,
-                    &llm::LlmCliConfig {
-                        provider: cli.provider.clone(),
-                        command: cli.command.clone(),
-                    },
-                    &sem_result,
-                );
+                if !used_fallback {
+                    let _ = llm::save_entry(
+                        &doc_p,
+                        &root_p,
+                        &cache_dir,
+                        &llm::LlmCliConfig {
+                            provider: cli.provider.clone(),
+                            command: cli.command.clone(),
+                        },
+                        &sem_result,
+                    );
+                }
                 results.push(sem_result);
             }
             Ok(Err(e)) => {
@@ -1687,6 +1703,8 @@ fn cmd_init() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use graphify_core::model::{ExtractionResult, GraphNode, NodeType};
+    use std::collections::HashMap;
 
     #[test]
     fn default_output_is_added_to_local_git_exclude() {
@@ -1713,6 +1731,47 @@ mod tests {
                 || !std::fs::read_to_string(exclude_path)
                     .expect("read exclude")
                     .contains("graphify-out/")
+        );
+    }
+
+    #[tokio::test]
+    async fn cli_semantic_uses_cached_fallback_when_fresh_extraction_fails() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let output = root.join(".graphify");
+        let doc = root.join("doc.md");
+        std::fs::write(&doc, "v1").expect("write v1");
+
+        let cli = llm::LlmCliConfig {
+            provider: "codex".into(),
+            command: "definitely-missing-graphify-test-command".into(),
+        };
+        let cache = llm::provider_cache_dir(&output, &cli.provider);
+        let cached = ExtractionResult {
+            nodes: vec![GraphNode {
+                id: "cached".into(),
+                label: "Cached".into(),
+                source_file: "doc.md".into(),
+                source_location: None,
+                node_type: NodeType::Concept,
+                community: None,
+                extra: HashMap::new(),
+            }],
+            edges: Vec::new(),
+            hyperedges: Vec::new(),
+        };
+        assert!(llm::save_entry(&doc, root, &cache, &cli, &cached));
+
+        std::fs::write(&doc, "v2").expect("write v2");
+        let results =
+            run_cli_semantic_extraction(&[doc], root, &output, &cli, Verbosity::Quiet, Some(1))
+                .await;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].nodes[0].label, "Cached");
+        assert_eq!(
+            results[0].nodes[0].extra["llm_stale_preserved"],
+            serde_json::json!(true)
         );
     }
 }
