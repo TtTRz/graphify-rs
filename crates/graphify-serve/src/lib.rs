@@ -3,6 +3,7 @@
 //! Provides graph traversal and scoring functions used by the query
 //! engine and MCP protocol server. Port of Python query tools.
 
+pub mod format;
 pub mod http;
 pub mod mcp;
 
@@ -15,6 +16,8 @@ use graphify_embed::{SemanticEngine, SemanticMatch, default_index_path_for_graph
 use serde_json::Value;
 use thiserror::Error;
 use tracing::warn;
+
+pub use format::{GraphifyOutputFormat, format_value};
 
 /// Errors from the server.
 #[derive(Debug, Error)]

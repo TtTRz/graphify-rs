@@ -33,6 +33,7 @@ graphifyq ensure                                      # build graph + local Mode
 graphifyq ensure --with-llm --llm-command "graphify-llm-codex --model gpt-5.4-mini" --llm-provider codex-cli  # explicit LLM refresh
 graphifyq query "how does auth work?"                 # short-lived semantic HTTP query helper
 graphifyq summary architecture                        # architecture summary via MCP smart_summary
+graphifyq summary architecture --format toon           # compact structured rows for agents
 ```
 
 ## What graphify is for
@@ -256,6 +257,7 @@ graphifyq query "where is authentication wired?"
 graphifyq query --no-embed "where is queue backpressure handled?"
 graphifyq stats
 graphifyq summary architecture --budget 3000
+graphifyq summary architecture --budget 3000 --format toon
 ```
 
 `graphifyq` is intentionally like `fffq`: it starts/reuses a per-project local sidecar, stores the registry under `.graphify/.graphifyq-server.json`, and exits after printing the requested context.

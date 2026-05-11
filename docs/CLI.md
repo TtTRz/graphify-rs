@@ -302,12 +302,16 @@ graphifyq ensure --refresh-interval-secs 60
 graphifyq query "how does auth work?"     # semantic query context by default
 graphifyq query --no-embed "where is queue backpressure handled?"
 graphifyq stats
+graphifyq stats --format toon
 graphifyq summary architecture --budget 3000
+graphifyq summary architecture --budget 3000 --format toon
 graphifyq tool pagerank '{"top_n": 20}'
+graphifyq tool god_nodes '{"top_n": 20}' --format toon
 ```
 
 `graphifyq` records its per-repo refresh state in `.graphify/.graphifyq-refresh.json`.
 When the interval expires it runs `graphify-rs build --path . --output .graphify --no-llm --update`
+Use `--format toon` for compact structured agent context. Text stays the default.
 and includes `--embed` when semantic search is enabled (the default for `ensure` and `query`).
 If a local HTTP sidecar is already running, graphifyq terminates and restarts it after refresh
 so subsequent MCP/query calls load the new graph.
@@ -785,8 +789,9 @@ Once installed, the agent follows these rules (injected into `CLAUDE.md` or `AGE
 1. **Before answering architecture or codebase questions** — prefer `graphifyq query "<question>"`; it uses the local Model2Vec semantic index by default and auto-refreshes stale graphs every 300s.
 2. **For broad orientation** — read `.graphify/GRAPH_REPORT.md` for god nodes and community structure.
 3. **If `.graphify/wiki/index.md` exists** — navigate the wiki instead of reading raw files.
-4. **For strict AST-only/offline startup** — pass `--no-embed` to `graphifyq ensure/query`.
-5. **After modifying code files** — run `graphifyq ensure` to keep graph.json and semantic-index.json current; force `graphify-rs build --path . --output .graphify --no-llm --update --embed` only when an immediate rebuild is required.
+4. **For compact structured rows** — add `--format toon` to `graphifyq query`, `summary`, `stats`, or `tool`.
+5. **For strict AST-only/offline startup** — pass `--no-embed` to `graphifyq ensure/query`.
+6. **After modifying code files** — run `graphifyq ensure` to keep graph.json and semantic-index.json current; force `graphify-rs build --path . --output .graphify --no-llm --update --embed` only when an immediate rebuild is required.
 
 The `PreToolUse` hook automatically fires when the agent uses `Glob` or `Grep` tools (Claude/CodeBuddy) or `Bash` (Codex), injecting a reminder to check the graph first.
 

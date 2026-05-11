@@ -253,10 +253,13 @@ async fn handle_query_post(
         )
         .await;
     }
-    let arguments = json!({
+    let mut arguments = json!({
         "question": question,
         "budget": request["budget"].as_u64().unwrap_or(2000),
     });
+    if let Some(format) = request["format"].as_str() {
+        arguments["format"] = json!(format);
+    }
     call_tool(stream, state, "query_graph", arguments).await
 }
 
@@ -507,6 +510,21 @@ mod tests {
         let text = query["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("AuthService"));
         assert!(text.contains("Database"));
+
+        let toon_query: Value = client
+            .post(format!("{}/graphifyq/query", registry.http_url))
+            .json(&json!({"question": "auth database", "budget": 500, "format": "toon"}))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let text = toon_query["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("kind: query_graph"));
+        assert!(text.contains("nodes["));
 
         let stats: Value = client
             .get(format!("{}/graphifyq/stats", registry.http_url))

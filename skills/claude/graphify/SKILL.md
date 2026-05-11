@@ -72,6 +72,7 @@ graphifyq ensure
 graphifyq ensure --no-auto-refresh
 graphifyq query "QUESTION"
 graphifyq summary architecture --budget 3000
+graphifyq summary architecture --budget 3000 --format toon
 graphifyq stats
 ```
 
@@ -113,5 +114,6 @@ When answering architecture questions:
 
 - Prefer existing `.graphify/GRAPH_REPORT.md` and `graphifyq summary architecture` first.
 - Use `graphifyq query "..."` for focused questions.
+- Use `--format toon` when compact structured node/edge/community rows are better than prose.
 - Rebuild with `graphifyq ensure` or `--no-llm --update` after meaningful code changes; use `--with-llm` only for explicit LLM refresh/enrichment.
 - Do not paste full graph JSON or full reports unless explicitly requested.

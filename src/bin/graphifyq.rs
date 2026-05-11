@@ -66,6 +66,8 @@ enum CommandKind {
         question: String,
         #[arg(long, default_value_t = 2000)]
         budget: usize,
+        #[arg(long, value_enum, default_value_t = OutputFormatArg::Text)]
+        format: OutputFormatArg,
         /// Ensure a semantic index exists before querying. Enabled by default; kept for compatibility.
         #[arg(long, action = ArgAction::SetTrue, conflicts_with = "no_embed")]
         embed: bool,
@@ -95,20 +97,48 @@ enum CommandKind {
         llm_provider: Option<String>,
     },
     /// Print graph statistics via the local sidecar.
-    Stats,
+    Stats {
+        #[arg(long, value_enum, default_value_t = OutputFormatArg::Text)]
+        format: OutputFormatArg,
+    },
     /// Generate smart graph summary via MCP.
     Summary {
         #[arg(value_enum, default_value_t = SummaryLevelArg::Community)]
         level: SummaryLevelArg,
         #[arg(long, default_value_t = 2000)]
         budget: usize,
+        #[arg(long, value_enum, default_value_t = OutputFormatArg::Text)]
+        format: OutputFormatArg,
     },
     /// Call a raw MCP tool: graphifyq tool <name> '{"arg":"value"}'
     Tool {
         name: String,
         #[arg(default_value = "{}")]
         arguments: String,
+        #[arg(long, value_enum, default_value_t = OutputFormatArg::Text)]
+        format: OutputFormatArg,
     },
+}
+
+#[derive(Clone, Debug, ValueEnum, Eq, PartialEq)]
+enum OutputFormatArg {
+    Text,
+    Json,
+    Toon,
+}
+
+impl OutputFormatArg {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Json => "json",
+            Self::Toon => "toon",
+        }
+    }
+
+    fn graphify_format(&self) -> graphify_serve::GraphifyOutputFormat {
+        graphify_serve::GraphifyOutputFormat::parse(Some(self.as_str()))
+    }
 }
 
 #[derive(Clone, Debug, ValueEnum)]
@@ -192,6 +222,7 @@ async fn main() -> Result<()> {
         CommandKind::Query {
             question,
             budget,
+            format,
             embed,
             no_embed,
             embedding_provider,
@@ -214,12 +245,12 @@ async fn main() -> Result<()> {
             .await?;
             let response = post_json(
                 &format!("{}/graphifyq/query", registry.http_url),
-                &json!({"question": question, "budget": budget}),
+                &json!({"question": question, "budget": budget, "format": format.as_str()}),
             )
             .await?;
             print_tool_response(&response)?;
         }
-        CommandKind::Stats => {
+        CommandKind::Stats { format } => {
             let registry = ensure(
                 false,
                 false,
@@ -231,9 +262,13 @@ async fn main() -> Result<()> {
             )
             .await?;
             let response = get_json(&format!("{}/graphifyq/stats", registry.http_url)).await?;
-            println!("{}", serde_json::to_string_pretty(&response)?);
+            print_value_response(&response, &format)?;
         }
-        CommandKind::Summary { level, budget } => {
+        CommandKind::Summary {
+            level,
+            budget,
+            format,
+        } => {
             let registry = ensure(
                 false,
                 false,
@@ -247,12 +282,16 @@ async fn main() -> Result<()> {
             let response = call_tool(
                 &registry,
                 "smart_summary",
-                json!({"level": level.as_str(), "budget": budget}),
+                json!({"level": level.as_str(), "budget": budget, "format": format.as_str()}),
             )
             .await?;
             print_tool_response(&response)?;
         }
-        CommandKind::Tool { name, arguments } => {
+        CommandKind::Tool {
+            name,
+            arguments,
+            format,
+        } => {
             let require_semantic = name == "semantic_query";
             let registry = ensure(
                 false,
@@ -266,6 +305,7 @@ async fn main() -> Result<()> {
             .await?;
             let args: Value = serde_json::from_str(&arguments)
                 .with_context(|| "tool arguments must be valid JSON")?;
+            let args = arguments_with_format(args, &format);
             let response = call_tool(&registry, &name, args).await?;
             print_tool_response(&response)?;
         }
@@ -734,6 +774,23 @@ fn print_tool_response(response: &Value) -> Result<()> {
     Ok(())
 }
 
+fn print_value_response(response: &Value, format: &OutputFormatArg) -> Result<()> {
+    let formatted = graphify_serve::format_value(response, format.graphify_format())
+        .map_err(anyhow::Error::msg)?;
+    println!("{formatted}");
+    Ok(())
+}
+
+fn arguments_with_format(mut args: Value, format: &OutputFormatArg) -> Value {
+    if format == &OutputFormatArg::Text {
+        return args;
+    }
+    if let Some(object) = args.as_object_mut() {
+        object.insert("format".to_string(), json!(format.as_str()));
+    }
+    args
+}
+
 fn graphify_rs_exe() -> PathBuf {
     let current = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("graphifyq"));
     let sibling = current.with_file_name(if cfg!(windows) {
@@ -782,6 +839,28 @@ mod tests {
         assert_eq!(SummaryLevelArg::Detailed.as_str(), "detailed");
         assert_eq!(SummaryLevelArg::Community.as_str(), "community");
         assert_eq!(SummaryLevelArg::Architecture.as_str(), "architecture");
+    }
+
+    #[test]
+    fn output_format_arg_serializes_to_tool_values() {
+        assert_eq!(OutputFormatArg::Text.as_str(), "text");
+        assert_eq!(OutputFormatArg::Json.as_str(), "json");
+        assert_eq!(OutputFormatArg::Toon.as_str(), "toon");
+    }
+
+    #[test]
+    fn arguments_with_format_preserves_text_default() {
+        let args = json!({"top_n": 2});
+        assert_eq!(
+            arguments_with_format(args.clone(), &OutputFormatArg::Text),
+            args
+        );
+    }
+
+    #[test]
+    fn arguments_with_format_injects_toon() {
+        let args = arguments_with_format(json!({"top_n": 2}), &OutputFormatArg::Toon);
+        assert_eq!(args["format"], "toon");
     }
 
     #[test]

@@ -85,6 +85,7 @@ local HTTP MCP sidecar, auto-refreshes stale graphs, writes its registry to
 graphifyq ensure
 graphifyq query "where is authentication wired?"
 graphifyq summary architecture --budget 3000
+graphifyq summary architecture --budget 3000 --format toon
 graphifyq stats
 graphifyq tool graph_stats '{}'
 ```
@@ -111,6 +112,7 @@ Codex hook output; use `graphifyq` explicitly for graph context.
 
 - If `.graphify/GRAPH_REPORT.md` exists, consult it before broad architecture answers.
 - Prefer `graphifyq query` or `graphifyq summary architecture` for concise context.
+- Use `--format toon` when compact structured node/edge/community rows are better than prose.
 - Keep `.graphify/` current after meaningful code edits with `graphifyq ensure`; use `--no-llm --update` only to force an immediate rebuild without new LLM calls.
 - Use `graphifyq ensure --with-llm --llm-command "graphify-llm-codex ..."` only for explicit LLM refresh/enrichment.
 - Do not paste entire reports; summarize god nodes, communities, cycles, and next questions.

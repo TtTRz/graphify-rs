@@ -12,6 +12,7 @@ graphify-analyze.workspace = true
 graphify-embed.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+toon-format.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 thiserror.workspace = true

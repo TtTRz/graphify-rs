@@ -53,6 +53,7 @@ graphify-rs query "how does auth work?"
 # Use --no-embed for fast/offline AST-only mode or --no-auto-refresh for read-only checks.
 graphifyq ensure
 graphifyq query "how does auth work?"
+graphifyq summary architecture --format toon  # compact structured context for agents
 
 # Optional embedding backends
 ollama pull embeddinggemma
@@ -104,6 +105,8 @@ Rust rewrite of [graphify](https://github.com/safishamsi/graphify) (Python) — 
 **Optional external LLM CLI extraction** (`--llm-command`): graphify can call an installed local CLI instead of requiring an API key. The command receives a strict semantic-extraction prompt on stdin and must print JSON with `entities` and `relationships` to stdout. The bundled `graphify-llm-codex` adapter makes installed Codex CLI usable directly, for example `--llm-command "graphify-llm-codex --model gpt-5.4-mini" --llm-provider codex-cli`. Results are stored under `.graphify/llm-cache/<provider>/` with provider/command/prompt metadata; `--no-llm` rebuilds preserve cached LLM enrichments in `graph.json`, and later LLM runs reuse unchanged file caches while passing previous per-path output back into the prompt for changed files.
 
 **Semantic query index** (`--embed`, default for `graphifyq ensure/query`): embeddings are stored in `.graphify/semantic-index.json` so `query_graph` / `semantic_query` can rank graph nodes by natural-language meaning before returning relationship-aware graph context. Default backend is local Model2Vec. `--embedding-provider ollama` uses Ollama `/api/embed`; `--embedding-provider voyage` uses Voyage embeddings with `VOYAGE_API_KEY`. `graphifyq` also keeps per-repo graphs fresh with a 300s TTL by running `graphify-rs build --path . --output .graphify --no-llm --update --embed` when stale, then restarting its local HTTP sidecar so queries see the new graph. Use `graphifyq ensure --no-embed` or `graphifyq query --no-embed ...` when you explicitly need AST-only/offline startup; use `--no-auto-refresh` for read-only checks.
+
+**Compact agent output**: `graphifyq query`, `summary`, `stats`, and raw `tool` calls support `--format text|json|toon`. Text remains the default; use `--format toon` when an agent needs compact structured rows for nodes, edges, communities, paths, or rankings.
 
 **LLM context pack**: `.graphify/LLM_CONTEXT.md` is a compact, ranked first-read artifact for agents. It boosts project docs and production entrypoints while downranking generated/minified/build/test/dependency nodes.
 
