@@ -52,7 +52,7 @@ graphify-rs query "how does auth work?"
 # Model2Vec semantic search is on by default; graphifyq auto-refreshes stale graphs every 300s.
 # Use --no-embed for fast/offline AST-only mode or --no-auto-refresh for read-only checks.
 graphifyq ensure
-graphifyq query "how does auth work?"
+graphifyq query "how does auth work?" --format toon
 graphifyq summary architecture --format toon  # compact structured context for agents
 
 # Optional embedding backends
@@ -106,7 +106,7 @@ Rust rewrite of [graphify](https://github.com/safishamsi/graphify) (Python) — 
 
 **Semantic query index** (`--embed`, default for `graphifyq ensure/query`): embeddings are stored in `.graphify/semantic-index.json` so `query_graph` / `semantic_query` can rank graph nodes by natural-language meaning before returning relationship-aware graph context. Default backend is local Model2Vec. `--embedding-provider ollama` uses Ollama `/api/embed`; `--embedding-provider voyage` uses Voyage embeddings with `VOYAGE_API_KEY`. `graphifyq` also keeps per-repo graphs fresh with a 300s TTL by running `graphify-rs build --path . --output .graphify --no-llm --update --embed` when stale, then restarting its local HTTP sidecar so queries see the new graph. Use `graphifyq ensure --no-embed` or `graphifyq query --no-embed ...` when you explicitly need AST-only/offline startup; use `--no-auto-refresh` for read-only checks.
 
-**Compact agent output**: `graphifyq query`, `summary`, `stats`, and raw `tool` calls support `--format text|json|toon`. Text remains the default; use `--format toon` when an agent needs compact structured rows for nodes, edges, communities, paths, or rankings.
+**Compact agent output**: `graphifyq query`, `summary`, `stats`, and raw `tool` calls support `--format text|json|toon`. Text remains the CLI default for humans; installed agent skills default their graphifyq context calls to `--format toon` and omit it only for prose/human-readable output.
 
 **LLM context pack**: `.graphify/LLM_CONTEXT.md` is a compact, ranked first-read artifact for agents. It boosts project docs and production entrypoints while downranking generated/minified/build/test/dependency nodes.
 
@@ -185,7 +185,7 @@ graphify-rs query "question" [--dfs] [--budget 2000]            # query
 graphify-rs watch --path .                                       # auto-rebuild
     graphify-rs serve                                                 # MCP stdio server
     graphify-rs serve --transport http --registry-path .graphify/.graphifyq-server.json
-    graphifyq query "where is auth wired?"                            # semantic by default; auto-refresh stale graph, reuse local HTTP sidecar
+    graphifyq query "where is auth wired?" --format toon               # semantic + compact agent rows; auto-refresh stale graph, reuse local HTTP sidecar
 graphify-rs diff old.json new.json                               # compare
 graphify-rs stats graph.json                                     # statistics
 ```

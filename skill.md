@@ -31,9 +31,8 @@ Turn any folder of files into a navigable knowledge graph with community detecti
 /graphify serve                                       # start MCP stdio server for agent access
 graphifyq ensure                                      # build graph + local Model2Vec semantic index; auto-refresh stale graph every 300s; start/reuse HTTP MCP sidecar
 graphifyq ensure --with-llm --llm-command "graphify-llm-codex --model gpt-5.4-mini" --llm-provider codex-cli  # explicit LLM refresh
-graphifyq query "how does auth work?"                 # short-lived semantic HTTP query helper
-graphifyq summary architecture                        # architecture summary via MCP smart_summary
-graphifyq summary architecture --format toon           # compact structured rows for agents
+graphifyq query "how does auth work?" --format toon    # default agent context: compact structured rows
+graphifyq summary architecture --format toon           # default agent summary format
 ```
 
 ## What graphify is for
@@ -94,6 +93,7 @@ Available flags:
 
 LLM enrichment rules for agents:
 - Default to `--no-llm` / `graphifyq ensure` unless the user explicitly asks for LLM enrichment.
+- Default agent-context `graphifyq query`, `summary`, `stats`, and `tool` calls to `--format toon`; omit it only when the user asks for prose/human-readable text.
 - `--no-llm` must not be treated as "delete LLM output"; graphify preserves cached LLM annotations in `.graphify/llm-cache.json`.
 - When running with `--llm-command`, graphify passes previous extraction back into the prompt for changed files, so follow-up builds are incremental/reiterative.
 - If the LLM provider/command/prompt contract changes, old LLM output is marked stale-preserved rather than silently overwritten.
@@ -253,10 +253,9 @@ For Codex-style short-lived calls, prefer `graphifyq`:
 ```bash
 graphifyq ensure
 graphifyq ensure --no-embed      # opt out only for strict AST-only/offline startup
-graphifyq query "where is authentication wired?"
-graphifyq query --no-embed "where is queue backpressure handled?"
-graphifyq stats
-graphifyq summary architecture --budget 3000
+graphifyq query "where is authentication wired?" --format toon
+graphifyq query --no-embed "where is queue backpressure handled?" --format toon
+graphifyq stats --format toon
 graphifyq summary architecture --budget 3000 --format toon
 ```
 
