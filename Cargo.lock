@@ -630,7 +630,6 @@ name = "graphify-build"
 version = "0.4.5"
 dependencies = [
  "graphify-core",
- "petgraph",
  "thiserror 2.0.18",
  "tracing",
 ]
@@ -653,7 +652,6 @@ version = "0.4.5"
 dependencies = [
  "graphify-core",
  "petgraph",
- "rand",
  "thiserror 2.0.18",
  "tracing",
 ]
@@ -690,7 +688,6 @@ version = "0.4.5"
 dependencies = [
  "anyhow",
  "graphify-core",
- "minijinja",
  "serde",
  "serde_json",
  "tempfile",
@@ -714,7 +711,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
- "tokio",
  "tracing",
  "tree-sitter",
  "tree-sitter-c",
@@ -734,7 +730,6 @@ dependencies = [
 name = "graphify-hooks"
 version = "0.4.5"
 dependencies = [
- "anyhow",
  "graphify-core",
  "tempfile",
  "thiserror 2.0.18",
@@ -797,8 +792,6 @@ dependencies = [
 name = "graphify-security"
 version = "0.4.5"
 dependencies = [
- "regex",
- "reqwest",
  "thiserror 2.0.18",
  "tracing",
  "url",
@@ -808,7 +801,6 @@ dependencies = [
 name = "graphify-serve"
 version = "0.4.5"
 dependencies = [
- "anyhow",
  "graphify-analyze",
  "graphify-core",
  "serde",
@@ -1308,26 +1300,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
-name = "memo-map"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38d1115007560874e373613744c6fba374c17688327a71c1476d1a5954cc857b"
-
-[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
-
-[[package]]
-name = "minijinja"
-version = "2.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "805bfd7352166bae857ee569628b52bcd85a1cecf7810861ebceb1686b72b75d"
-dependencies = [
- "memo-map",
- "serde",
-]
 
 [[package]]
 name = "mio"
@@ -1563,15 +1539,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ppv-lite86"
-version = "0.2.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
-dependencies = [
- "zerocopy",
-]
-
-[[package]]
 name = "prettyplease"
 version = "0.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1604,36 +1571,6 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
-
-[[package]]
-name = "rand"
-version = "0.8.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
-dependencies = [
- "libc",
- "rand_chacha",
- "rand_core",
-]
-
-[[package]]
-name = "rand_chacha"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
-dependencies = [
- "ppv-lite86",
- "rand_core",
-]
-
-[[package]]
-name = "rand_core"
-version = "0.6.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
-dependencies = [
- "getrandom 0.2.17",
-]
 
 [[package]]
 name = "rayon"

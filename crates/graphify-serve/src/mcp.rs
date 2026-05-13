@@ -299,6 +299,13 @@ fn tool_result_text(text: &str) -> Value {
     })
 }
 
+fn tool_result_json<T: serde::Serialize>(value: &T) -> Value {
+    let text = serde_json::to_string_pretty(value).unwrap_or_else(|e| {
+        format!("{{\"error\": \"serialization failed: {}\"}}", e)
+    });
+    tool_result_text(&text)
+}
+
 fn tool_result_error(text: &str) -> Value {
     json!({
         "content": [{
@@ -363,7 +370,7 @@ fn handle_get_node(graph: &KnowledgeGraph, args: &Value) -> Value {
                 "degree": degree,
                 "neighbors": neighbors,
             });
-            tool_result_text(&serde_json::to_string_pretty(&result).unwrap_or_default())
+            tool_result_json(&result)
         }
         None => tool_result_error(&format!("Node not found: {node_id}")),
     }
@@ -414,7 +421,7 @@ fn handle_get_neighbors(graph: &KnowledgeGraph, args: &Value) -> Value {
         "neighbors": neighbor_info,
     });
 
-    tool_result_text(&serde_json::to_string_pretty(&result).unwrap_or_default())
+    tool_result_json(&result)
 }
 
 fn handle_get_community(graph: &KnowledgeGraph, args: &Value) -> Value {
@@ -455,7 +462,7 @@ fn handle_get_community(graph: &KnowledgeGraph, args: &Value) -> Value {
         "members": members,
     });
 
-    tool_result_text(&serde_json::to_string_pretty(&result).unwrap_or_default())
+    tool_result_json(&result)
 }
 
 fn handle_god_nodes(graph: &KnowledgeGraph, args: &Value) -> Value {
@@ -482,12 +489,12 @@ fn handle_god_nodes(graph: &KnowledgeGraph, args: &Value) -> Value {
         "god_nodes": result,
     });
 
-    tool_result_text(&serde_json::to_string_pretty(&output).unwrap_or_default())
+    tool_result_json(&output)
 }
 
 fn handle_graph_stats(graph: &KnowledgeGraph) -> Value {
     let stats = graph_stats(graph);
-    tool_result_text(&serde_json::to_string_pretty(&stats).unwrap_or_default())
+    tool_result_json(&stats)
 }
 
 fn handle_shortest_path(graph: &KnowledgeGraph, args: &Value) -> Value {
@@ -506,14 +513,17 @@ fn handle_shortest_path(graph: &KnowledgeGraph, args: &Value) -> Value {
     }
 
     if source == target {
-        let node = graph.get_node(source).unwrap();
+        let node = match graph.get_node(source) {
+            Some(n) => n,
+            None => return tool_result_error(&format!("Source node not found: {source}")),
+        };
         let result = json!({
             "source": source,
             "target": target,
             "path_length": 0,
             "path": [{"id": node.id, "label": node.label}],
         });
-        return tool_result_text(&serde_json::to_string_pretty(&result).unwrap_or_default());
+        return tool_result_json(&result);
     }
 
     // BFS shortest path
@@ -569,7 +579,7 @@ fn handle_shortest_path(graph: &KnowledgeGraph, args: &Value) -> Value {
         "path": path_nodes,
     });
 
-    tool_result_text(&serde_json::to_string_pretty(&result).unwrap_or_default())
+    tool_result_json(&result)
 }
 
 fn handle_find_all_paths(graph: &KnowledgeGraph, args: &Value) -> Value {
@@ -614,7 +624,7 @@ fn handle_find_all_paths(graph: &KnowledgeGraph, args: &Value) -> Value {
         "paths": paths_json,
     });
 
-    tool_result_text(&serde_json::to_string_pretty(&result).unwrap_or_default())
+    tool_result_json(&result)
 }
 
 fn handle_weighted_path(graph: &KnowledgeGraph, args: &Value) -> Value {
@@ -663,7 +673,7 @@ fn handle_weighted_path(graph: &KnowledgeGraph, args: &Value) -> Value {
                 "path": path_nodes,
                 "edges": edges,
             });
-            tool_result_text(&serde_json::to_string_pretty(&result).unwrap_or_default())
+            tool_result_json(&result)
         }
         None => tool_result_text(&format!(
             "No path found between {source} and {target} with min_confidence {min_confidence}"
@@ -705,7 +715,7 @@ fn handle_community_bridges(graph: &KnowledgeGraph, args: &Value) -> Value {
         "bridges": result,
     });
 
-    tool_result_text(&serde_json::to_string_pretty(&output).unwrap_or_default())
+    tool_result_json(&output)
 }
 
 fn handle_graph_diff(graph: &KnowledgeGraph, args: &Value) -> Value {
@@ -720,13 +730,13 @@ fn handle_graph_diff(graph: &KnowledgeGraph, args: &Value) -> Value {
     };
 
     let diff = graphify_analyze::graph_diff(graph, &other_graph);
-    tool_result_text(&serde_json::to_string_pretty(&diff).unwrap_or_default())
+    tool_result_json(&diff)
 }
 
 fn handle_pagerank(graph: &KnowledgeGraph, args: &Value) -> Value {
     let top_n = args["top_n"].as_u64().unwrap_or(10) as usize;
     let results = graphify_analyze::pagerank(graph, top_n, 0.85, 20);
-    tool_result_text(&serde_json::to_string_pretty(&results).unwrap_or_default())
+    tool_result_json(&results)
 }
 
 fn handle_detect_cycles(graph: &KnowledgeGraph, args: &Value) -> Value {
@@ -735,7 +745,7 @@ fn handle_detect_cycles(graph: &KnowledgeGraph, args: &Value) -> Value {
     if cycles.is_empty() {
         tool_result_text("No dependency cycles detected.")
     } else {
-        tool_result_text(&serde_json::to_string_pretty(&cycles).unwrap_or_default())
+        tool_result_json(&cycles)
     }
 }
 
@@ -767,7 +777,7 @@ fn handle_find_similar(graph: &KnowledgeGraph, args: &Value) -> Value {
     if pairs.is_empty() {
         tool_result_text("No structurally similar node pairs found.")
     } else {
-        tool_result_text(&serde_json::to_string_pretty(&pairs).unwrap_or_default())
+        tool_result_json(&pairs)
     }
 }
 
@@ -893,14 +903,22 @@ pub fn run_mcp_server(graph_path: &Path) -> Result<(), ServeError> {
             Err(e) => {
                 error!("JSON parse error: {e}");
                 let err = jsonrpc_error(&Value::Null, -32700, &format!("Parse error: {e}"));
-                let _ = writeln!(stdout_lock, "{}", serde_json::to_string(&err).unwrap());
+                if let Ok(json) = serde_json::to_string(&err) {
+                    let _ = writeln!(stdout_lock, "{}", json);
+                }
                 let _ = stdout_lock.flush();
                 continue;
             }
         };
 
         if let Some(response) = dispatch(&graph, &request) {
-            let out = serde_json::to_string(&response).unwrap_or_default();
+            let out = match serde_json::to_string(&response) {
+                Ok(s) => s,
+                Err(e) => {
+                    error!("response serialization failed: {e}");
+                    continue;
+                }
+            };
             if let Err(e) = writeln!(stdout_lock, "{}", out) {
                 error!("stdout write error: {e}");
                 break;

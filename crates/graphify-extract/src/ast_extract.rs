@@ -13,12 +13,68 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::LazyLock;
 
 use graphify_core::confidence::Confidence;
 use graphify_core::id::make_id;
 use graphify_core::model::{ExtractionResult, GraphEdge, GraphNode, NodeType};
 use regex::Regex;
 use tracing::trace;
+
+macro_rules! re {
+    ($name:ident, $pattern:expr) => {
+        static $name: LazyLock<Regex> = LazyLock::new(|| Regex::new($pattern).expect($pattern));
+    };
+}
+
+// Pre-compiled regex patterns — initialized once, never panic at runtime
+re!(RE_PY_CLASS, r"(?m)^(\s*)class\s+(\w+)");
+re!(RE_PY_CLASS_LOOKUP, r"^(\s*)class\s+(\w+)");
+re!(RE_PY_FUNC, r"(?m)^(\s*)def\s+(\w+)\s*\(");
+re!(RE_PY_IMPORT, r"(?m)^(?:from\s+([\w.]+)\s+)?import\s+([\w.,\s*]+)");
+
+re!(RE_JS_CLASS, r"(?m)(?:export\s+)?(?:default\s+)?class\s+(\w+)");
+re!(RE_JS_FUNC, r"(?m)(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+(\w+)\s*\(|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=])\s*=>");
+re!(RE_JS_IMPORT, r#"(?m)import\s+(?:\{([^}]+)\}|(\w+))\s+from\s+['"]([^'"]+)['"]|import\s+['"]([^'"]+)['"]"#);
+re!(RE_JS_REQUIRE, r#"(?m)(?:const|let|var)\s+(\w+)\s*=\s*require\s*\(\s*['"]([^'"]+)['"]\s*\)"#);
+
+re!(RE_RS_STRUCT, r"(?m)^(?:\s*pub(?:\([^)]*\))?\s+)?struct\s+(\w+)");
+re!(RE_RS_ENUM, r"(?m)^(?:\s*pub(?:\([^)]*\))?\s+)?enum\s+(\w+)");
+re!(RE_RS_TRAIT, r"(?m)^(?:\s*pub(?:\([^)]*\))?\s+)?trait\s+(\w+)");
+re!(RE_RS_IMPL, r"(?m)^(?:\s*)impl(?:<[^>]*>)?\s+(?:(\w+)\s+for\s+)?(\w+)");
+re!(RE_RS_FUNC, r"(?m)^(\s*)(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?(?:const\s+)?fn\s+(\w+)");
+re!(RE_RS_USE, r"(?m)^(?:\s*)(?:pub\s+)?use\s+([\w:]+)");
+
+re!(RE_GO_TYPE, r"(?m)^type\s+(\w+)\s+(struct|interface)");
+re!(RE_GO_FUNC, r"(?m)^func\s+(?:\([^)]+\)\s+)?(\w+)\s*\(");
+re!(RE_GO_IMPORT_SINGLE, r#"(?m)^import\s+"([^"]+)""#);
+re!(RE_GO_IMPORT_BLOCK, r"(?s)import\s*\(([^)]+)\)");
+re!(RE_GO_IMPORT_LINE, r#""([^"]+)""#);
+
+re!(RE_JAVA_CLASS, r"(?m)(?:public\s+|private\s+|protected\s+)?(?:abstract\s+|static\s+|final\s+)*(class|interface|enum)\s+(\w+)");
+re!(RE_JAVA_METHOD, r"(?m)^\s+(?:public\s+|private\s+|protected\s+)?(?:static\s+)?(?:final\s+)?(?:synchronized\s+)?(?:abstract\s+)?(?:\w+(?:<[^>]*>)?)\s+(\w+)\s*\(");
+re!(RE_JAVA_IMPORT, r"(?m)^import\s+(?:static\s+)?([\w.]+)\s*;");
+
+re!(RE_C_INCLUDE, r#"(?m)^#include\s+[<"]([^>"]+)[>"]"#);
+re!(RE_CPP_CLASS, r"(?m)^(?:\s*)(?:class|struct|namespace)\s+(\w+)");
+re!(RE_C_STRUCT, r"(?m)^(?:typedef\s+)?struct\s+(\w+)");
+re!(RE_C_FUNC, r"(?m)^(?:static\s+)?(?:inline\s+)?(?:extern\s+)?(?:const\s+)?(?:unsigned\s+)?(?:signed\s+)?(?:\w+(?:\s*\*\s*|\s+))(\w+)\s*\([^;]*\)\s*\{");
+
+re!(RE_RB_CLASS, r"(?m)^\s*(class|module)\s+(\w+(?:::\w+)*)");
+re!(RE_RB_FUNC, r"(?m)^\s*def\s+(self\.)?(\w+[?!=]?)");
+re!(RE_RB_REQUIRE, r#"(?m)^\s*require(?:_relative)?\s+['"]([^'"]+)['"]"#);
+
+re!(RE_CS_CLASS, r"(?m)(?:public\s+|private\s+|protected\s+|internal\s+)?(?:abstract\s+|static\s+|sealed\s+|partial\s+)*(class|interface|struct|enum)\s+(\w+)");
+re!(RE_CS_METHOD, r"(?m)^\s+(?:public\s+|private\s+|protected\s+|internal\s+)?(?:static\s+)?(?:virtual\s+)?(?:override\s+)?(?:async\s+)?(?:\w+(?:<[^>]*>)?)\s+(\w+)\s*\(");
+re!(RE_CS_USING, r"(?m)^using\s+([\w.]+)\s*;");
+
+re!(RE_KT_CLASS, r"(?m)(?:open\s+|abstract\s+|data\s+|sealed\s+)?(?:class|object|interface)\s+(\w+)");
+re!(RE_KT_FUNC, r"(?m)^\s*(?:(?:private|public|protected|internal|override|open|suspend)\s+)*fun\s+(?:<[^>]+>\s+)?(\w+)\s*\(");
+re!(RE_KT_IMPORT, r"(?m)^import\s+([\w.]+)");
+
+re!(RE_GEN_CLASS, r"(?m)^\s*(?:(?:pub|public|private|protected|internal|open|abstract|sealed|partial|static|final|export)\s+)*(?:class|struct|module|object|interface|trait|protocol|enum|defmodule)\s+(\w+(?:::\w+)*)");
+re!(RE_GEN_FUNC, r"(?m)^\s*(?:(?:pub|public|private|protected|internal|open|override|suspend|static|async|export|def|defp)\s+)*(?:func|function|fn|def|defp|fun|sub)\s+(\w+[?!]?)\s*[\(<]");
+re!(RE_GEN_IMPORT, r#"(?m)^\s*(?:import|use|using|require|include|from)\s+['"]?([\w./:-]+)['"]?"#);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Public entry point
@@ -150,10 +206,8 @@ fn extract_python(path: &Path, source: &str) -> ExtractionResult {
     let ps = path_str(path);
 
     // Classes: `class Foo(Bar):`  or `class Foo:`
-    let re_class = Regex::new(r"(?m)^(\s*)class\s+(\w+)").unwrap();
-    let re_class_lookup = Regex::new(r"^(\s*)class\s+(\w+)").unwrap();
     let mut class_ids: HashMap<String, String> = HashMap::new();
-    for cap in re_class.captures_iter(source) {
+    for cap in RE_PY_CLASS.captures_iter(source) {
         let name = &cap[2];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
         let node = make_node(name, path, NodeType::Class, line);
@@ -170,9 +224,8 @@ fn extract_python(path: &Path, source: &str) -> ExtractionResult {
     }
 
     // Functions / methods: `def foo(...):`
-    let re_func = Regex::new(r"(?m)^(\s*)def\s+(\w+)\s*\(").unwrap();
     let mut functions: Vec<(String, String, usize, usize)> = Vec::new();
-    let func_matches: Vec<_> = re_func.captures_iter(source).collect();
+    let func_matches: Vec<_> = RE_PY_FUNC.captures_iter(source).collect();
     for (i, cap) in func_matches.iter().enumerate() {
         let indent = cap[1].len();
         let name = cap[2].to_string();
@@ -192,7 +245,7 @@ fn extract_python(path: &Path, source: &str) -> ExtractionResult {
             let mut parent = None;
             for line_idx in (0..start_line.saturating_sub(1)).rev() {
                 if let Some(line) = lines.get(line_idx)
-                    && let Some(cls_cap) = re_class_lookup.captures(line)
+                    && let Some(cls_cap) = RE_PY_CLASS_LOOKUP.captures(line)
                     && cls_cap[1].len() < indent
                 {
                     parent = class_ids.get(&cls_cap[2]).cloned();
@@ -225,8 +278,7 @@ fn extract_python(path: &Path, source: &str) -> ExtractionResult {
     }
 
     // Imports: `import X` / `from X import Y`
-    let re_import = Regex::new(r"(?m)^(?:from\s+([\w.]+)\s+)?import\s+([\w.,\s*]+)").unwrap();
-    for cap in re_import.captures_iter(source) {
+    for cap in RE_PY_IMPORT.captures_iter(source) {
         let module = cap.get(1).map_or("", |m| m.as_str());
         let names_str = &cap[2];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
@@ -288,8 +340,7 @@ fn extract_js_ts(path: &Path, source: &str, lang: &str) -> ExtractionResult {
     let ps = path_str(path);
 
     // Classes: `class Foo` / `export class Foo`
-    let re_class = Regex::new(r"(?m)(?:export\s+)?(?:default\s+)?class\s+(\w+)").unwrap();
-    for cap in re_class.captures_iter(source) {
+    for cap in RE_JS_CLASS.captures_iter(source) {
         let name = &cap[1];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
         let node = make_node(name, path, NodeType::Class, line);
@@ -306,12 +357,8 @@ fn extract_js_ts(path: &Path, source: &str, lang: &str) -> ExtractionResult {
 
     // Functions: `function foo(` / `const foo = (` / `const foo = async (`
     // Also: `export function foo(` / `export default function foo(`
-    let re_func = Regex::new(
-        r"(?m)(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+(\w+)\s*\(|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=])\s*=>"
-    )
-    .unwrap();
     let mut functions: Vec<(String, String, usize, usize)> = Vec::new();
-    let func_matches: Vec<_> = re_func.captures_iter(source).collect();
+    let func_matches: Vec<_> = RE_JS_FUNC.captures_iter(source).collect();
 
     for (i, cap) in func_matches.iter().enumerate() {
         let name = cap
@@ -345,11 +392,7 @@ fn extract_js_ts(path: &Path, source: &str, lang: &str) -> ExtractionResult {
     }
 
     // Imports: `import { X } from 'Y'` / `import X from 'Y'` / `import 'Y'`
-    let re_import = Regex::new(
-        r#"(?m)import\s+(?:\{([^}]+)\}|(\w+))\s+from\s+['"]([^'"]+)['"]|import\s+['"]([^'"]+)['"]"#,
-    )
-    .unwrap();
-    for cap in re_import.captures_iter(source) {
+    for cap in RE_JS_IMPORT.captures_iter(source) {
         let module = cap.get(3).or(cap.get(4)).map(|m| m.as_str()).unwrap_or("");
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
 
@@ -402,11 +445,7 @@ fn extract_js_ts(path: &Path, source: &str, lang: &str) -> ExtractionResult {
 
     // Also handle require() for JS
     if lang == "javascript" {
-        let re_require = Regex::new(
-            r#"(?m)(?:const|let|var)\s+(\w+)\s*=\s*require\s*\(\s*['"]([^'"]+)['"]\s*\)"#,
-        )
-        .unwrap();
-        for cap in re_require.captures_iter(source) {
+        for cap in RE_JS_REQUIRE.captures_iter(source) {
             let name = &cap[1];
             let module = &cap[2];
             let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
@@ -450,8 +489,7 @@ fn extract_rust(path: &Path, source: &str) -> ExtractionResult {
     let ps = path_str(path);
 
     // Structs: `pub struct Foo` / `struct Foo`
-    let re_struct = Regex::new(r"(?m)^(?:\s*pub(?:\([^)]*\))?\s+)?struct\s+(\w+)").unwrap();
-    for cap in re_struct.captures_iter(source) {
+    for cap in RE_RS_STRUCT.captures_iter(source) {
         let name = &cap[1];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
         let node = make_node(name, path, NodeType::Struct, line);
@@ -467,8 +505,7 @@ fn extract_rust(path: &Path, source: &str) -> ExtractionResult {
     }
 
     // Enums: `pub enum Foo` / `enum Foo`
-    let re_enum = Regex::new(r"(?m)^(?:\s*pub(?:\([^)]*\))?\s+)?enum\s+(\w+)").unwrap();
-    for cap in re_enum.captures_iter(source) {
+    for cap in RE_RS_ENUM.captures_iter(source) {
         let name = &cap[1];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
         let node = make_node(name, path, NodeType::Enum, line);
@@ -484,8 +521,7 @@ fn extract_rust(path: &Path, source: &str) -> ExtractionResult {
     }
 
     // Traits: `pub trait Foo` / `trait Foo`
-    let re_trait = Regex::new(r"(?m)^(?:\s*pub(?:\([^)]*\))?\s+)?trait\s+(\w+)").unwrap();
-    for cap in re_trait.captures_iter(source) {
+    for cap in RE_RS_TRAIT.captures_iter(source) {
         let name = &cap[1];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
         let node = make_node(name, path, NodeType::Trait, line);
@@ -501,8 +537,7 @@ fn extract_rust(path: &Path, source: &str) -> ExtractionResult {
     }
 
     // Impl blocks: `impl Foo` / `impl Trait for Foo`
-    let re_impl = Regex::new(r"(?m)^(?:\s*)impl(?:<[^>]*>)?\s+(?:(\w+)\s+for\s+)?(\w+)").unwrap();
-    for cap in re_impl.captures_iter(source) {
+    for cap in RE_RS_IMPL.captures_iter(source) {
         let _trait_name = cap.get(1).map(|m| m.as_str());
         let type_name = &cap[2];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
@@ -523,12 +558,8 @@ fn extract_rust(path: &Path, source: &str) -> ExtractionResult {
 
     // Functions: `pub fn foo(` / `fn foo(` / `pub(crate) fn foo(`
     // Also methods inside impl blocks
-    let re_func = Regex::new(
-        r"(?m)^(\s*)(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?(?:const\s+)?fn\s+(\w+)",
-    )
-    .unwrap();
     let mut functions: Vec<(String, String, usize, usize)> = Vec::new();
-    let func_matches: Vec<_> = re_func.captures_iter(source).collect();
+    let func_matches: Vec<_> = RE_RS_FUNC.captures_iter(source).collect();
     for (i, cap) in func_matches.iter().enumerate() {
         let indent = cap[1].len();
         let name = cap[2].to_string();
@@ -560,8 +591,7 @@ fn extract_rust(path: &Path, source: &str) -> ExtractionResult {
     }
 
     // Use statements
-    let re_use = Regex::new(r"(?m)^(?:\s*)(?:pub\s+)?use\s+([\w:]+)").unwrap();
-    for cap in re_use.captures_iter(source) {
+    for cap in RE_RS_USE.captures_iter(source) {
         let module = &cap[1];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
         let import_id = make_id(&[&ps, "use", module]);
@@ -603,8 +633,7 @@ fn extract_go(path: &Path, source: &str) -> ExtractionResult {
     let ps = path_str(path);
 
     // Type definitions: `type Foo struct {` / `type Foo interface {`
-    let re_type = Regex::new(r"(?m)^type\s+(\w+)\s+(struct|interface)").unwrap();
-    for cap in re_type.captures_iter(source) {
+    for cap in RE_GO_TYPE.captures_iter(source) {
         let name = &cap[1];
         let kind = &cap[2];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
@@ -625,9 +654,8 @@ fn extract_go(path: &Path, source: &str) -> ExtractionResult {
     }
 
     // Functions and methods: `func Foo(` / `func (r *Recv) Foo(`
-    let re_func = Regex::new(r"(?m)^func\s+(?:\([^)]+\)\s+)?(\w+)\s*\(").unwrap();
     let mut functions: Vec<(String, String, usize, usize)> = Vec::new();
-    let func_matches: Vec<_> = re_func.captures_iter(source).collect();
+    let func_matches: Vec<_> = RE_GO_FUNC.captures_iter(source).collect();
     for (i, cap) in func_matches.iter().enumerate() {
         let name = cap[1].to_string();
         let start_line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
@@ -662,11 +690,7 @@ fn extract_go(path: &Path, source: &str) -> ExtractionResult {
     }
 
     // Imports: `import "fmt"` / `import ( "fmt" "os" )`
-    let re_import_single = Regex::new(r#"(?m)^import\s+"([^"]+)""#).unwrap();
-    let re_import_block = Regex::new(r"(?s)import\s*\(([^)]+)\)").unwrap();
-    let re_import_line = Regex::new(r#""([^"]+)""#).unwrap();
-
-    for cap in re_import_single.captures_iter(source) {
+    for cap in RE_GO_IMPORT_SINGLE.captures_iter(source) {
         let module = &cap[1];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
         let import_id = make_id(&[&ps, "import", module]);
@@ -688,10 +712,10 @@ fn extract_go(path: &Path, source: &str) -> ExtractionResult {
         ));
     }
 
-    for cap in re_import_block.captures_iter(source) {
+    for cap in RE_GO_IMPORT_BLOCK.captures_iter(source) {
         let block = &cap[1];
         let block_start = source[..cap.get(0).unwrap().start()].lines().count() + 1;
-        for (idx, imp_cap) in re_import_line.captures_iter(block).enumerate() {
+        for (idx, imp_cap) in RE_GO_IMPORT_LINE.captures_iter(block).enumerate() {
             let module = &imp_cap[1];
             let import_id = make_id(&[&ps, "import", module]);
             result.nodes.push(GraphNode {
@@ -733,11 +757,7 @@ fn extract_java(path: &Path, source: &str) -> ExtractionResult {
     let ps = path_str(path);
 
     // Classes / interfaces / enums
-    let re_class = Regex::new(
-        r"(?m)(?:public\s+|private\s+|protected\s+)?(?:abstract\s+|static\s+|final\s+)*(class|interface|enum)\s+(\w+)",
-    )
-    .unwrap();
-    for cap in re_class.captures_iter(source) {
+    for cap in RE_JAVA_CLASS.captures_iter(source) {
         let kind = &cap[1];
         let name = &cap[2];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
@@ -759,12 +779,8 @@ fn extract_java(path: &Path, source: &str) -> ExtractionResult {
     }
 
     // Methods: `public void foo(` / `private static int bar(`
-    let re_method = Regex::new(
-        r"(?m)^\s+(?:public\s+|private\s+|protected\s+)?(?:static\s+)?(?:final\s+)?(?:synchronized\s+)?(?:abstract\s+)?(?:\w+(?:<[^>]*>)?)\s+(\w+)\s*\(",
-    )
-    .unwrap();
     let mut functions: Vec<(String, String, usize, usize)> = Vec::new();
-    let func_matches: Vec<_> = re_method.captures_iter(source).collect();
+    let func_matches: Vec<_> = RE_JAVA_METHOD.captures_iter(source).collect();
     for (i, cap) in func_matches.iter().enumerate() {
         let name = cap[1].to_string();
         // Skip common false positives
@@ -798,8 +814,7 @@ fn extract_java(path: &Path, source: &str) -> ExtractionResult {
     }
 
     // Imports
-    let re_import = Regex::new(r"(?m)^import\s+(?:static\s+)?([\w.]+)\s*;").unwrap();
-    for cap in re_import.captures_iter(source) {
+    for cap in RE_JAVA_IMPORT.captures_iter(source) {
         let module = &cap[1];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
         let import_id = make_id(&[&ps, "import", module]);
@@ -841,8 +856,7 @@ fn extract_c_cpp(path: &Path, source: &str, lang: &str) -> ExtractionResult {
     let ps = path_str(path);
 
     // #include directives
-    let re_include = Regex::new(r#"(?m)^#include\s+[<"]([^>"]+)[>"]"#).unwrap();
-    for cap in re_include.captures_iter(source) {
+    for cap in RE_C_INCLUDE.captures_iter(source) {
         let header = &cap[1];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
         let import_id = make_id(&[&ps, "include", header]);
@@ -866,8 +880,7 @@ fn extract_c_cpp(path: &Path, source: &str, lang: &str) -> ExtractionResult {
 
     // C++ classes / structs / namespaces
     if lang == "cpp" {
-        let re_class = Regex::new(r"(?m)^(?:\s*)(?:class|struct|namespace)\s+(\w+)").unwrap();
-        for cap in re_class.captures_iter(source) {
+        for cap in RE_CPP_CLASS.captures_iter(source) {
             let name = &cap[1];
             let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
             let node = make_node(name, path, NodeType::Class, line);
@@ -885,8 +898,7 @@ fn extract_c_cpp(path: &Path, source: &str, lang: &str) -> ExtractionResult {
 
     // C structs
     if lang == "c" {
-        let re_struct = Regex::new(r"(?m)^(?:typedef\s+)?struct\s+(\w+)").unwrap();
-        for cap in re_struct.captures_iter(source) {
+        for cap in RE_C_STRUCT.captures_iter(source) {
             let name = &cap[1];
             let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
             let node = make_node(name, path, NodeType::Struct, line);
@@ -903,12 +915,8 @@ fn extract_c_cpp(path: &Path, source: &str, lang: &str) -> ExtractionResult {
     }
 
     // Functions: `type name(` at start of line (heuristic)
-    let re_func = Regex::new(
-        r"(?m)^(?:static\s+)?(?:inline\s+)?(?:extern\s+)?(?:const\s+)?(?:unsigned\s+)?(?:signed\s+)?(?:\w+(?:\s*\*\s*|\s+))(\w+)\s*\([^;]*\)\s*\{",
-    )
-    .unwrap();
     let mut functions: Vec<(String, String, usize, usize)> = Vec::new();
-    let func_matches: Vec<_> = re_func.captures_iter(source).collect();
+    let func_matches: Vec<_> = RE_C_FUNC.captures_iter(source).collect();
     for (i, cap) in func_matches.iter().enumerate() {
         let name = cap[1].to_string();
         if ["if", "for", "while", "switch", "return", "sizeof"].contains(&name.as_str()) {
@@ -956,8 +964,7 @@ fn extract_ruby(path: &Path, source: &str) -> ExtractionResult {
     let ps = path_str(path);
 
     // Classes and modules
-    let re_class = Regex::new(r"(?m)^\s*(class|module)\s+(\w+(?:::\w+)*)").unwrap();
-    for cap in re_class.captures_iter(source) {
+    for cap in RE_RB_CLASS.captures_iter(source) {
         let name = &cap[2];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
         let node = make_node(name, path, NodeType::Class, line);
@@ -973,9 +980,8 @@ fn extract_ruby(path: &Path, source: &str) -> ExtractionResult {
     }
 
     // Methods
-    let re_func = Regex::new(r"(?m)^\s*def\s+(self\.)?(\w+[?!=]?)").unwrap();
     let mut functions: Vec<(String, String, usize, usize)> = Vec::new();
-    let func_matches: Vec<_> = re_func.captures_iter(source).collect();
+    let func_matches: Vec<_> = RE_RB_FUNC.captures_iter(source).collect();
     for (i, cap) in func_matches.iter().enumerate() {
         let name = cap[2].to_string();
         let start_line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
@@ -1001,8 +1007,7 @@ fn extract_ruby(path: &Path, source: &str) -> ExtractionResult {
     }
 
     // require / require_relative
-    let re_require = Regex::new(r#"(?m)^\s*require(?:_relative)?\s+['"]([^'"]+)['"]"#).unwrap();
-    for cap in re_require.captures_iter(source) {
+    for cap in RE_RB_REQUIRE.captures_iter(source) {
         let module = &cap[1];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
         let import_id = make_id(&[&ps, "require", module]);
@@ -1044,11 +1049,7 @@ fn extract_csharp(path: &Path, source: &str) -> ExtractionResult {
     let ps = path_str(path);
 
     // Classes / interfaces / structs / enums
-    let re_class = Regex::new(
-        r"(?m)(?:public\s+|private\s+|protected\s+|internal\s+)?(?:abstract\s+|static\s+|sealed\s+|partial\s+)*(class|interface|struct|enum)\s+(\w+)",
-    )
-    .unwrap();
-    for cap in re_class.captures_iter(source) {
+    for cap in RE_CS_CLASS.captures_iter(source) {
         let kind = &cap[1];
         let name = &cap[2];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
@@ -1071,12 +1072,8 @@ fn extract_csharp(path: &Path, source: &str) -> ExtractionResult {
     }
 
     // Methods
-    let re_method = Regex::new(
-        r"(?m)^\s+(?:public\s+|private\s+|protected\s+|internal\s+)?(?:static\s+)?(?:virtual\s+)?(?:override\s+)?(?:async\s+)?(?:\w+(?:<[^>]*>)?)\s+(\w+)\s*\(",
-    )
-    .unwrap();
     let mut functions: Vec<(String, String, usize, usize)> = Vec::new();
-    let func_matches: Vec<_> = re_method.captures_iter(source).collect();
+    let func_matches: Vec<_> = RE_CS_METHOD.captures_iter(source).collect();
     for (i, cap) in func_matches.iter().enumerate() {
         let name = cap[1].to_string();
         if [
@@ -1109,8 +1106,7 @@ fn extract_csharp(path: &Path, source: &str) -> ExtractionResult {
     }
 
     // using directives
-    let re_using = Regex::new(r"(?m)^using\s+([\w.]+)\s*;").unwrap();
-    for cap in re_using.captures_iter(source) {
+    for cap in RE_CS_USING.captures_iter(source) {
         let ns = &cap[1];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
         let import_id = make_id(&[&ps, "using", ns]);
@@ -1152,11 +1148,7 @@ fn extract_kotlin(path: &Path, source: &str) -> ExtractionResult {
     let ps = path_str(path);
 
     // Classes / objects / interfaces
-    let re_class = Regex::new(
-        r"(?m)(?:open\s+|abstract\s+|data\s+|sealed\s+)?(?:class|object|interface)\s+(\w+)",
-    )
-    .unwrap();
-    for cap in re_class.captures_iter(source) {
+    for cap in RE_KT_CLASS.captures_iter(source) {
         let name = &cap[1];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
         let node = make_node(name, path, NodeType::Class, line);
@@ -1172,9 +1164,8 @@ fn extract_kotlin(path: &Path, source: &str) -> ExtractionResult {
     }
 
     // Functions: `fun foo(`
-    let re_func = Regex::new(r"(?m)^\s*(?:(?:private|public|protected|internal|override|open|suspend)\s+)*fun\s+(?:<[^>]+>\s+)?(\w+)\s*\(").unwrap();
     let mut functions: Vec<(String, String, usize, usize)> = Vec::new();
-    let func_matches: Vec<_> = re_func.captures_iter(source).collect();
+    let func_matches: Vec<_> = RE_KT_FUNC.captures_iter(source).collect();
     for (i, cap) in func_matches.iter().enumerate() {
         let name = cap[1].to_string();
         let start_line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
@@ -1200,8 +1191,7 @@ fn extract_kotlin(path: &Path, source: &str) -> ExtractionResult {
     }
 
     // Imports
-    let re_import = Regex::new(r"(?m)^import\s+([\w.]+)").unwrap();
-    for cap in re_import.captures_iter(source) {
+    for cap in RE_KT_IMPORT.captures_iter(source) {
         let module = &cap[1];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
         let import_id = make_id(&[&ps, "import", module]);
@@ -1243,10 +1233,7 @@ fn extract_generic(path: &Path, source: &str, _lang: &str) -> ExtractionResult {
     let ps = path_str(path);
 
     // Generic class/struct/module pattern
-    let re_class =
-        Regex::new(r"(?m)^\s*(?:(?:pub|public|private|protected|internal|open|abstract|sealed|partial|static|final|export)\s+)*(?:class|struct|module|object|interface|trait|protocol|enum|defmodule)\s+(\w+(?:::\w+)*)")
-            .unwrap();
-    for cap in re_class.captures_iter(source) {
+    for cap in RE_GEN_CLASS.captures_iter(source) {
         let name = &cap[1];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
         let node = make_node(name, path, NodeType::Class, line);
@@ -1262,12 +1249,8 @@ fn extract_generic(path: &Path, source: &str, _lang: &str) -> ExtractionResult {
     }
 
     // Generic function pattern
-    let re_func = Regex::new(
-        r"(?m)^\s*(?:(?:pub|public|private|protected|internal|open|override|suspend|static|async|export|def|defp)\s+)*(?:func|function|fn|def|defp|fun|sub)\s+(\w+[?!]?)\s*[\(<]",
-    )
-    .unwrap();
     let mut functions: Vec<(String, String, usize, usize)> = Vec::new();
-    let func_matches: Vec<_> = re_func.captures_iter(source).collect();
+    let func_matches: Vec<_> = RE_GEN_FUNC.captures_iter(source).collect();
     for (i, cap) in func_matches.iter().enumerate() {
         let name = cap[1].to_string();
         let start_line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
@@ -1293,10 +1276,7 @@ fn extract_generic(path: &Path, source: &str, _lang: &str) -> ExtractionResult {
     }
 
     // Generic import pattern
-    let re_import =
-        Regex::new(r#"(?m)^\s*(?:import|use|using|require|include|from)\s+['"]?([\w./:-]+)['"]?"#)
-            .unwrap();
-    for cap in re_import.captures_iter(source) {
+    for cap in RE_GEN_IMPORT.captures_iter(source) {
         let module = &cap[1];
         let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
         let import_id = make_id(&[&ps, "import", module]);

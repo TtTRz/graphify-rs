@@ -22,18 +22,17 @@ pub fn export_cypher(graph: &KnowledgeGraph, output_dir: &Path) -> anyhow::Resul
             cypher_escape(&node.id),
             cypher_escape(&node.label),
             cypher_escape(&node.source_file),
-        )
-        .unwrap();
+        )?;
         if let Some(loc) = &node.source_location {
-            write!(cypher, ", source_location: '{}'", cypher_escape(loc)).unwrap();
+            write!(cypher, ", source_location: '{}'", cypher_escape(loc))?;
         }
         if let Some(c) = node.community {
-            write!(cypher, ", community: {}", c).unwrap();
+            write!(cypher, ", community: {}", c)?;
         }
-        writeln!(cypher, "}});").unwrap();
+        writeln!(cypher, "}});")?;
     }
 
-    writeln!(cypher).unwrap();
+    writeln!(cypher)?;
 
     // Edges
     for edge in graph.edges() {
@@ -52,8 +51,7 @@ pub fn export_cypher(graph: &KnowledgeGraph, output_dir: &Path) -> anyhow::Resul
             cypher_escape(&edge.source_file),
             edge.weight,
             sanitize_var(&edge.target),
-        )
-        .unwrap();
+        )?;
     }
 
     fs::create_dir_all(output_dir)?;

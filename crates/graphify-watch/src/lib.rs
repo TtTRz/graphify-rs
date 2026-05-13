@@ -219,7 +219,7 @@ fn rebuild(
         HashMap::from([("input".to_string(), 0), ("output".to_string(), 0)]);
 
     let root_str = root.to_string_lossy();
-    let report = graphify_export::generate_report(
+    if let Ok(report) = graphify_export::generate_report(
         &graph,
         &communities,
         &cohesion,
@@ -230,9 +230,10 @@ fn rebuild(
         &token_cost,
         &root_str,
         Some(&question_json),
-    );
-    let report_path = output_dir.join("GRAPH_REPORT.md");
-    let _ = std::fs::write(&report_path, &report);
+    ) {
+        let report_path = output_dir.join("GRAPH_REPORT.md");
+        let _ = std::fs::write(&report_path, &report);
+    }
 
     // Save manifest
     let manifest_path = output_dir.join(".graphify_manifest.json");
@@ -288,9 +289,12 @@ pub async fn watch_directory(root: &Path, output_dir: &Path) -> Result<(), Watch
 
     // Run initial build (full)
     println!("Running initial build...");
-    match rebuild(root, output_dir, None) {
-        Ok(()) => println!("Initial build complete."),
-        Err(e) => eprintln!("Initial build failed: {e}"),
+    let root_clone = root.to_path_buf();
+    let out_clone = output_dir.to_path_buf();
+    match tokio::task::spawn_blocking(move || rebuild(&root_clone, &out_clone, None)).await {
+        Ok(Ok(())) => println!("Initial build complete."),
+        Ok(Err(e)) => eprintln!("Initial build failed: {e}"),
+        Err(e) => eprintln!("Initial build panicked: {e}"),
     }
 
     while let Some(changed_paths) = rx.recv().await {
@@ -311,13 +315,12 @@ pub async fn watch_directory(root: &Path, output_dir: &Path) -> Result<(), Watch
             debug!("  changed: {}", p.display());
         }
 
-        match rebuild(root, output_dir, Some(&relevant)) {
-            Ok(()) => {
-                println!("Rebuild complete.");
-            }
-            Err(e) => {
-                eprintln!("Rebuild failed: {e}");
-            }
+        let root_clone = root.to_path_buf();
+        let out_clone = output_dir.to_path_buf();
+        match tokio::task::spawn_blocking(move || rebuild(&root_clone, &out_clone, Some(&relevant))).await {
+            Ok(Ok(())) => println!("Rebuild complete."),
+            Ok(Err(e)) => eprintln!("Rebuild failed: {e}"),
+            Err(e) => eprintln!("Rebuild panicked: {e}"),
         }
     }
 

@@ -948,7 +948,7 @@ async fn cmd_build(
             &token_cost,
             path,
             Some(&question_json),
-        );
+        )?;
         let report_path = output_dir.join("GRAPH_REPORT.md");
         std::fs::write(&report_path, &report)?;
         info_print!(

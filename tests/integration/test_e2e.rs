@@ -748,7 +748,8 @@ fn test_all_export_formats() {
         &token_cost,
         ".",
         Some(&question_json),
-    );
+    )
+    .unwrap();
     assert!(
         report.contains("Graph Analysis Report"),
         "report should have header"

@@ -247,24 +247,29 @@ fn extract_between(haystack: &str, start: &str, end: &str) -> Option<String> {
 
 /// Strip `<script>` and `<style>` blocks from HTML.
 fn strip_scripts_and_styles(html: &str) -> String {
-    let re_script = Regex::new(r"(?is)<script[^>]*>.*?</script>").unwrap();
-    let re_style = Regex::new(r"(?is)<style[^>]*>.*?</style>").unwrap();
-    let result = re_script.replace_all(html, "");
-    re_style.replace_all(&result, "").to_string()
+    static RE_SCRIPT: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"(?is)<script[^>]*>.*?</script>").expect("valid regex"));
+    static RE_STYLE: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"(?is)<style[^>]*>.*?</style>").expect("valid regex"));
+    let result = RE_SCRIPT.replace_all(html, "");
+    RE_STYLE.replace_all(&result, "").to_string()
 }
 
 /// Strip all HTML tags from a string.
 fn strip_html_tags(html: &str) -> String {
-    let re = Regex::new(r"<[^>]+>").unwrap();
-    re.replace_all(html, "").to_string()
+    static RE: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"<[^>]+>").expect("valid regex"));
+    RE.replace_all(html, "").to_string()
 }
 
 /// Collapse multiple whitespace/newlines into single spaces or newlines.
 fn collapse_whitespace(text: &str) -> String {
-    let re = Regex::new(r"[ \t]+").unwrap();
-    let result = re.replace_all(text, " ");
-    let re_nl = Regex::new(r"\n{3,}").unwrap();
-    re_nl.replace_all(&result, "\n\n").to_string()
+    static RE_WS: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"[ \t]+").expect("valid regex"));
+    static RE_NL: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"\n{3,}").expect("valid regex"));
+    let result = RE_WS.replace_all(text, " ");
+    RE_NL.replace_all(&result, "\n\n").to_string()
 }
 
 /// Sanitize a URL or string into a safe filename.

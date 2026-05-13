@@ -121,19 +121,14 @@ fn date_to_age(date_str: &str, now_days: u64) -> u64 {
 
 /// Approximate days since 2020-01-01 for "now".
 fn chrono_days_since_epoch() -> u64 {
-    // Use git to get current date for consistency
-    let output = Command::new("date")
-        .args(["+%Y-%m-%d"])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .unwrap_or_else(|| "2026-04-13".to_string());
-    let trimmed = output.trim();
-    let parts: Vec<u64> = trimmed.split('-').filter_map(|p| p.parse().ok()).collect();
-    if parts.len() < 3 {
-        return 2300; // ~2026
-    }
-    (parts[0] - 2020) * 365 + parts[1] * 30 + parts[2]
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // 2020-01-01 = 1577836800 epoch seconds
+    let days_since_2020 = secs.saturating_sub(1577836800) / 86400;
+    days_since_2020
 }
 
 #[cfg(test)]

@@ -43,20 +43,17 @@ pub fn export_svg(
             svg,
             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\">",
             SVG_WIDTH, SVG_HEIGHT
-        )
-        .unwrap();
+        )?;
         write!(
             svg,
             "<rect width=\"100%\" height=\"100%\" fill=\"{}\"/>",
             BG_COLOR
-        )
-        .unwrap();
+        )?;
         write!(
             svg,
             "<text x=\"50%\" y=\"50%\" fill=\"{}\" text-anchor=\"middle\" font-family=\"sans-serif\">Empty graph</text>",
             TEXT_COLOR
-        )
-        .unwrap();
+        )?;
         svg.push_str("</svg>");
         fs::write(&path, &svg)?;
         return Ok(path);
@@ -89,14 +86,12 @@ pub fn export_svg(
         svg,
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" viewBox=\"0 0 {} {}\">",
         SVG_WIDTH, SVG_HEIGHT, SVG_WIDTH, SVG_HEIGHT
-    )
-    .unwrap();
+    )?;
     writeln!(
         svg,
         "<rect width=\"100%\" height=\"100%\" fill=\"{}\"/>",
         BG_COLOR
-    )
-    .unwrap();
+    )?;
 
     // Edges
     for edge in &edges {
@@ -108,8 +103,7 @@ pub fn export_svg(
                 svg,
                 "<line x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"{}\" stroke-width=\"0.5\" stroke-opacity=\"0.6\"/>",
                 x1, y1, x2, y2, EDGE_COLOR
-            )
-            .unwrap();
+            )?;
         }
     }
 
@@ -126,8 +120,7 @@ pub fn export_svg(
                 svg,
                 "<circle cx=\"{:.1}\" cy=\"{:.1}\" r=\"{}\" fill=\"{}\" opacity=\"0.85\"><title>{}</title></circle>",
                 x, y, NODE_RADIUS, color, svg_escape(&node.label)
-            )
-            .unwrap();
+            )?;
         }
     }
 
@@ -142,8 +135,7 @@ pub fn export_svg(
                     y - NODE_RADIUS - 3.0,
                     LABEL_COLOR,
                     svg_escape(&node.label)
-                )
-                .unwrap();
+                )?;
             }
         }
     }

@@ -61,16 +61,17 @@ pub const DISPATCH: &[(&str, &str)] = &[
     (".dart", "dart"),
 ];
 
-/// Build a hashmap for fast extension lookup.
-fn dispatch_map() -> HashMap<&'static str, &'static str> {
-    DISPATCH.iter().copied().collect()
+/// Build a hashmap for fast extension lookup (cached).
+fn dispatch_map() -> &'static HashMap<&'static str, &'static str> {
+    static MAP: std::sync::LazyLock<HashMap<&str, &str>> =
+        std::sync::LazyLock::new(|| DISPATCH.iter().copied().collect());
+    &MAP
 }
 
 /// Return the language name for a file extension (e.g. `".py"` → `"python"`).
 pub fn language_for_path(path: &Path) -> Option<&'static str> {
     let ext = path.extension()?.to_str()?;
-    let dotted = format!(".{ext}");
-    dispatch_map().get(dotted.as_str()).copied()
+    dispatch_map().get(&*format!(".{ext}")).copied()
 }
 
 // ---------------------------------------------------------------------------
@@ -81,7 +82,7 @@ pub fn language_for_path(path: &Path) -> Option<&'static str> {
 pub fn collect_files(target: &Path) -> Vec<PathBuf> {
     let map = dispatch_map();
     let mut files = Vec::new();
-    collect_files_inner(target, &map, &mut files);
+    collect_files_inner(target, map, &mut files);
     files.sort();
     files
 }

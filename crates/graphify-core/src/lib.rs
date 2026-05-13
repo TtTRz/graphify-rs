@@ -4,6 +4,21 @@ pub mod graph;
 pub mod id;
 pub mod model;
 
+use std::collections::HashMap;
+
+/// Build a reverse lookup from node ID to community ID.
+pub fn build_node_to_community(
+    communities: &HashMap<usize, Vec<String>>,
+) -> HashMap<&str, usize> {
+    let mut map = HashMap::new();
+    for (&cid, members) in communities {
+        for nid in members {
+            map.insert(nid.as_str(), cid);
+        }
+    }
+    map
+}
+
 /// Maximum bytes for a single filename component (excluding extension).
 /// macOS HFS+/APFS limit is 255 bytes per component; we reserve 15 for extension + safety.
 pub const MAX_FILENAME_BYTES: usize = 240;

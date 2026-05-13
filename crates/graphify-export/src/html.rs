@@ -50,13 +50,7 @@ pub fn export_html(
     };
 
     // Build reverse lookup: node_id → community_id
-    let mut node_community: HashMap<&str, usize> = HashMap::new();
-    for (&cid, members) in communities {
-        for nid in members {
-            node_community.insert(nid.as_str(), cid);
-        }
-    }
-
+    let node_community = graphify_core::build_node_to_community(communities);
     // Build vis.js nodes JSON array
     let mut vis_nodes = String::from("[");
     let mut first = true;
@@ -92,7 +86,7 @@ pub fn export_html(
             cid.unwrap_or(0),
             size,
         )
-        .unwrap();
+        ?;
     }
     vis_nodes.push(']');
 
@@ -131,7 +125,7 @@ pub fn export_html(
             dashes,
             width,
         )
-        .unwrap();
+        ?;
     }
     vis_edges.push(']');
 
@@ -145,7 +139,7 @@ pub fn export_html(
             color,
             escape_html(label),
         )
-        .unwrap();
+        ?;
     }
 
     // Build hyperedge info
@@ -158,7 +152,7 @@ pub fn export_html(
             escape_html(&he.label),
             he.nodes.join(", "),
         )
-        .unwrap();
+        ?;
     }
 
     // Banner for pruned graphs
@@ -465,13 +459,7 @@ pub fn export_html_split(
     fs::create_dir_all(&html_dir)?;
 
     // Build reverse lookup
-    let mut node_community: HashMap<&str, usize> = HashMap::new();
-    for (&cid, members) in communities {
-        for nid in members {
-            node_community.insert(nid.as_str(), cid);
-        }
-    }
-
+    let node_community = graphify_core::build_node_to_community(communities);
     // ── Generate index.html (overview) ──
     generate_overview(
         &html_dir,
@@ -546,7 +534,7 @@ fn generate_overview(
             color = color,
             size = size,
         )
-        .unwrap();
+        ?;
     }
     vis_nodes.push(']');
 
@@ -579,7 +567,7 @@ fn generate_overview(
             count = count,
             width = width,
         )
-        .unwrap();
+        ?;
     }
     vis_edges.push(']');
 
@@ -602,7 +590,7 @@ fn generate_overview(
             label = escape_html(&label),
             count = count,
         )
-        .unwrap();
+        ?;
     }
 
     let html = format!(
@@ -718,7 +706,7 @@ fn generate_community_page(
             color,
             size,
         )
-        .unwrap();
+        ?;
     }
     vis_nodes.push(']');
 
@@ -750,7 +738,7 @@ fn generate_community_page(
                 edge.relation, edge.source, edge.target, edge.confidence
             )),
         )
-        .unwrap();
+        ?;
     }
     vis_edges.push(']');
 
@@ -792,7 +780,7 @@ fn generate_community_page(
             label = escape_html(&ext_label),
             count = count,
         )
-        .unwrap();
+        ?;
     }
 
     let is_large = members.len() > 500;
@@ -1055,7 +1043,7 @@ mod tests {
     }
 
     #[test]
-    fn export_html_respects_max_nodes() {
+    fn export_html_respects_max_nodes() -> anyhow::Result<()> {
         // Build a graph with 10 nodes
         let mut kg = KnowledgeGraph::new();
         for i in 0..10 {
@@ -1067,8 +1055,7 @@ mod tests {
                 node_type: NodeType::Function,
                 community: Some(0),
                 extra: HashMap::new(),
-            })
-            .unwrap();
+            }).unwrap();
         }
         for i in 1..10 {
             let _ = kg.add_edge(GraphEdge {
@@ -1100,5 +1087,6 @@ mod tests {
             html.contains("pruned") || html.contains("Showing"),
             "should indicate pruning occurred"
         );
+        Ok(())
     }
 }
