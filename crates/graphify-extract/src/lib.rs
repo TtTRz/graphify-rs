@@ -477,7 +477,7 @@ fn resolve_cross_file_imports(result: &mut ExtractionResult) {
             // Fallback: create edges to all target entities, but cap per import
             // to avoid O(N*M) explosion for files with many entities.
             const MAX_FALLBACK_EDGES: usize = 50;
-            let mut count = 0;
+            let mut fallback_count = 0;
             for (_, target_id, _) in &target_entities {
                 if local_id == target_id {
                     continue;
@@ -498,8 +498,8 @@ fn resolve_cross_file_imports(result: &mut ExtractionResult) {
                     weight: 0.8,
                     extra: Default::default(),
                 });
-                count += 1;
-                if count >= MAX_FALLBACK_EDGES {
+                fallback_count += 1;
+                if fallback_count >= MAX_FALLBACK_EDGES {
                     break;
                 }
             }

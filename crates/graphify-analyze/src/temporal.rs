@@ -139,7 +139,7 @@ fn days_since_epoch_2020(date_str: &str) -> Option<u64> {
     } else {
         0
     };
-    Some((y.saturating_sub(2020)) * 365 + CUM_DAYS.get(m as usize - 1).copied().unwrap_or(0) + leap_extra + d)
+    Some((y.saturating_sub(2020)) * 365 + CUM_DAYS.get(m as usize - 1).copied().unwrap_or(0) + leap_extra + d - 1)
 }
 
 /// Approximate days since 2020-01-01 for "now".
@@ -174,11 +174,13 @@ mod tests {
 
     #[test]
     fn days_since_epoch_consistent() {
-        // 2020-01-01 should be day 1 (minimum)
-        assert_eq!(days_since_epoch_2020("2020-01-01"), Some(1));
-        // 2020-02-01 = 31 + 1 = 32
-        assert_eq!(days_since_epoch_2020("2020-02-01"), Some(32));
-        // 2021-01-01 = 365 + 1 = 366
-        assert_eq!(days_since_epoch_2020("2021-01-01"), Some(366));
+        // 2020-01-01 is the epoch, so day 0
+        assert_eq!(days_since_epoch_2020("2020-01-01"), Some(0));
+        // 2020-02-01 = 31 days after epoch
+        assert_eq!(days_since_epoch_2020("2020-02-01"), Some(31));
+        // 2021-01-01 = 365 days after epoch
+        assert_eq!(days_since_epoch_2020("2021-01-01"), Some(365));
+        // 2020-03-01 = 31 + 29 (leap) + 0 = 60
+        assert_eq!(days_since_epoch_2020("2020-03-01"), Some(60));
     }
 }

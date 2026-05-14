@@ -102,9 +102,9 @@ fn build_unique_filenames(graph: &KnowledgeGraph) -> HashMap<String, String> {
     }
 
     let mut result = HashMap::new();
-    for (sanitized, ids) in name_to_ids {
+    for (sanitized, mut ids) in name_to_ids {
         if ids.len() == 1 {
-            result.insert(ids.into_iter().next().unwrap(), sanitized);
+            result.insert(ids.pop().unwrap(), sanitized);
         } else {
             for (i, id) in ids.into_iter().enumerate() {
                 result.insert(id, format!("{sanitized}_{i}"));

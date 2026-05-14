@@ -46,7 +46,7 @@ pub fn export_cypher(graph: &KnowledgeGraph, output_dir: &Path) -> anyhow::Resul
         let rel_type = edge
             .relation
             .to_uppercase()
-            .replace(|c: char| !c.is_alphanumeric() && c != '_', "_");
+            .replace(|c: char| !c.is_ascii_alphanumeric() && c != '_', "_");
         let src_var = var_names
             .get(&edge.source)
             .map(|s| s.as_str())
@@ -80,7 +80,7 @@ pub fn export_cypher(graph: &KnowledgeGraph, output_dir: &Path) -> anyhow::Resul
 fn sanitize_var(id: &str) -> String {
     let mut out = String::with_capacity(id.len());
     for c in id.chars() {
-        if c.is_alphanumeric() || c == '_' {
+        if c.is_ascii_alphanumeric() || c == '_' {
             out.push(c);
         } else {
             out.push('_');
@@ -104,9 +104,9 @@ fn build_unique_var_names(graph: &KnowledgeGraph) -> HashMap<String, String> {
     }
 
     let mut result = HashMap::new();
-    for (sanitized, ids) in name_to_ids {
+    for (sanitized, mut ids) in name_to_ids {
         if ids.len() == 1 {
-            result.insert(ids.into_iter().next().unwrap(), sanitized);
+            result.insert(ids.pop().unwrap(), sanitized);
         } else {
             for (i, id) in ids.into_iter().enumerate() {
                 result.insert(id, format!("{sanitized}_{i}"));

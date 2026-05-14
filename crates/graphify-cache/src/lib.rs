@@ -29,8 +29,13 @@ pub enum CacheError {
 /// Returns `None` if the file cannot be read.
 pub fn file_hash(path: &Path) -> Option<String> {
     let content = fs::read(path).ok()?;
-    let hash = Sha256::digest(&content);
-    Some(format!("{hash:x}"))
+    Some(content_hash(&content))
+}
+
+/// Compute the SHA256 hex digest of arbitrary bytes.
+pub fn content_hash(data: &[u8]) -> String {
+    let hash = Sha256::digest(data);
+    format!("{hash:x}")
 }
 
 /// Build a cache filename from a file path relative to `root`.
