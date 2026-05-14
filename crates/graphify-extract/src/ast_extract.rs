@@ -21,6 +21,25 @@ use graphify_core::model::{ExtractionResult, GraphEdge, GraphNode, NodeType};
 use regex::Regex;
 use tracing::trace;
 
+/// Line number (1-based) where a regex capture starts in `source`.
+fn line_of(source: &str, cap: &regex::Captures<'_>) -> usize {
+    source[..cap.get(0).unwrap().start()].lines().count() + 1
+}
+
+/// 1-based end line of `source` at byte offset of the next capture's start,
+/// or end of file if this is the last capture.
+fn end_line_at(source: &str, next: Option<&regex::Captures<'_>>) -> usize {
+    match next {
+        Some(n) => source[..n.get(0).unwrap().start()].lines().count(),
+        None => source.lines().count(),
+    }
+}
+
+/// Full matched string of capture group 0.
+fn full_match<'a>(cap: &regex::Captures<'a>) -> &'a str {
+    cap.get(0).unwrap().as_str()
+}
+
 macro_rules! re {
     ($name:ident, $pattern:expr) => {
         static $name: LazyLock<Regex> = LazyLock::new(|| Regex::new($pattern).expect($pattern));
@@ -272,7 +291,7 @@ fn extract_python(path: &Path, source: &str) -> ExtractionResult {
     let mut class_ids: HashMap<String, String> = HashMap::new();
     for cap in RE_PY_CLASS.captures_iter(source) {
         let name = &cap[2];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let node = make_node(name, path, NodeType::Class, line);
         let node_id = node.id.clone();
         class_ids.insert(name.to_string(), node_id.clone());
@@ -292,7 +311,7 @@ fn extract_python(path: &Path, source: &str) -> ExtractionResult {
     for (i, cap) in func_matches.iter().enumerate() {
         let indent = cap[1].len();
         let name = cap[2].to_string();
-        let start_line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let start_line = line_of(source, cap);
 
         let node_type = if indent > 0 {
             NodeType::Method
@@ -321,13 +340,7 @@ fn extract_python(path: &Path, source: &str) -> ExtractionResult {
         };
 
         // End line: next function at same or lower indent, or end of file
-        let end_line = if i + 1 < func_matches.len() {
-            source[..func_matches[i + 1].get(0).unwrap().start()]
-                .lines()
-                .count()
-        } else {
-            lines.len()
-        };
+        let end_line = end_line_at(source, func_matches.get(i + 1));
 
         functions.push((name.clone(), node_id.clone(), start_line, end_line));
         result.nodes.push(node);
@@ -344,7 +357,7 @@ fn extract_python(path: &Path, source: &str) -> ExtractionResult {
     for cap in RE_PY_IMPORT.captures_iter(source) {
         let module = cap.get(1).map_or("", |m| m.as_str());
         let names_str = &cap[2];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
 
         for name in names_str.split(',') {
             let name = name.trim().split(" as ").next().unwrap_or("").trim();
@@ -405,7 +418,7 @@ fn extract_js_ts(path: &Path, source: &str, lang: &str) -> ExtractionResult {
     // Classes: `class Foo` / `export class Foo`
     for cap in RE_JS_CLASS.captures_iter(source) {
         let name = &cap[1];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let node = make_node(name, path, NodeType::Class, line);
         let node_id = node.id.clone();
         result.nodes.push(node);
@@ -432,14 +445,8 @@ fn extract_js_ts(path: &Path, source: &str, lang: &str) -> ExtractionResult {
         if name.is_empty() {
             continue;
         }
-        let start_line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
-        let end_line = if i + 1 < func_matches.len() {
-            source[..func_matches[i + 1].get(0).unwrap().start()]
-                .lines()
-                .count()
-        } else {
-            lines.len()
-        };
+        let start_line = line_of(source, cap);
+        let end_line = end_line_at(source, func_matches.get(i + 1));
 
         let node = make_node(&name, path, NodeType::Function, start_line);
         let node_id = node.id.clone();
@@ -456,8 +463,8 @@ fn extract_js_ts(path: &Path, source: &str, lang: &str) -> ExtractionResult {
 
     // Imports: `import { X } from 'Y'` / `import X from 'Y'` / `import 'Y'`
     for cap in RE_JS_IMPORT.captures_iter(source) {
-        let module = cap.get(3).or(cap.get(4)).map(|m| m.as_str()).unwrap_or("");
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let module = cap.get(3).or(cap.get(4)).map_or("", |m| m.as_str());
+        let line = line_of(source, &cap);
 
         if let Some(names) = cap.get(1) {
             for name in names.as_str().split(',') {
@@ -511,7 +518,7 @@ fn extract_js_ts(path: &Path, source: &str, lang: &str) -> ExtractionResult {
         for cap in RE_JS_REQUIRE.captures_iter(source) {
             let name = &cap[1];
             let module = &cap[2];
-            let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+            let line = line_of(source, &cap);
             let import_id = make_id(&[&ps, "import", module]);
             result.nodes.push(GraphNode {
                 id: import_id.clone(),
@@ -554,7 +561,7 @@ fn extract_rust(path: &Path, source: &str) -> ExtractionResult {
     // Structs: `pub struct Foo` / `struct Foo`
     for cap in RE_RS_STRUCT.captures_iter(source) {
         let name = &cap[1];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let node = make_node(name, path, NodeType::Struct, line);
         let node_id = node.id.clone();
         result.nodes.push(node);
@@ -570,7 +577,7 @@ fn extract_rust(path: &Path, source: &str) -> ExtractionResult {
     // Enums: `pub enum Foo` / `enum Foo`
     for cap in RE_RS_ENUM.captures_iter(source) {
         let name = &cap[1];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let node = make_node(name, path, NodeType::Enum, line);
         let node_id = node.id.clone();
         result.nodes.push(node);
@@ -586,7 +593,7 @@ fn extract_rust(path: &Path, source: &str) -> ExtractionResult {
     // Traits: `pub trait Foo` / `trait Foo`
     for cap in RE_RS_TRAIT.captures_iter(source) {
         let name = &cap[1];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let node = make_node(name, path, NodeType::Trait, line);
         let node_id = node.id.clone();
         result.nodes.push(node);
@@ -603,7 +610,7 @@ fn extract_rust(path: &Path, source: &str) -> ExtractionResult {
     for cap in RE_RS_IMPL.captures_iter(source) {
         let _trait_name = cap.get(1).map(|m| m.as_str());
         let type_name = &cap[2];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         // Create an "implements" edge if impl Trait for Type
         if let Some(trait_m) = cap.get(1) {
             let trait_id = make_id(&[&ps, trait_m.as_str()]);
@@ -626,14 +633,8 @@ fn extract_rust(path: &Path, source: &str) -> ExtractionResult {
     for (i, cap) in func_matches.iter().enumerate() {
         let indent = cap[1].len();
         let name = cap[2].to_string();
-        let start_line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
-        let end_line = if i + 1 < func_matches.len() {
-            source[..func_matches[i + 1].get(0).unwrap().start()]
-                .lines()
-                .count()
-        } else {
-            lines.len()
-        };
+        let start_line = line_of(source, cap);
+        let end_line = end_line_at(source, func_matches.get(i + 1));
 
         let node_type = if indent > 0 {
             NodeType::Method
@@ -656,7 +657,7 @@ fn extract_rust(path: &Path, source: &str) -> ExtractionResult {
     // Use statements
     for cap in RE_RS_USE.captures_iter(source) {
         let module = &cap[1];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let import_id = make_id(&[&ps, "use", module]);
         result.nodes.push(GraphNode {
             id: import_id.clone(),
@@ -699,7 +700,7 @@ fn extract_go(path: &Path, source: &str) -> ExtractionResult {
     for cap in RE_GO_TYPE.captures_iter(source) {
         let name = &cap[1];
         let kind = &cap[2];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let node_type = match kind {
             "interface" => NodeType::Interface,
             _ => NodeType::Struct,
@@ -721,17 +722,11 @@ fn extract_go(path: &Path, source: &str) -> ExtractionResult {
     let func_matches: Vec<_> = RE_GO_FUNC.captures_iter(source).collect();
     for (i, cap) in func_matches.iter().enumerate() {
         let name = cap[1].to_string();
-        let start_line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
-        let end_line = if i + 1 < func_matches.len() {
-            source[..func_matches[i + 1].get(0).unwrap().start()]
-                .lines()
-                .count()
-        } else {
-            lines.len()
-        };
+        let start_line = line_of(source, cap);
+        let end_line = end_line_at(source, func_matches.get(i + 1));
 
         // Methods have a receiver
-        let full_match = cap.get(0).unwrap().as_str();
+        let full_match = full_match(cap);
         let node_type = if full_match.contains('(') && full_match.find('(') < full_match.find(&name)
         {
             NodeType::Method
@@ -755,7 +750,7 @@ fn extract_go(path: &Path, source: &str) -> ExtractionResult {
     // Imports: `import "fmt"` / `import ( "fmt" "os" )`
     for cap in RE_GO_IMPORT_SINGLE.captures_iter(source) {
         let module = &cap[1];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let import_id = make_id(&[&ps, "import", module]);
         result.nodes.push(GraphNode {
             id: import_id.clone(),
@@ -777,7 +772,7 @@ fn extract_go(path: &Path, source: &str) -> ExtractionResult {
 
     for cap in RE_GO_IMPORT_BLOCK.captures_iter(source) {
         let block = &cap[1];
-        let block_start = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let block_start = line_of(source, &cap);
         for (idx, imp_cap) in RE_GO_IMPORT_LINE.captures_iter(block).enumerate() {
             let module = &imp_cap[1];
             let import_id = make_id(&[&ps, "import", module]);
@@ -823,7 +818,7 @@ fn extract_java(path: &Path, source: &str) -> ExtractionResult {
     for cap in RE_JAVA_CLASS.captures_iter(source) {
         let kind = &cap[1];
         let name = &cap[2];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let node_type = match kind {
             "interface" => NodeType::Interface,
             "enum" => NodeType::Enum,
@@ -854,14 +849,8 @@ fn extract_java(path: &Path, source: &str) -> ExtractionResult {
         {
             continue;
         }
-        let start_line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
-        let end_line = if i + 1 < func_matches.len() {
-            source[..func_matches[i + 1].get(0).unwrap().start()]
-                .lines()
-                .count()
-        } else {
-            lines.len()
-        };
+        let start_line = line_of(source, cap);
+        let end_line = end_line_at(source, func_matches.get(i + 1));
 
         let node = make_node(&name, path, NodeType::Method, start_line);
         let node_id = node.id.clone();
@@ -879,7 +868,7 @@ fn extract_java(path: &Path, source: &str) -> ExtractionResult {
     // Imports
     for cap in RE_JAVA_IMPORT.captures_iter(source) {
         let module = &cap[1];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let import_id = make_id(&[&ps, "import", module]);
         result.nodes.push(GraphNode {
             id: import_id.clone(),
@@ -921,7 +910,7 @@ fn extract_c_cpp(path: &Path, source: &str, lang: &str) -> ExtractionResult {
     // #include directives
     for cap in RE_C_INCLUDE.captures_iter(source) {
         let header = &cap[1];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let import_id = make_id(&[&ps, "include", header]);
         result.nodes.push(GraphNode {
             id: import_id.clone(),
@@ -945,7 +934,7 @@ fn extract_c_cpp(path: &Path, source: &str, lang: &str) -> ExtractionResult {
     if lang == "cpp" {
         for cap in RE_CPP_CLASS.captures_iter(source) {
             let name = &cap[1];
-            let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+            let line = line_of(source, &cap);
             let node = make_node(name, path, NodeType::Class, line);
             let node_id = node.id.clone();
             result.nodes.push(node);
@@ -963,7 +952,7 @@ fn extract_c_cpp(path: &Path, source: &str, lang: &str) -> ExtractionResult {
     if lang == "c" {
         for cap in RE_C_STRUCT.captures_iter(source) {
             let name = &cap[1];
-            let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+            let line = line_of(source, &cap);
             let node = make_node(name, path, NodeType::Struct, line);
             let node_id = node.id.clone();
             result.nodes.push(node);
@@ -985,14 +974,8 @@ fn extract_c_cpp(path: &Path, source: &str, lang: &str) -> ExtractionResult {
         if ["if", "for", "while", "switch", "return", "sizeof"].contains(&name.as_str()) {
             continue;
         }
-        let start_line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
-        let end_line = if i + 1 < func_matches.len() {
-            source[..func_matches[i + 1].get(0).unwrap().start()]
-                .lines()
-                .count()
-        } else {
-            lines.len()
-        };
+        let start_line = line_of(source, cap);
+        let end_line = end_line_at(source, func_matches.get(i + 1));
 
         let node = make_node(&name, path, NodeType::Function, start_line);
         let node_id = node.id.clone();
@@ -1029,7 +1012,7 @@ fn extract_ruby(path: &Path, source: &str) -> ExtractionResult {
     // Classes and modules
     for cap in RE_RB_CLASS.captures_iter(source) {
         let name = &cap[2];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let node = make_node(name, path, NodeType::Class, line);
         let node_id = node.id.clone();
         result.nodes.push(node);
@@ -1047,14 +1030,8 @@ fn extract_ruby(path: &Path, source: &str) -> ExtractionResult {
     let func_matches: Vec<_> = RE_RB_FUNC.captures_iter(source).collect();
     for (i, cap) in func_matches.iter().enumerate() {
         let name = cap[2].to_string();
-        let start_line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
-        let end_line = if i + 1 < func_matches.len() {
-            source[..func_matches[i + 1].get(0).unwrap().start()]
-                .lines()
-                .count()
-        } else {
-            lines.len()
-        };
+        let start_line = line_of(source, cap);
+        let end_line = end_line_at(source, func_matches.get(i + 1));
 
         let node = make_node(&name, path, NodeType::Method, start_line);
         let node_id = node.id.clone();
@@ -1072,7 +1049,7 @@ fn extract_ruby(path: &Path, source: &str) -> ExtractionResult {
     // require / require_relative
     for cap in RE_RB_REQUIRE.captures_iter(source) {
         let module = &cap[1];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let import_id = make_id(&[&ps, "require", module]);
         result.nodes.push(GraphNode {
             id: import_id.clone(),
@@ -1115,7 +1092,7 @@ fn extract_csharp(path: &Path, source: &str) -> ExtractionResult {
     for cap in RE_CS_CLASS.captures_iter(source) {
         let kind = &cap[1];
         let name = &cap[2];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let node_type = match kind {
             "interface" => NodeType::Interface,
             "struct" => NodeType::Struct,
@@ -1146,14 +1123,8 @@ fn extract_csharp(path: &Path, source: &str) -> ExtractionResult {
         {
             continue;
         }
-        let start_line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
-        let end_line = if i + 1 < func_matches.len() {
-            source[..func_matches[i + 1].get(0).unwrap().start()]
-                .lines()
-                .count()
-        } else {
-            lines.len()
-        };
+        let start_line = line_of(source, cap);
+        let end_line = end_line_at(source, func_matches.get(i + 1));
 
         let node = make_node(&name, path, NodeType::Method, start_line);
         let node_id = node.id.clone();
@@ -1171,7 +1142,7 @@ fn extract_csharp(path: &Path, source: &str) -> ExtractionResult {
     // using directives
     for cap in RE_CS_USING.captures_iter(source) {
         let ns = &cap[1];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let import_id = make_id(&[&ps, "using", ns]);
         result.nodes.push(GraphNode {
             id: import_id.clone(),
@@ -1213,7 +1184,7 @@ fn extract_kotlin(path: &Path, source: &str) -> ExtractionResult {
     // Classes / objects / interfaces
     for cap in RE_KT_CLASS.captures_iter(source) {
         let name = &cap[1];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let node = make_node(name, path, NodeType::Class, line);
         let node_id = node.id.clone();
         result.nodes.push(node);
@@ -1231,14 +1202,8 @@ fn extract_kotlin(path: &Path, source: &str) -> ExtractionResult {
     let func_matches: Vec<_> = RE_KT_FUNC.captures_iter(source).collect();
     for (i, cap) in func_matches.iter().enumerate() {
         let name = cap[1].to_string();
-        let start_line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
-        let end_line = if i + 1 < func_matches.len() {
-            source[..func_matches[i + 1].get(0).unwrap().start()]
-                .lines()
-                .count()
-        } else {
-            lines.len()
-        };
+        let start_line = line_of(source, cap);
+        let end_line = end_line_at(source, func_matches.get(i + 1));
 
         let node = make_node(&name, path, NodeType::Function, start_line);
         let node_id = node.id.clone();
@@ -1256,7 +1221,7 @@ fn extract_kotlin(path: &Path, source: &str) -> ExtractionResult {
     // Imports
     for cap in RE_KT_IMPORT.captures_iter(source) {
         let module = &cap[1];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let import_id = make_id(&[&ps, "import", module]);
         result.nodes.push(GraphNode {
             id: import_id.clone(),
@@ -1298,7 +1263,7 @@ fn extract_generic(path: &Path, source: &str, _lang: &str) -> ExtractionResult {
     // Generic class/struct/module pattern
     for cap in RE_GEN_CLASS.captures_iter(source) {
         let name = &cap[1];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let node = make_node(name, path, NodeType::Class, line);
         let node_id = node.id.clone();
         result.nodes.push(node);
@@ -1316,14 +1281,8 @@ fn extract_generic(path: &Path, source: &str, _lang: &str) -> ExtractionResult {
     let func_matches: Vec<_> = RE_GEN_FUNC.captures_iter(source).collect();
     for (i, cap) in func_matches.iter().enumerate() {
         let name = cap[1].to_string();
-        let start_line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
-        let end_line = if i + 1 < func_matches.len() {
-            source[..func_matches[i + 1].get(0).unwrap().start()]
-                .lines()
-                .count()
-        } else {
-            lines.len()
-        };
+        let start_line = line_of(source, cap);
+        let end_line = end_line_at(source, func_matches.get(i + 1));
 
         let node = make_node(&name, path, NodeType::Function, start_line);
         let node_id = node.id.clone();
@@ -1341,7 +1300,7 @@ fn extract_generic(path: &Path, source: &str, _lang: &str) -> ExtractionResult {
     // Generic import pattern
     for cap in RE_GEN_IMPORT.captures_iter(source) {
         let module = &cap[1];
-        let line = source[..cap.get(0).unwrap().start()].lines().count() + 1;
+        let line = line_of(source, &cap);
         let import_id = make_id(&[&ps, "import", module]);
         result.nodes.push(GraphNode {
             id: import_id.clone(),

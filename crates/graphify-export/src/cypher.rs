@@ -27,7 +27,7 @@ pub fn export_cypher(graph: &KnowledgeGraph, output_dir: &Path) -> anyhow::Resul
             write!(cypher, ", source_location: '{}'", cypher_escape(loc))?;
         }
         if let Some(c) = node.community {
-            write!(cypher, ", community: {}", c)?;
+            write!(cypher, ", community: {c}")?;
         }
         writeln!(cypher, "}});")?;
     }

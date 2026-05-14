@@ -31,14 +31,13 @@ pub fn export_wiki(
     writeln!(index)?;
 
     let mut sorted_cids: Vec<usize> = communities.keys().copied().collect();
-    sorted_cids.sort();
+    sorted_cids.sort_unstable();
 
     for &cid in &sorted_cids {
         let members = &communities[&cid];
         let label = community_labels
             .get(&cid)
-            .map(|s| s.as_str())
-            .unwrap_or("Unnamed");
+            .map_or("Unnamed", std::string::String::as_str);
         let filename = community_filename(cid);
         writeln!(
             index,
@@ -70,7 +69,7 @@ pub fn export_wiki(
         writeln!(index)?;
         for (nid, degree) in &god_nodes {
             let node = graph.get_node(nid);
-            let label = node.map(|n| n.label.as_str()).unwrap_or(nid.as_str());
+            let label = node.map_or(nid.as_str(), |n| n.label.as_str());
             let filename = node_filename(nid);
             writeln!(
                 index,
@@ -90,10 +89,9 @@ pub fn export_wiki(
         let members = &communities[&cid];
         let label = community_labels
             .get(&cid)
-            .map(|s| s.as_str())
-            .unwrap_or("Unnamed");
+            .map_or("Unnamed", std::string::String::as_str);
         let mut page = String::with_capacity(1024);
-        writeln!(page, "# Community {}: {}", cid, label)?;
+        writeln!(page, "# Community {cid}: {label}")?;
         writeln!(page)?;
         writeln!(page, "**Members:** {}", members.len())?;
         writeln!(page)?;
@@ -102,22 +100,21 @@ pub fn export_wiki(
         writeln!(page)?;
         for nid in members {
             let node = graph.get_node(nid);
-            let node_label = node.map(|n| n.label.as_str()).unwrap_or(nid.as_str());
+            let node_label = node.map_or(nid.as_str(), |n| n.label.as_str());
             let node_type = node
                 .map(|n| format!("{}", n.node_type))
                 .unwrap_or_default();
             let degree = graph.degree(nid);
             writeln!(
                 page,
-                "- **{}** (`{}`, {}, degree: {})",
-                node_label, nid, node_type, degree
+                "- **{node_label}** (`{nid}`, {node_type}, degree: {degree})"
             )?;
         }
         writeln!(page)?;
 
         // Internal edges
         let member_set: std::collections::HashSet<&str> =
-            members.iter().map(|s| s.as_str()).collect();
+            members.iter().map(std::string::String::as_str).collect();
         let all_edges = graph.edges();
         let internal_edges: Vec<_> = all_edges
             .iter()
@@ -155,11 +152,11 @@ pub fn export_wiki(
         writeln!(page, "- **Type:** {:?}", node.node_type)?;
         writeln!(page, "- **File:** `{}`", node.source_file)?;
         if let Some(loc) = &node.source_location {
-            writeln!(page, "- **Location:** {}", loc)?;
+            writeln!(page, "- **Location:** {loc}")?;
         }
         if let Some(c) = node.community {
-            let clabel = community_labels.get(&c).map(|s| s.as_str()).unwrap_or("?");
-            writeln!(page, "- **Community:** {} ({})", c, clabel)?;
+            let clabel = community_labels.get(&c).map_or("?", std::string::String::as_str);
+            writeln!(page, "- **Community:** {c} ({clabel})")?;
         }
         writeln!(page)?;
 
@@ -190,7 +187,7 @@ pub fn export_wiki(
 }
 
 fn community_filename(cid: usize) -> String {
-    format!("community_{}.md", cid)
+    format!("community_{cid}.md")
 }
 
 fn node_filename(id: &str) -> String {
@@ -205,7 +202,7 @@ fn node_filename(id: &str) -> String {
         })
         .collect();
     let truncated = graphify_core::truncate_to_bytes(&safe, graphify_core::MAX_FILENAME_BYTES);
-    format!("{}.md", truncated)
+    format!("{truncated}.md")
 }
 
 #[cfg(test)]

@@ -65,7 +65,7 @@ pub async fn extract_anthropic(
         }
         AuthType::Bearer => {
             if let Some(ref token) = config.api_key {
-                request = request.header("authorization", format!("Bearer {}", token));
+                request = request.header("authorization", format!("Bearer {token}"));
             }
         }
     }
@@ -96,7 +96,7 @@ pub async fn extract_anthropic(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Anthropic API returned {}: {}", status, body);
+        anyhow::bail!("Anthropic API returned {status}: {body}");
     }
 
     let msg: MessageResponse = response

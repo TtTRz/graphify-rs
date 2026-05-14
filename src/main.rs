@@ -450,7 +450,7 @@ fn cmd_query(question: &str, use_dfs: bool, budget: usize, graph_path: &str) -> 
     let terms: Vec<String> = question
         .split_whitespace()
         .filter(|w| w.len() > 2)
-        .map(|w| w.to_lowercase())
+        .map(str::to_lowercase)
         .collect();
 
     let scored = graphify_serve::score_nodes(&graph, &terms);
@@ -466,7 +466,7 @@ fn cmd_query(question: &str, use_dfs: bool, budget: usize, graph_path: &str) -> 
         graphify_serve::bfs(&graph, &start, 2)
     };
     let text = graphify_serve::subgraph_to_text(&graph, &nodes, &edges, budget);
-    println!("{}", text);
+    println!("{text}");
 
     Ok(())
 }
@@ -573,14 +573,14 @@ fn cmd_diff(old_path: &str, new_path: &str, output_format: &str) -> Result<()> {
             }
         }
 
-        let summary_added = added_nodes.map_or(0, |v| v.len()) + added_edges.map_or(0, |v| v.len());
+        let summary_added = added_nodes.map_or(0, std::vec::Vec::len) + added_edges.map_or(0, std::vec::Vec::len);
         let summary_removed =
-            removed_nodes.map_or(0, |v| v.len()) + removed_edges.map_or(0, |v| v.len());
+            removed_nodes.map_or(0, std::vec::Vec::len) + removed_edges.map_or(0, std::vec::Vec::len);
         println!(
             "\n{}: {} additions, {} removals",
             "Summary".bold(),
-            format!("+{}", summary_added).green(),
-            format!("-{}", summary_removed).red()
+            format!("+{summary_added}").green(),
+            format!("-{summary_removed}").red()
         );
     }
 
@@ -637,8 +637,8 @@ fn cmd_stats(graph_path: &str) -> Result<()> {
     println!("  Nodes:       {}", node_count.to_string().bold());
     println!("  Edges:       {}", edge_count.to_string().bold());
     println!("  Communities: {}", communities.len().to_string().bold());
-    println!("  Avg degree:  {:.1}", avg_degree);
-    println!("  Max degree:  {}", max_degree);
+    println!("  Avg degree:  {avg_degree:.1}");
+    println!("  Max degree:  {max_degree}");
 
     println!("\n{}", "Node Types".bold());
     let mut types: Vec<_> = type_counts.iter().collect();

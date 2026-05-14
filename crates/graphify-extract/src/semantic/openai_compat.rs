@@ -64,18 +64,17 @@ pub async fn extract_openai_compatible(
 
     let client = reqwest::Client::new();
     let mut request = client
-        .post(format!("{}/chat/completions", base_url))
+        .post(format!("{base_url}/chat/completions"))
         .header("content-type", "application/json")
         .json(&request_body);
 
     if let Some(key) = api_key {
-        request = request.header("authorization", format!("Bearer {}", key));
+        request = request.header("authorization", format!("Bearer {key}"));
     }
 
     let response = request.send().await.with_context(|| {
         format!(
-            "Cannot connect to {}. Make sure the server is running.",
-            base_url
+            "Cannot connect to {base_url}. Make sure the server is running."
         )
     })?;
 
@@ -88,8 +87,7 @@ pub async fn extract_openai_compatible(
             }
             _ => {
                 anyhow::bail!(
-                    "Authentication failed for {}. Check your API key in graphify.toml.",
-                    base_url
+                    "Authentication failed for {base_url}. Check your API key in graphify.toml."
                 );
             }
         }
@@ -98,19 +96,16 @@ pub async fn extract_openai_compatible(
     if response.status().as_u16() == 404 {
         match provider {
             LLMProvider::Ollama => {
-                anyhow::bail!("Model '{}' not found. Run: ollama pull {}", model, model);
+                anyhow::bail!("Model '{model}' not found. Run: ollama pull {model}");
             }
             LLMProvider::OpenAI => {
                 anyhow::bail!(
-                    "Model '{}' not found. Check available models at platform.openai.com",
-                    model
+                    "Model '{model}' not found. Check available models at platform.openai.com"
                 );
             }
             _ => {
                 anyhow::bail!(
-                    "Model '{}' not found at {}. Check that the model is available.",
-                    model,
-                    base_url
+                    "Model '{model}' not found at {base_url}. Check that the model is available."
                 );
             }
         }
@@ -119,7 +114,7 @@ pub async fn extract_openai_compatible(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("LLM API at {} returned {}: {}", base_url, status, body);
+        anyhow::bail!("LLM API at {base_url} returned {status}: {body}");
     }
 
     let chat_resp: ChatResponse = response

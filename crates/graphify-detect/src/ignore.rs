@@ -27,9 +27,9 @@ pub fn load_graphifyignore(root: &Path) -> Vec<String> {
 
     content
         .lines()
-        .map(|l| l.trim())
+        .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .map(|l| l.to_string())
+        .map(std::string::ToString::to_string)
         .collect()
 }
 

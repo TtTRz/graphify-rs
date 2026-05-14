@@ -619,7 +619,7 @@ fn handle_function(
         let nid = make_id(&[class_nid, &normalized_name]);
         (
             nid,
-            format!(".{}()", normalized_name),
+            format!(".{normalized_name}()"),
             NodeType::Method,
             "defines",
         )
@@ -627,7 +627,7 @@ fn handle_function(
         let nid = make_id(&[str_path, &normalized_name]);
         (
             nid,
-            format!("{}()", normalized_name),
+            format!("{normalized_name}()"),
             NodeType::Function,
             "defines",
         )
@@ -676,7 +676,7 @@ fn extract_import(
     match lang {
         "python" => extract_python_import(node, source, file_nid, str_path, line, edges, nodes),
         "javascript" | "typescript" => {
-            extract_js_import(node, source, file_nid, str_path, line, edges, nodes)
+            extract_js_import(node, source, file_nid, str_path, line, edges, nodes);
         }
         "rust" => {
             // `use foo::bar::Baz;` → module = full text after "use"
@@ -912,9 +912,7 @@ fn extract_js_import(
                         for spec in inner.children(&mut spec_cursor) {
                             if spec.kind() == "import_specifier" {
                                 let name = spec
-                                    .child_by_field_name("name")
-                                    .map(|n| node_text(n, source))
-                                    .unwrap_or_else(|| node_text(spec, source));
+                                    .child_by_field_name("name").map_or_else(|| node_text(spec, source), |n| node_text(n, source));
                                 let full = format!("{module}/{name}");
                                 add_import_node(
                                     nodes,

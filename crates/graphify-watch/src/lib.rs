@@ -119,19 +119,16 @@ fn rebuild(
             continue;
         }
         // Extract fresh, catching panics
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if let Ok(fresh) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             graphify_extract::extract(std::slice::from_ref(file_path))
         })) {
-            Ok(fresh) => {
-                let _ = graphify_cache::save_cached_to(file_path, &fresh, root, &cache_dir);
-                ast_result.nodes.extend(fresh.nodes);
-                ast_result.edges.extend(fresh.edges);
-                ast_result.hyperedges.extend(fresh.hyperedges);
-            }
-            Err(_) => {
-                errors += 1;
-                warn!("rebuild: extraction panicked for {}", file_path.display());
-            }
+            let _ = graphify_cache::save_cached_to(file_path, &fresh, root, &cache_dir);
+            ast_result.nodes.extend(fresh.nodes);
+            ast_result.edges.extend(fresh.edges);
+            ast_result.hyperedges.extend(fresh.hyperedges);
+        } else {
+            errors += 1;
+            warn!("rebuild: extraction panicked for {}", file_path.display());
         }
     }
     if cache_hits > 0 {
@@ -172,9 +169,7 @@ fn rebuild(
         .map(|(cid, nodes)| {
             let label = nodes
                 .first()
-                .and_then(|id| graph.get_node(id))
-                .map(|n| n.label.clone())
-                .unwrap_or_else(|| format!("Community {}", cid));
+                .and_then(|id| graph.get_node(id)).map_or_else(|| format!("Community {cid}"), |n| n.label.clone());
             (*cid, label)
         })
         .collect();

@@ -43,21 +43,21 @@ pub fn export_obsidian(
 
     for node in graph.nodes() {
         let filename = sanitize_filename(&node.label);
-        let filepath = vault_dir.join(format!("{}.md", filename));
+        let filepath = vault_dir.join(format!("{filename}.md"));
 
         let mut content = String::with_capacity(512);
 
         // --- YAML frontmatter ---
         content.push_str("---\n");
-        writeln!(content, "id: {}", node.id).unwrap();
-        writeln!(content, "type: {}", node.node_type).unwrap();
+        writeln!(content, "id: {}", node.id)?;
+        writeln!(content, "type: {}", node.node_type)?;
         if !node.source_file.is_empty() {
-            writeln!(content, "source: {}", node.source_file).unwrap();
+            writeln!(content, "source: {}", node.source_file)?;
         }
         if let Some(&cid) = node_community.get(node.id.as_str()) {
-            writeln!(content, "community: {}", cid).unwrap();
+            writeln!(content, "community: {cid}")?;
             if let Some(clabel) = community_labels.get(&cid) {
-                writeln!(content, "community_label: {}", clabel).unwrap();
+                writeln!(content, "community_label: {clabel}")?;
             }
         }
         content.push_str("---\n\n");
@@ -69,10 +69,8 @@ pub fn export_obsidian(
             content.push_str("## Connections\n\n");
             for &(neighbor_id, relation) in neighbours {
                 let link_label = graph
-                    .get_node(neighbor_id)
-                    .map(|n| sanitize_filename(&n.label))
-                    .unwrap_or_else(|| sanitize_filename(neighbor_id));
-                writeln!(content, "- [[{}]] ({})", link_label, relation).unwrap();
+                    .get_node(neighbor_id).map_or_else(|| sanitize_filename(neighbor_id), |n| sanitize_filename(&n.label));
+                writeln!(content, "- [[{link_label}]] ({relation})")?;
             }
         }
 

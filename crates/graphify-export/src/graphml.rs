@@ -11,7 +11,7 @@ use tracing::info;
 pub fn export_graphml(graph: &KnowledgeGraph, output_dir: &Path) -> anyhow::Result<PathBuf> {
     let mut xml = String::with_capacity(4096);
 
-    writeln!(xml, r#"<?xml version="1.0" encoding="UTF-8"?>"#).unwrap();
+    writeln!(xml, r#"<?xml version="1.0" encoding="UTF-8"?>"#)?;
     writeln!(
         xml,
         r#"<graphml xmlns="http://graphml.graphdrawing.org/xmlns""#
@@ -72,11 +72,11 @@ pub fn export_graphml(graph: &KnowledgeGraph, output_dir: &Path) -> anyhow::Resu
     )
     .unwrap();
 
-    writeln!(xml, r#"  <graph id="G" edgedefault="undirected">"#).unwrap();
+    writeln!(xml, r#"  <graph id="G" edgedefault="undirected">"#)?;
 
     // Nodes
     for node in graph.nodes() {
-        writeln!(xml, r#"    <node id="{}">"#, xml_escape(&node.id)).unwrap();
+        writeln!(xml, r#"    <node id="{}">"#, xml_escape(&node.id))?;
         writeln!(
             xml,
             r#"      <data key="label">{}</data>"#,
@@ -96,9 +96,9 @@ pub fn export_graphml(graph: &KnowledgeGraph, output_dir: &Path) -> anyhow::Resu
         )
         .unwrap();
         if let Some(c) = node.community {
-            writeln!(xml, r#"      <data key="community">{}</data>"#, c).unwrap();
+            writeln!(xml, r#"      <data key="community">{c}</data>"#)?;
         }
-        writeln!(xml, "    </node>").unwrap();
+        writeln!(xml, "    </node>")?;
     }
 
     // Edges
@@ -129,12 +129,12 @@ pub fn export_graphml(graph: &KnowledgeGraph, output_dir: &Path) -> anyhow::Resu
             edge.confidence_score
         )
         .unwrap();
-        writeln!(xml, r#"      <data key="weight">{}</data>"#, edge.weight).unwrap();
-        writeln!(xml, "    </edge>").unwrap();
+        writeln!(xml, r#"      <data key="weight">{}</data>"#, edge.weight)?;
+        writeln!(xml, "    </edge>")?;
     }
 
-    writeln!(xml, "  </graph>").unwrap();
-    writeln!(xml, "</graphml>").unwrap();
+    writeln!(xml, "  </graph>")?;
+    writeln!(xml, "</graphml>")?;
 
     fs::create_dir_all(output_dir)?;
     let path = output_dir.join("graph.graphml");

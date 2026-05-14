@@ -35,7 +35,7 @@ pub async fn cmd_build(
     let selected: Vec<&str> = if formats.is_empty() {
         all_formats.to_vec()
     } else {
-        formats.iter().map(|s| s.as_str()).collect()
+        formats.iter().map(std::string::String::as_str).collect()
     };
     let should_export = |name: &str| selected.iter().any(|s| s.eq_ignore_ascii_case(name));
 
@@ -125,19 +125,19 @@ fn step_detect(
     let n_code = detection
         .files
         .get(&graphify_detect::FileType::Code)
-        .map_or(0, |v| v.len());
+        .map_or(0, std::vec::Vec::len);
     let n_doc = detection
         .files
         .get(&graphify_detect::FileType::Document)
-        .map_or(0, |v| v.len());
+        .map_or(0, std::vec::Vec::len);
     let n_paper = detection
         .files
         .get(&graphify_detect::FileType::Paper)
-        .map_or(0, |v| v.len());
+        .map_or(0, std::vec::Vec::len);
     let n_image = detection
         .files
         .get(&graphify_detect::FileType::Image)
-        .map_or(0, |v| v.len());
+        .map_or(0, std::vec::Vec::len);
     info_print!(
         verb,
         "  Found {} files ({} code, {} doc, {} paper, {} image) · ~{} words",
@@ -193,7 +193,9 @@ fn step_extract_ast(
     let cache_hits = AtomicUsize::new(0);
     let extract_errors = AtomicUsize::new(0);
 
-    let pb = if !verb.is_quiet() {
+    let pb = if verb.is_quiet() {
+        None
+    } else {
         let pb = ProgressBar::new(code_files.len() as u64);
         pb.set_style(
             ProgressStyle::with_template("  {bar:40.cyan/dim} {pos}/{len} files ({eta} remaining)")
@@ -201,8 +203,6 @@ fn step_extract_ast(
                 .progress_chars("██░"),
         );
         Some(pb)
-    } else {
-        None
     };
 
     // Parallel extraction: each file is processed independently, results collected
@@ -230,17 +230,14 @@ fn step_extract_ast(
                 return cached;
             }
             // Extract fresh — catch panics to not abort the entire pipeline
-            let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let result = if let Ok(fresh) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 graphify_extract::extract(std::slice::from_ref(file_path))
             })) {
-                Ok(fresh) => {
-                    let _ = graphify_cache::save_cached_to(file_path, &fresh, root, cache_dir);
-                    fresh
-                }
-                Err(_) => {
-                    extract_errors.fetch_add(1, Ordering::Relaxed);
-                    graphify_core::model::ExtractionResult::default()
-                }
+                let _ = graphify_cache::save_cached_to(file_path, &fresh, root, cache_dir);
+                fresh
+            } else {
+                extract_errors.fetch_add(1, Ordering::Relaxed);
+                graphify_core::model::ExtractionResult::default()
             };
             if let Some(ref pb) = pb {
                 pb.inc(1);
@@ -304,11 +301,11 @@ async fn step_extract_semantic(
     let n_doc = detection
         .files
         .get(&graphify_detect::FileType::Document)
-        .map_or(0, |v| v.len());
+        .map_or(0, std::vec::Vec::len);
     let n_paper = detection
         .files
         .get(&graphify_detect::FileType::Paper)
-        .map_or(0, |v| v.len());
+        .map_or(0, std::vec::Vec::len);
 
     let provider_config = resolve_llm_config(llm_config, verb);
     if let Some(config) = provider_config {
@@ -339,7 +336,9 @@ async fn step_extract_semantic(
             let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
             let rt = tokio::runtime::Handle::current();
 
-            let pb_sem = if !verb.is_quiet() {
+            let pb_sem = if verb.is_quiet() {
+                None
+            } else {
                 let pb = ProgressBar::new(doc_files.len() as u64);
                 pb.set_style(
                     ProgressStyle::with_template(
@@ -349,8 +348,6 @@ async fn step_extract_semantic(
                     .progress_chars("██░"),
                 );
                 Some(pb)
-            } else {
-                None
             };
 
             // Collect tasks for concurrent execution
@@ -367,14 +364,11 @@ async fn step_extract_semantic(
                     }
                     continue;
                 }
-                let content = match std::fs::read_to_string(doc_path) {
-                    Ok(c) => c,
-                    Err(_) => {
-                        if let Some(ref pb) = pb_sem {
-                            pb.inc(1);
-                        }
-                        continue;
+                let content = if let Ok(c) = std::fs::read_to_string(doc_path) { c } else {
+                    if let Some(ref pb) = pb_sem {
+                        pb.inc(1);
                     }
+                    continue;
                 };
                 let file_type = if doc_path.extension().and_then(|e| e.to_str()) == Some("pdf") {
                     "paper"
@@ -534,12 +528,10 @@ fn step_cluster(
                     .unwrap_or_else(|| {
                         nodes
                             .first()
-                            .and_then(|id| graph.get_node(id))
-                            .map(|n| n.label.clone())
-                            .unwrap_or_else(|| format!("Community {}", cid))
+                            .and_then(|id| graph.get_node(id)).map_or_else(|| format!("Community {cid}"), |n| n.label.clone())
                     });
                 let label = if used_labels.contains(&best) {
-                    format!("{} ({})", best, cid)
+                    format!("{best} ({cid})")
                 } else {
                     used_labels.insert(best.clone());
                     best

@@ -223,13 +223,13 @@ pub fn print_benchmark(result: &BenchmarkResult) {
     println!("Graph tokens: {}", result.graph_tokens);
 
     if let Some(words) = result.corpus_words {
-        println!("Corpus words: {}", words);
+        println!("Corpus words: {words}");
     }
     if let Some(tokens) = result.corpus_tokens {
-        println!("Corpus tokens (est.): {}", tokens);
+        println!("Corpus tokens (est.): {tokens}");
     }
     if let Some(ratio) = result.compression_ratio {
-        println!("Compression: {:.1}x", ratio);
+        println!("Compression: {ratio:.1}x");
     }
 
     println!();

@@ -53,7 +53,7 @@ pub fn generate_report(input: &ReportInput) -> anyhow::Result<String> {
     // Header
     writeln!(report, "# 📊 Graph Analysis Report")?;
     writeln!(report)?;
-    writeln!(report, "**Root:** `{}`", root)?;
+    writeln!(report, "**Root:** `{root}`")?;
     writeln!(report)?;
 
     // Summary
@@ -66,9 +66,9 @@ pub fn generate_report(input: &ReportInput) -> anyhow::Result<String> {
 
     writeln!(report, "| Metric | Value |")?;
     writeln!(report, "|--------|-------|")?;
-    writeln!(report, "| Nodes | {} |", node_count)?;
-    writeln!(report, "| Edges | {} |", edge_count)?;
-    writeln!(report, "| Communities | {} |", community_count)?;
+    writeln!(report, "| Nodes | {node_count} |")?;
+    writeln!(report, "| Edges | {edge_count} |")?;
+    writeln!(report, "| Communities | {community_count} |")?;
     writeln!(report, "| Hyperedges | {} |", graph.hyperedges.len())?;
     writeln!(report)?;
 
@@ -118,9 +118,7 @@ pub fn generate_report(input: &ReportInput) -> anyhow::Result<String> {
         writeln!(report, "|------|--------|-----------|")?;
         for gn in god_nodes {
             let comm = gn
-                .community
-                .map(|c| c.to_string())
-                .unwrap_or_else(|| "–".into());
+                .community.map_or_else(|| "–".into(), |c| c.to_string());
             writeln!(report, "| {} | {} | {} |", gn.label, gn.degree, comm)?;
         }
     }
@@ -162,8 +160,7 @@ pub fn generate_report(input: &ReportInput) -> anyhow::Result<String> {
     for (cid, members) in &sorted_communities {
         let label = community_labels
             .get(cid)
-            .map(|s| s.as_str())
-            .unwrap_or("Unnamed");
+            .map_or("Unnamed", std::string::String::as_str);
         let cohesion = cohesion_scores.get(cid).copied().unwrap_or(0.0);
         writeln!(
             report,
@@ -177,9 +174,8 @@ pub fn generate_report(input: &ReportInput) -> anyhow::Result<String> {
         for nid in members.iter().take(20) {
             let node_label = graph
                 .get_node(nid)
-                .map(|n| n.label.as_str())
-                .unwrap_or(nid.as_str());
-            writeln!(report, "- {}", node_label)?;
+                .map_or(nid.as_str(), |n| n.label.as_str());
+            writeln!(report, "- {node_label}")?;
         }
         if members.len() > 20 {
             writeln!(report, "- _…and {} more_", members.len() - 20)?;
@@ -225,7 +221,7 @@ pub fn generate_report(input: &ReportInput) -> anyhow::Result<String> {
     } else {
         writeln!(report, "**Isolated nodes** ({}):", isolated.len())?;
         for label in isolated.iter().take(20) {
-            writeln!(report, "- {}", label)?;
+            writeln!(report, "- {label}")?;
         }
         if isolated.len() > 20 {
             writeln!(report, "- _…and {} more_", isolated.len() - 20)?;
@@ -249,7 +245,7 @@ pub fn generate_report(input: &ReportInput) -> anyhow::Result<String> {
 
     // Detection result info
     if let Some(method) = detection_result.get("method").and_then(|v| v.as_str()) {
-        writeln!(report, "**Community detection method:** {}", method)?;
+        writeln!(report, "**Community detection method:** {method}")?;
         writeln!(report)?;
     }
 
@@ -261,10 +257,10 @@ pub fn generate_report(input: &ReportInput) -> anyhow::Result<String> {
         writeln!(report, "|------|--------|")?;
         let mut total_tokens = 0usize;
         for (file, &tokens) in token_cost {
-            writeln!(report, "| {} | {} |", file, tokens)?;
+            writeln!(report, "| {file} | {tokens} |")?;
             total_tokens += tokens;
         }
-        writeln!(report, "| **Total** | **{}** |", total_tokens)?;
+        writeln!(report, "| **Total** | **{total_tokens}** |")?;
         writeln!(report)?;
     }
 
@@ -276,9 +272,9 @@ pub fn generate_report(input: &ReportInput) -> anyhow::Result<String> {
         writeln!(report)?;
         for q in questions {
             if let Some(text) = q.as_str() {
-                writeln!(report, "1. {}", text)?;
+                writeln!(report, "1. {text}")?;
             } else if let Some(text) = q.get("question").and_then(|v| v.as_str()) {
-                writeln!(report, "1. {}", text)?;
+                writeln!(report, "1. {text}")?;
             }
         }
         writeln!(report)?;

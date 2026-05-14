@@ -302,8 +302,7 @@ pub fn suggest_questions(
                 q.insert(
                     "question".into(),
                     format!(
-                        "Why is '{}' ({} nodes) loosely connected (cohesion {:.2})? Should it be split?",
-                        label, n, cohesion
+                        "Why is '{label}' ({n} nodes) loosely connected (cohesion {cohesion:.2})? Should it be split?"
                     ),
                 );
                 q.insert("community".into(), cid.to_string());
@@ -439,7 +438,7 @@ pub fn community_bridges(
 
             let ratio = cross as f64 / total as f64;
             let mut communities_touched: Vec<usize> = touched.into_iter().collect();
-            communities_touched.sort();
+            communities_touched.sort_unstable();
 
             Some(BridgeNode {
                 id: id.clone(),
@@ -500,7 +499,7 @@ fn compute_cohesion(graph: &KnowledgeGraph, community_nodes: &[String]) -> f64 {
     if n <= 1 {
         return 1.0;
     }
-    let node_set: HashSet<&str> = community_nodes.iter().map(|s| s.as_str()).collect();
+    let node_set: HashSet<&str> = community_nodes.iter().map(std::string::String::as_str).collect();
     let mut actual_edges = 0usize;
     for node_id in community_nodes {
         for neighbor in graph.get_neighbors(node_id) {
@@ -552,7 +551,7 @@ pub fn pagerank(
         }
     }
 
-    let out_degree: Vec<usize> = adj.iter().map(|neighbors| neighbors.len()).collect();
+    let out_degree: Vec<usize> = adj.iter().map(std::vec::Vec::len).collect();
     let init = 1.0 / n as f64;
     let mut rank = vec![init; n];
     let mut next_rank = vec![0.0f64; n];

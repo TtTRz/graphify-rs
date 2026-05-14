@@ -64,7 +64,7 @@ async fn ingest_arxiv(client: &Client, url: &str, out: &Path) -> Result<PathBuf,
 
     // Extract title
     let title = extract_between(&html, "<title>", "</title>")
-        .unwrap_or_else(|| format!("arXiv:{}", arxiv_id));
+        .unwrap_or_else(|| format!("arXiv:{arxiv_id}"));
     let title = strip_html_tags(&title).trim().to_string();
 
     // Extract abstract
@@ -82,8 +82,7 @@ async fn ingest_arxiv(client: &Client, url: &str, out: &Path) -> Result<PathBuf,
     std::fs::create_dir_all(out)?;
 
     let content = format!(
-        "---\nsource: {}\ntype: arxiv\narxiv_id: {}\ntitle: \"{}\"\n---\n\n# {}\n\n## Abstract\n\n{}\n",
-        url, arxiv_id, title, title, abstract_text
+        "---\nsource: {url}\ntype: arxiv\narxiv_id: {arxiv_id}\ntitle: \"{title}\"\n---\n\n# {title}\n\n## Abstract\n\n{abstract_text}\n"
     );
     std::fs::write(&path, content)?;
 
@@ -115,7 +114,7 @@ async fn ingest_tweet(client: &Client, url: &str, out: &Path) -> Result<PathBuf,
         let text = strip_html_tags(&html_content);
         (author, text)
     } else {
-        ("unknown".to_string(), format!("Tweet from: {}", url))
+        ("unknown".to_string(), format!("Tweet from: {url}"))
     };
 
     // Extract tweet ID from URL
@@ -153,7 +152,7 @@ async fn ingest_pdf(client: &Client, url: &str, out: &Path) -> Result<PathBuf, I
     let filename = if filename.ends_with(".pdf") {
         filename.to_string()
     } else {
-        format!("{}.pdf", filename)
+        format!("{filename}.pdf")
     };
 
     let path = out.join(&filename);
@@ -185,7 +184,7 @@ async fn ingest_webpage(client: &Client, url: &str, out: &Path) -> Result<PathBu
     let text = collapse_whitespace(&text);
 
     let filename = sanitize_filename(url);
-    let path = out.join(format!("{}.md", filename));
+    let path = out.join(format!("{filename}.md"));
     std::fs::create_dir_all(out)?;
 
     let content = format!(
@@ -219,14 +218,13 @@ pub fn save_query_result(
         .unwrap_or_default()
         .as_secs();
 
-    let filename = format!("{}_{}.md", query_type, timestamp);
+    let filename = format!("{query_type}_{timestamp}.md");
     let path = memory_dir.join(&filename);
 
     let nodes_str = source_nodes.map(|n| n.join(", ")).unwrap_or_default();
 
     let content = format!(
-        "---\ntype: {}\ntimestamp: {}\nnodes: [{}]\n---\n\n## Question\n\n{}\n\n## Answer\n\n{}\n",
-        query_type, timestamp, nodes_str, question, answer
+        "---\ntype: {query_type}\ntimestamp: {timestamp}\nnodes: [{nodes_str}]\n---\n\n## Question\n\n{question}\n\n## Answer\n\n{answer}\n"
     );
     std::fs::write(&path, content)?;
 

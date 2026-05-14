@@ -90,7 +90,7 @@ When the user types `/graphify`, invoke the Skill tool with `skill: "graphify"` 
 
 // ── Project-level CLAUDE.md section ──
 
-const CLAUDE_MD_SECTION: &str = r#"## graphify
+const CLAUDE_MD_SECTION: &str = r"## graphify
 
 This project has a graphify-rs knowledge graph at graphify-out/.
 
@@ -98,13 +98,13 @@ Rules:
 - Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
 - If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
 - After modifying code files in this session, run `graphify-rs build --path . --output graphify-out --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s)
-"#;
+";
 
 const CLAUDE_MD_MARKER: &str = "## graphify";
 
 // ── AGENTS.md section (for non-claude platforms) ──
 
-const AGENTS_MD_SECTION: &str = r#"## graphify
+const AGENTS_MD_SECTION: &str = r"## graphify
 
 This project has a graphify-rs knowledge graph at graphify-out/.
 
@@ -112,7 +112,7 @@ Rules:
 - Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
 - If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
 - After modifying code files in this session, run `graphify-rs build --path . --output graphify-out --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s)
-"#;
+";
 
 const AGENTS_MD_MARKER: &str = "## graphify";
 
@@ -136,8 +136,7 @@ pub fn check_skill_versions() {
                 let installed = installed.trim();
                 if !installed.is_empty() && installed != VERSION {
                     eprintln!(
-                        "  warning: skill is from graphify-rs {}, package is {}. Run 'graphify-rs install' to update.",
-                        installed, VERSION
+                        "  warning: skill is from graphify-rs {installed}, package is {VERSION}. Run 'graphify-rs install' to update."
                     );
                     return; // Only warn once
                 }
@@ -188,7 +187,7 @@ pub fn install_skill(platform: &str) -> Result<()> {
         println!("  Registered in {}", claude_md_path.display());
     }
 
-    println!("\n  Installed graphify skill for '{}'.", platform);
+    println!("\n  Installed graphify skill for '{platform}'.");
     println!("  Use `/graphify` in your AI assistant to trigger the skill.");
 
     Ok(())
@@ -335,7 +334,7 @@ pub fn generic_platform_install(project_root: &Path, platform: &str) -> Result<(
     let agents_md = project_root.join("AGENTS.md");
     append_section(&agents_md, AGENTS_MD_SECTION, AGENTS_MD_MARKER)?;
     println!("  Updated {}", agents_md.display());
-    println!("\n  {} integration installed.", platform);
+    println!("\n  {platform} integration installed.");
     Ok(())
 }
 
@@ -344,7 +343,7 @@ pub fn generic_platform_uninstall(project_root: &Path, platform: &str) -> Result
     let agents_md = project_root.join("AGENTS.md");
     remove_section(&agents_md, AGENTS_MD_MARKER)?;
     println!("  Cleaned {}", agents_md.display());
-    println!("\n  {} integration uninstalled.", platform);
+    println!("\n  {platform} integration uninstalled.");
     Ok(())
 }
 

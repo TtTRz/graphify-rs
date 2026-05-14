@@ -13,14 +13,14 @@ const HOOK_MARKER_START: &str = "# graphify-hook-start";
 const HOOK_MARKER_END: &str = "# graphify-hook-end";
 
 /// The hook script block injected into git hooks.
-const HOOK_SCRIPT: &str = r#"
+const HOOK_SCRIPT: &str = r"
 # graphify-hook-start
 # Auto-run graphify-rs AST extraction on commit (code-only, no LLM)
 if command -v graphify-rs >/dev/null 2>&1; then
   graphify-rs build --code-only --output graphify-out &
 fi
 # graphify-hook-end
-"#;
+";
 
 /// Hook names that graphify manages.
 const MANAGED_HOOKS: &[&str] = &["post-commit", "post-checkout"];

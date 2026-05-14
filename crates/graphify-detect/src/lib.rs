@@ -156,7 +156,7 @@ pub fn detect(root: &Path) -> DetectResult {
         files.entry(file_type).or_default().push(rel);
     }
 
-    let total_files: usize = files.values().map(|v| v.len()).sum();
+    let total_files: usize = files.values().map(std::vec::Vec::len).sum();
 
     // Determine warnings
     let warning = if total_words > CORPUS_UPPER_THRESHOLD {
@@ -221,7 +221,7 @@ pub fn detect_incremental(root: &Path, manifest_path: Option<&str>) -> DetectRes
         }
     }
 
-    let filtered_total: usize = filtered_files.values().map(|v| v.len()).sum();
+    let filtered_total: usize = filtered_files.values().map(std::vec::Vec::len).sum();
 
     // Save the new manifest
     if let Err(e) = save_manifest(&manifest_file, &new_manifest) {

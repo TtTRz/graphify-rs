@@ -120,7 +120,7 @@ pub fn cohesion_score(graph: &KnowledgeGraph, community_nodes: &[String]) -> f64
         return 1.0;
     }
 
-    let node_set: HashSet<&str> = community_nodes.iter().map(|s| s.as_str()).collect();
+    let node_set: HashSet<&str> = community_nodes.iter().map(std::string::String::as_str).collect();
     let mut actual_edges = 0usize;
 
     // Count edges where both endpoints are in the community
@@ -188,8 +188,7 @@ fn total_weight(adj: &HashMap<String, Vec<(String, f64)>>) -> f64 {
 /// Sum of weights of edges incident to a node.
 fn node_strength(adj: &HashMap<String, Vec<(String, f64)>>, node: &str) -> f64 {
     adj.get(node)
-        .map(|neighbors| neighbors.iter().map(|(_, w)| w).sum())
-        .unwrap_or(0.0)
+        .map_or(0.0, |neighbors| neighbors.iter().map(|(_, w)| w).sum())
 }
 
 /// Sum of weights of edges from `node` to nodes in `community`.
@@ -199,14 +198,13 @@ fn edges_to_community(
     community: &HashSet<&str>,
 ) -> f64 {
     adj.get(node)
-        .map(|neighbors| {
+        .map_or(0.0, |neighbors| {
             neighbors
                 .iter()
                 .filter(|(n, _)| community.contains(n.as_str()))
                 .map(|(_, w)| w)
                 .sum()
         })
-        .unwrap_or(0.0)
 }
 
 /// Sum of strengths of all nodes in a community.
@@ -434,10 +432,10 @@ fn refinement_phase(
                 .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             {
                 // Only merge if modularity gain is positive
-                let _component_set: HashSet<&str> = component.iter().map(|s| s.as_str()).collect();
+                let _component_set: HashSet<&str> = component.iter().map(std::string::String::as_str).collect();
                 let target_members: HashSet<&str> = community_members
                     .get(&best_cid)
-                    .map(|s| s.iter().map(|x| x.as_str()).collect())
+                    .map(|s| s.iter().map(std::string::String::as_str).collect())
                     .unwrap_or_default();
 
                 let ki_sum: f64 = component.iter().map(|n| node_strength(adj, n)).sum();
@@ -486,7 +484,7 @@ fn connected_components_within(
     adj: &HashMap<String, Vec<(String, f64)>>,
     members: &[String],
 ) -> Vec<Vec<String>> {
-    let member_set: HashSet<&str> = members.iter().map(|s| s.as_str()).collect();
+    let member_set: HashSet<&str> = members.iter().map(std::string::String::as_str).collect();
     let mut visited: HashSet<&str> = HashSet::new();
     let mut components: Vec<Vec<String>> = Vec::new();
 
@@ -526,7 +524,7 @@ fn compact_ids(community_of: &mut HashMap<String, usize>) {
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
-    used.sort();
+    used.sort_unstable();
     let remap: HashMap<usize, usize> = used
         .iter()
         .enumerate()
@@ -595,7 +593,7 @@ fn split_community(graph: &KnowledgeGraph, nodes: &[String]) -> Vec<Vec<String>>
         return vec![nodes.to_vec()];
     }
 
-    let node_set: HashSet<&str> = nodes.iter().map(|s| s.as_str()).collect();
+    let node_set: HashSet<&str> = nodes.iter().map(std::string::String::as_str).collect();
 
     // Build sub-adjacency list
     let mut sub_adj: HashMap<String, Vec<(String, f64)>> = HashMap::new();
@@ -674,7 +672,7 @@ pub fn cluster_incremental(
         return cluster(graph);
     }
 
-    let changed_set: HashSet<&str> = changed_files.iter().map(|s| s.as_str()).collect();
+    let changed_set: HashSet<&str> = changed_files.iter().map(std::string::String::as_str).collect();
 
     // Find affected node IDs (nodes whose source_file is in changed_files)
     let affected_nodes: HashSet<String> = graph
@@ -733,7 +731,7 @@ pub fn cluster_incremental(
     // Also include new nodes not in any previous community
     let all_prev_nodes: HashSet<&str> = prev_communities
         .values()
-        .flat_map(|v| v.iter().map(|s| s.as_str()))
+        .flat_map(|v| v.iter().map(std::string::String::as_str))
         .collect();
     let new_nodes: Vec<String> = graph
         .node_ids()

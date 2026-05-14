@@ -66,8 +66,7 @@ pub fn export_html(
             .community
             .or_else(|| node_community.get(node.id.as_str()).copied());
         let color = cid
-            .map(|c| COMMUNITY_COLORS[c % COMMUNITY_COLORS.len()])
-            .unwrap_or("#888888");
+            .map_or("#888888", |c| COMMUNITY_COLORS[c % COMMUNITY_COLORS.len()]);
         let degree = graph.degree(&node.id);
         // Scale node size by degree
         let size = 8.0 + (degree as f64).sqrt() * 4.0;
@@ -251,7 +250,7 @@ fn build_html_template(
 ) -> String {
     // For large graphs: disable physics after stabilization, use Barnes-Hut
     let physics_config = if is_large {
-        r#"
+        r"
             solver: 'barnesHut',
             barnesHut: {
                 gravitationalConstant: -8000,
@@ -262,9 +261,9 @@ fn build_html_template(
                 avoidOverlap: 0.2
             },
             stabilization: { iterations: 150, fit: true },
-            adaptiveTimestep: true"#
+            adaptiveTimestep: true"
     } else {
-        r#"
+        r"
             solver: 'forceAtlas2Based',
             forceAtlas2Based: {
                 gravitationalConstant: -50,
@@ -274,7 +273,7 @@ fn build_html_template(
                 damping: 0.4,
                 avoidOverlap: 0.5
             },
-            stabilization: { iterations: 200 }"#
+            stabilization: { iterations: 200 }"
     };
 
     // For large graphs: hide edge labels, smaller fonts
@@ -282,7 +281,7 @@ fn build_html_template(
     let node_font_size = if is_large { 10 } else { 12 };
 
     format!(
-        r##"<!DOCTYPE html>
+        r#"<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -324,11 +323,11 @@ body {{ background: #0f0f1a; color: #e0e0e0; font-family: 'Segoe UI', system-ui,
     </div>
     <div>
         <h3>Communities</h3>
-        <div id="legend">{legend}</div>
+        <div id="legend">{legend_html}</div>
     </div>
     <div id="hyperedges">
         <h3>Hyperedges</h3>
-        <ul>{hyperedges}</ul>
+        <ul>{hyperedge_html}</ul>
     </div>
 </div>
 <div id="graph-container">
@@ -336,8 +335,8 @@ body {{ background: #0f0f1a; color: #e0e0e0; font-family: 'Segoe UI', system-ui,
 </div>
 <script>
 (function() {{
-    var nodesData = {nodes};
-    var edgesData = {edges};
+    var nodesData = {vis_nodes};
+    var edgesData = {vis_edges};
 
     var container = document.getElementById('graph-container');
     var loading = document.getElementById('loading');
@@ -345,7 +344,7 @@ body {{ background: #0f0f1a; color: #e0e0e0; font-family: 'Segoe UI', system-ui,
     var edges = new vis.DataSet(edgesData);
 
     var options = {{
-        physics: {{{physics}}},
+        physics: {{{physics_config}}},
         nodes: {{
             shape: 'dot',
             font: {{ color: '#e0e0e0', size: {node_font_size} }},
@@ -420,15 +419,7 @@ body {{ background: #0f0f1a; color: #e0e0e0; font-family: 'Segoe UI', system-ui,
 }})();
 </script>
 </body>
-</html>"##,
-        nodes = vis_nodes,
-        edges = vis_edges,
-        legend = legend_html,
-        hyperedges = hyperedge_html,
-        prune_banner = prune_banner,
-        physics = physics_config,
-        node_font_size = node_font_size,
-        edge_font_size = edge_font_size,
+</html>"#,
     )
 }
 
@@ -467,13 +458,13 @@ pub fn export_html_split(
 
     // ── Generate per-community pages ──
     let mut sorted_cids: Vec<usize> = communities.keys().copied().collect();
-    sorted_cids.sort();
+    sorted_cids.sort_unstable();
     for &cid in &sorted_cids {
         let members = &communities[&cid];
         let label = community_labels
             .get(&cid)
             .cloned()
-            .unwrap_or_else(|| format!("Community {}", cid));
+            .unwrap_or_else(|| format!("Community {cid}"));
         generate_community_page(
             &html_dir,
             graph,
@@ -512,7 +503,7 @@ fn generate_overview(
         let label = community_labels
             .get(&cid)
             .cloned()
-            .unwrap_or_else(|| format!("Community {}", cid));
+            .unwrap_or_else(|| format!("Community {cid}"));
         let color = COMMUNITY_COLORS[cid % COMMUNITY_COLORS.len()];
         let size = 20.0 + (members.len() as f64).sqrt() * 5.0;
         let title = format!(
@@ -557,10 +548,6 @@ fn generate_overview(
         write!(
             vis_edges,
             r#"{{from:{from},to:{to},label:"{count}",width:{width:.1},title:"{count} cross-community edges"}}"#,
-            from = from,
-            to = to,
-            count = count,
-            width = width,
         )?;
     }
     vis_edges.push(']');
@@ -568,12 +555,12 @@ fn generate_overview(
     // Navigation links
     let mut nav_html = String::new();
     let mut sorted_cids: Vec<usize> = communities.keys().copied().collect();
-    sorted_cids.sort();
+    sorted_cids.sort_unstable();
     for cid in &sorted_cids {
         let label = community_labels
             .get(cid)
             .cloned()
-            .unwrap_or_else(|| format!("Community {}", cid));
+            .unwrap_or_else(|| format!("Community {cid}"));
         let color = COMMUNITY_COLORS[*cid % COMMUNITY_COLORS.len()];
         let count = communities[cid].len();
         write!(
@@ -587,7 +574,7 @@ fn generate_overview(
     }
 
     let html = format!(
-        r##"<!DOCTYPE html>
+        r#"<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -648,7 +635,7 @@ body {{ background: #0f0f1a; color: #e0e0e0; font-family: 'Segoe UI', system-ui,
 }})();
 </script>
 </body>
-</html>"##,
+</html>"#,
         nodes = vis_nodes,
         edges = vis_edges,
         nav = nav_html,
@@ -671,7 +658,7 @@ fn generate_community_page(
     community_labels: &HashMap<usize, String>,
     node_community: &HashMap<&str, usize>,
 ) -> anyhow::Result<()> {
-    let member_set: HashSet<&str> = members.iter().map(|s| s.as_str()).collect();
+    let member_set: HashSet<&str> = members.iter().map(std::string::String::as_str).collect();
     let color = COMMUNITY_COLORS[cid % COMMUNITY_COLORS.len()];
 
     // Build nodes
@@ -761,7 +748,7 @@ fn generate_community_page(
         let ext_label = community_labels
             .get(ext_cid)
             .cloned()
-            .unwrap_or_else(|| format!("Community {}", ext_cid));
+            .unwrap_or_else(|| format!("Community {ext_cid}"));
         let ext_color = COMMUNITY_COLORS[*ext_cid % COMMUNITY_COLORS.len()];
         write!(
             nav_html,
@@ -782,7 +769,7 @@ fn generate_community_page(
     let edge_font = if is_large { 0 } else { 10 };
 
     let html = format!(
-        r##"<!DOCTYPE html>
+        r#"<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -865,8 +852,8 @@ body {{ background: #0f0f1a; color: #e0e0e0; font-family: 'Segoe UI', system-ui,
 }})();
 </script>
 </body>
-</html>"##,
-        title = escape_html(&format!("{} — Community {}", label, cid)),
+</html>"#,
+        title = escape_html(&format!("{label} — Community {cid}")),
         color = color,
         label = escape_html(label),
         cid = cid,
@@ -878,7 +865,7 @@ body {{ background: #0f0f1a; color: #e0e0e0; font-family: 'Segoe UI', system-ui,
         edge_font = edge_font,
     );
 
-    fs::write(html_dir.join(format!("community_{}.html", cid)), &html)?;
+    fs::write(html_dir.join(format!("community_{cid}.html")), &html)?;
     Ok(())
 }
 

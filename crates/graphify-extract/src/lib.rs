@@ -135,12 +135,9 @@ pub fn extract(paths: &[PathBuf]) -> ExtractionResult {
     let results: Vec<ExtractionResult> = paths
         .par_iter()
         .filter_map(|path| {
-            let lang = match language_for_path(path) {
-                Some(l) => l,
-                None => {
-                    debug!("skipping unsupported file: {}", path.display());
-                    return None;
-                }
+            let lang = if let Some(l) = language_for_path(path) { l } else {
+                debug!("skipping unsupported file: {}", path.display());
+                return None;
             };
 
             let source = match std::fs::read(path) {
@@ -235,8 +232,7 @@ fn resolve_python_imports(result: &mut ExtractionResult) {
                 .nodes
                 .iter()
                 .find(|n| n.id == edge.target)
-                .map(|n| n.label.as_str())
-                .unwrap_or("");
+                .map_or("", |n| n.label.as_str());
 
             if import_label.contains('*') {
                 // `from module import *` — expand to all entities in module

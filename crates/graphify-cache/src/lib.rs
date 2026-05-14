@@ -30,7 +30,7 @@ pub enum CacheError {
 pub fn file_hash(path: &Path) -> Option<String> {
     let content = fs::read(path).ok()?;
     let hash = Sha256::digest(&content);
-    Some(format!("{:x}", hash))
+    Some(format!("{hash:x}"))
 }
 
 /// Build a cache filename from a file path relative to `root`.

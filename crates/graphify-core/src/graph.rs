@@ -116,8 +116,7 @@ impl KnowledgeGraph {
     pub fn degree(&self, id: &str) -> usize {
         self.index_map
             .get(id)
-            .map(|&idx| self.graph.edges(idx).count())
-            .unwrap_or(0)
+            .map_or(0, |&idx| self.graph.edges(idx).count())
     }
 
     /// Get neighbor IDs as strings.

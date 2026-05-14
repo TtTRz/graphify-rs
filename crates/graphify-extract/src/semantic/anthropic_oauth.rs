@@ -28,7 +28,7 @@ fn read_token_from_file(path: &std::path::Path) -> Option<String> {
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
 
     // Check token expiry — expiresAt is a Unix timestamp in milliseconds
-    if let Some(expires_at) = json.get("expiresAt").and_then(|v| v.as_i64()) {
+    if let Some(expires_at) = json.get("expiresAt").and_then(serde_json::Value::as_i64) {
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
