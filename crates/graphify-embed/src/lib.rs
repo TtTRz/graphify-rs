@@ -772,19 +772,30 @@ const QUERY_STOPWORDS: &[&str] = &[
 ];
 
 fn query_terms(question: &str) -> Vec<QueryTerm> {
-    let mut terms = Vec::new();
+    let mut specific_terms = Vec::new();
+    let mut generic_terms = Vec::new();
     for raw in question.split(|ch: char| !ch.is_alphanumeric() && ch != '_') {
         if raw.is_empty() {
             continue;
         }
         let identifier_like = is_identifier_like(raw);
-        push_query_term(raw, identifier_like, &mut terms);
+        push_query_term(
+            raw,
+            identifier_like,
+            &mut specific_terms,
+            &mut generic_terms,
+        );
         if !raw.contains('_') {
             for part in split_camel(raw) {
-                push_query_term(&part, false, &mut terms);
+                push_query_term(&part, false, &mut specific_terms, &mut generic_terms);
             }
         }
     }
+    let mut terms = if specific_terms.is_empty() {
+        generic_terms
+    } else {
+        specific_terms
+    };
     terms.sort_by(|a, b| a.text.cmp(&b.text));
     terms.dedup_by(|a, b| {
         if a.text == b.text {
@@ -797,15 +808,25 @@ fn query_terms(question: &str) -> Vec<QueryTerm> {
     terms
 }
 
-fn push_query_term(raw: &str, exact_identifier: bool, terms: &mut Vec<QueryTerm>) {
+fn push_query_term(
+    raw: &str,
+    exact_identifier: bool,
+    specific_terms: &mut Vec<QueryTerm>,
+    generic_terms: &mut Vec<QueryTerm>,
+) {
     let term = raw.to_ascii_lowercase();
     if term.len() <= 2 || QUERY_STOPWORDS.contains(&term.as_str()) {
         return;
     }
-    terms.push(QueryTerm {
+    let query_term = QueryTerm {
         text: term,
         exact_identifier,
-    });
+    };
+    if is_generic_query_term(&query_term.text) {
+        generic_terms.push(query_term);
+    } else {
+        specific_terms.push(query_term);
+    }
 }
 
 fn is_identifier_like(raw: &str) -> bool {
@@ -836,6 +857,34 @@ fn split_camel(raw: &str) -> Vec<String> {
         parts.push(current);
     }
     parts
+}
+
+fn is_generic_query_term(term: &str) -> bool {
+    matches!(
+        term,
+        "control"
+            | "controls"
+            | "controller"
+            | "controllers"
+            | "feature"
+            | "features"
+            | "flow"
+            | "handler"
+            | "interface"
+            | "interfaces"
+            | "method"
+            | "native"
+            | "queue"
+            | "remote"
+            | "remotes"
+            | "report"
+            | "reports"
+            | "web"
+            | "wire"
+            | "wired"
+            | "wires"
+            | "workflow"
+    )
 }
 
 fn weight_terms(index: &SemanticIndex, terms: &[QueryTerm]) -> Vec<WeightedTerm> {
@@ -1348,6 +1397,24 @@ mod tests {
         );
 
         assert_eq!(matches[0].node_id, "generated_rpc");
+    }
+
+    #[test]
+    fn query_terms_drop_generic_prompt_words_when_identifiers_exist() {
+        let terms = query_terms(
+            "Steam Controller Triton webOS native HID feature reports interface queue flow where control_hid and sdl_hid_feature_report wire into RemoteHID",
+        );
+        let texts: Vec<_> = terms.iter().map(|term| term.text.as_str()).collect();
+
+        assert!(texts.contains(&"control_hid"));
+        assert!(texts.contains(&"sdl_hid_feature_report"));
+        assert!(texts.contains(&"remotehid"));
+        assert!(!texts.contains(&"controller"));
+        assert!(!texts.contains(&"feature"));
+        assert!(!texts.contains(&"reports"));
+        assert!(!texts.contains(&"interface"));
+        assert!(!texts.contains(&"flow"));
+        assert!(!texts.contains(&"wire"));
     }
 
     #[test]

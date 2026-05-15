@@ -271,13 +271,20 @@ fn is_query_stopword(term: &str) -> bool {
 fn is_generic_query_term(term: &str) -> bool {
     matches!(
         term,
-        "handler"
+        "control"
+            | "controls"
+            | "controller"
+            | "controllers"
+            | "handler"
             | "method"
             | "native"
+            | "remote"
+            | "remotes"
             | "feature"
             | "features"
             | "report"
             | "reports"
+            | "web"
             | "interface"
             | "interfaces"
             | "queue"
@@ -987,11 +994,13 @@ mod tests {
         );
 
         assert!(terms.contains(&"control_hid".to_string()));
-        assert!(terms.contains(&"control".to_string()));
         assert!(terms.contains(&"hid".to_string()));
         assert!(terms.contains(&"sdl_hid_feature_report".to_string()));
         assert!(terms.contains(&"remotehid".to_string()));
-        assert!(terms.contains(&"remote".to_string()));
+        assert!(!terms.contains(&"controller".to_string()));
+        assert!(!terms.contains(&"control".to_string()));
+        assert!(!terms.contains(&"remote".to_string()));
+        assert!(!terms.contains(&"web".to_string()));
         assert!(!terms.contains(&"feature".to_string()));
         assert!(!terms.contains(&"reports".to_string()));
         assert!(!terms.contains(&"interface".to_string()));

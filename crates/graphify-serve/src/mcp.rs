@@ -479,6 +479,11 @@ fn query_context(
         }
 
         let degree = graph.degree(&current);
+        if !should_expand_query_node(graph, &current) && degree > limits.max_neighbors_per_node {
+            truncated = true;
+            omitted_nodes += degree;
+            continue;
+        }
         let per_node_limit = if degree > limits.hub_degree_cutoff {
             truncated = true;
             limits.max_neighbors_per_node.min(6)
@@ -527,6 +532,17 @@ fn query_context(
         omitted_nodes,
         omitted_edges,
     }
+}
+
+fn should_expand_query_node(graph: &KnowledgeGraph, node_id: &str) -> bool {
+    graph.get_node(node_id).is_some_and(|node| {
+        !matches!(
+            node.node_type,
+            graphify_core::model::NodeType::File
+                | graphify_core::model::NodeType::Module
+                | graphify_core::model::NodeType::Package
+        )
+    })
 }
 
 fn query_node_score(graph: &KnowledgeGraph, node_id: &str, terms: &[String]) -> f64 {
@@ -586,6 +602,32 @@ fn query_seed_candidate(graph: &KnowledgeGraph, node_id: &str, terms: &[String])
             | graphify_core::model::NodeType::Module
             | graphify_core::model::NodeType::Package
     )
+}
+
+fn semantic_seed_candidate(
+    graph: &KnowledgeGraph,
+    candidate: &graphify_embed::SemanticMatch,
+    terms: &[String],
+    identifier_query: bool,
+) -> bool {
+    let lexical_supported =
+        query_node_score(graph, &candidate.node_id, terms) > 0.0 || candidate.lexical_score >= 0.5;
+    if identifier_query && !lexical_supported {
+        return false;
+    }
+    query_seed_candidate(graph, &candidate.node_id, terms)
+}
+
+fn query_has_code_identifier(question: &str) -> bool {
+    question
+        .split(|ch: char| !ch.is_alphanumeric() && ch != '_' && ch != '.')
+        .any(|raw| {
+            raw.len() > 4
+                && (raw.contains('_')
+                    || raw.contains('.')
+                    || raw.chars().any(|ch| ch.is_ascii_lowercase())
+                        && raw.chars().any(|ch| ch.is_ascii_uppercase()))
+        })
 }
 
 fn query_context_to_value(
@@ -809,6 +851,7 @@ fn handle_query_graph(
     }
 
     let terms = query_search_terms(question);
+    let identifier_query = query_has_code_identifier(question);
 
     if terms.is_empty() {
         return tool_result_text("No meaningful search terms found in the question.");
@@ -833,8 +876,8 @@ fn handle_query_graph(
                 start.extend(
                     matches
                         .into_iter()
-                        .map(|m| m.node_id)
-                        .filter(|id| query_seed_candidate(graph, id, &terms)),
+                        .filter(|m| semantic_seed_candidate(graph, m, &terms, identifier_query))
+                        .map(|m| m.node_id),
                 );
             }
             Err(err) => {
@@ -1716,6 +1759,44 @@ mod tests {
     }
 
     #[test]
+    fn query_graph_does_not_expand_file_hub_neighbors() {
+        let mut g = KnowledgeGraph::new();
+        g.add_node(make_node("control_hid", "control_hid()", Some(0)))
+            .unwrap();
+        let mut file = make_node("file_hub", "src/control_hid.rs", Some(0));
+        file.node_type = NodeType::File;
+        g.add_node(file).unwrap();
+        g.add_edge(make_edge("control_hid", "file_hub")).unwrap();
+
+        for idx in 0..40 {
+            let id = format!("leaf_{idx}");
+            let label = format!("UnrelatedNeighbor{idx}");
+            g.add_node(make_node(&id, &label, Some(1))).unwrap();
+            g.add_edge(make_edge("file_hub", &id)).unwrap();
+        }
+
+        let req = json!({
+            "jsonrpc": "2.0", "method": "tools/call", "id": 35,
+            "params": {
+                "name": "query_graph",
+                "arguments": {
+                    "question": "control_hid RemoteHID",
+                    "budget": 500,
+                    "format": "json"
+                }
+            }
+        });
+        let resp = handle_jsonrpc(&g, &req).unwrap();
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        let value: Value = serde_json::from_str(text).unwrap();
+        let nodes = value["nodes"].as_array().unwrap();
+
+        assert!(nodes.iter().any(|node| node["id"] == "file_hub"));
+        assert!(!nodes.iter().any(|node| node["id"] == "leaf_39"));
+        assert!(nodes.len() <= 3);
+    }
+
+    #[test]
     fn test_semantic_query_without_index_is_actionable_error() {
         let g = test_graph();
         let req = json!({
@@ -1763,6 +1844,35 @@ mod tests {
         assert!(text.contains("semantic query unavailable"));
         assert!(text.contains("falling back to lexical query"));
         assert!(text.contains("AuthService"));
+    }
+
+    #[test]
+    fn semantic_seed_requires_lexical_support_for_identifier_queries() {
+        let mut g = KnowledgeGraph::new();
+        g.add_node(make_node("control_hid", "control_hid()", Some(0)))
+            .unwrap();
+        g.add_node(make_node("webpage", "ingest_webpage()", Some(0)))
+            .unwrap();
+        let terms = vec!["control_hid".to_string()];
+        let fuzzy = graphify_embed::SemanticMatch {
+            node_id: "webpage".into(),
+            label: "ingest_webpage()".into(),
+            source_file: "./src/web.rs".into(),
+            score: 0.95,
+            semantic_score: 0.95,
+            lexical_score: 0.0,
+        };
+        let exact = graphify_embed::SemanticMatch {
+            node_id: "control_hid".into(),
+            label: "control_hid()".into(),
+            source_file: "./src/control_hid.rs".into(),
+            score: 0.95,
+            semantic_score: 0.9,
+            lexical_score: 1.0,
+        };
+
+        assert!(!semantic_seed_candidate(&g, &fuzzy, &terms, true));
+        assert!(semantic_seed_candidate(&g, &exact, &terms, true));
     }
 
     #[test]
