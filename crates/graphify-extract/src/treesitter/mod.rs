@@ -159,7 +159,15 @@ pub(crate) fn walk_node(
                 .map(|n| node_text(n, source))
                 .unwrap_or_default();
             if method_name == "require" || method_name == "require_relative" {
-                imports::extract_import(node, source, ctx.file_nid, ctx.str_path, ctx.lang, ctx.edges, ctx.nodes);
+                imports::extract_import(
+                    node,
+                    source,
+                    ctx.file_nid,
+                    ctx.str_path,
+                    ctx.lang,
+                    ctx.edges,
+                    ctx.nodes,
+                );
                 return;
             }
         } else if ctx.lang == "elixir" && kind == "call" {
@@ -168,11 +176,27 @@ pub(crate) fn walk_node(
                 .map(|n| node_text(n, source))
                 .unwrap_or_default();
             if matches!(target.as_str(), "import" | "use" | "require" | "alias") {
-                imports::extract_import(node, source, ctx.file_nid, ctx.str_path, ctx.lang, ctx.edges, ctx.nodes);
+                imports::extract_import(
+                    node,
+                    source,
+                    ctx.file_nid,
+                    ctx.str_path,
+                    ctx.lang,
+                    ctx.edges,
+                    ctx.nodes,
+                );
                 return;
             }
         } else {
-            imports::extract_import(node, source, ctx.file_nid, ctx.str_path, ctx.lang, ctx.edges, ctx.nodes);
+            imports::extract_import(
+                node,
+                source,
+                ctx.file_nid,
+                ctx.str_path,
+                ctx.lang,
+                ctx.edges,
+                ctx.nodes,
+            );
             return;
         }
     }
@@ -201,7 +225,13 @@ pub(crate) fn walk_node(
                 .unwrap_or_default();
             if matches!(
                 target.as_str(),
-                "def" | "defp" | "defmacro" | "defmacrop" | "defguard" | "defguardp" | "defdelegate"
+                "def"
+                    | "defp"
+                    | "defmacro"
+                    | "defmacrop"
+                    | "defguard"
+                    | "defguardp"
+                    | "defdelegate"
             ) {
                 handlers::handle_function(node, source, config, ctx, parent_class_nid);
                 return;
