@@ -183,6 +183,9 @@ enum Commands {
         /// Optional JSON file written after the HTTP server binds. Used by graphifyq.
         #[arg(long)]
         registry_path: Option<String>,
+        /// Exit HTTP server after this many idle seconds. 0 disables idle exit.
+        #[arg(long)]
+        idle_timeout_secs: Option<u64>,
     },
     /// Codex hook compatibility check. Intentionally emits no output.
     #[command(hide = true)]
@@ -512,6 +515,7 @@ async fn main() -> Result<()> {
             http_bind,
             http_path,
             registry_path,
+            idle_timeout_secs,
         } => match transport {
             McpTransport::Stdio => graphify_serve::start_server(Path::new(&graph)).await?,
             McpTransport::Http => {
@@ -519,6 +523,7 @@ async fn main() -> Result<()> {
                     bind: http_bind,
                     mcp_path: http_path,
                     registry_path: registry_path.map(PathBuf::from),
+                    idle_timeout_secs,
                 };
                 graphify_serve::start_http_server(Path::new(&graph), config).await?;
             }
@@ -999,6 +1004,7 @@ async fn cmd_build(
         ast_result.edges.extend(partial.edges);
         ast_result.hyperedges.extend(partial.hyperedges);
     }
+    graphify_extract::resolve_import_relationships(&mut ast_result);
 
     if let Some(pb) = pb {
         pb.finish_and_clear();

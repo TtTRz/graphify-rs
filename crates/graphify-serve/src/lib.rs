@@ -8,7 +8,7 @@ pub mod http;
 pub mod mcp;
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use graphify_core::{graph::KnowledgeGraph, model::NodeType, quality};
@@ -38,22 +38,22 @@ pub enum ServeError {
 /// the concrete upstream type is wrapped in a mutex here so HTTP handlers can
 /// share one loaded model safely without making public Sync assumptions.
 pub struct SemanticState {
-    engine: Mutex<SemanticEngine>,
+    index_path: PathBuf,
+    engine: Mutex<Option<SemanticEngine>>,
 }
 
 impl SemanticState {
     pub fn load_for_graph_path(
         graph_path: &Path,
-        graph: &KnowledgeGraph,
+        _graph: &KnowledgeGraph,
     ) -> std::result::Result<Option<Self>, ServeError> {
         let index_path = default_index_path_for_graph(graph_path);
         if !index_path.exists() {
             return Ok(None);
         }
-        let engine = SemanticEngine::load_for_graph(&index_path, graph)
-            .map_err(|err| ServeError::GraphLoad(format!("load semantic index: {err:#}")))?;
         Ok(Some(Self {
-            engine: Mutex::new(engine),
+            index_path,
+            engine: Mutex::new(None),
         }))
     }
 
@@ -63,10 +63,20 @@ impl SemanticState {
         question: &str,
         top_n: usize,
     ) -> std::result::Result<Vec<SemanticMatch>, ServeError> {
-        let engine = self
+        let mut engine = self
             .engine
             .lock()
             .map_err(|_| ServeError::GraphLoad("semantic engine lock poisoned".into()))?;
+        if engine.is_none() {
+            *engine = Some(
+                SemanticEngine::load_for_graph(&self.index_path, graph).map_err(|err| {
+                    ServeError::GraphLoad(format!("load semantic index: {err:#}"))
+                })?,
+            );
+        }
+        let engine = engine
+            .as_ref()
+            .ok_or_else(|| ServeError::GraphLoad("semantic engine unavailable".into()))?;
         engine
             .query(graph, question, top_n)
             .map_err(|err| ServeError::GraphLoad(format!("semantic query: {err:#}")))
@@ -74,7 +84,10 @@ impl SemanticState {
 
     pub fn description(&self) -> String {
         match self.engine.lock() {
-            Ok(engine) => format!("{} nodes via {}", engine.node_count(), engine.model()),
+            Ok(engine) => match engine.as_ref() {
+                Some(engine) => format!("{} nodes via {}", engine.node_count(), engine.model()),
+                None => format!("available at {}", self.index_path.display()),
+            },
             Err(_) => "semantic engine unavailable".to_string(),
         }
     }
@@ -145,6 +158,136 @@ pub fn score_nodes(graph: &KnowledgeGraph, terms: &[String]) -> Vec<(f64, String
     scored
 }
 
+/// Extract weighted-enough terms for graph lookup from a natural-language
+/// question. Keeps exact identifiers, splits snake_case/CamelCase, and drops
+/// generic prompt words that otherwise seed large noisy neighborhoods.
+pub fn query_search_terms(question: &str) -> Vec<String> {
+    let mut strong_terms = Vec::new();
+    let mut generic_terms = Vec::new();
+    let mut seen_strong = HashSet::new();
+    let mut seen_generic = HashSet::new();
+
+    for raw in question.split(|ch: char| !ch.is_alphanumeric() && ch != '_' && ch != '.') {
+        if raw.is_empty() {
+            continue;
+        }
+
+        push_query_search_term(
+            raw,
+            &mut seen_strong,
+            &mut strong_terms,
+            &mut seen_generic,
+            &mut generic_terms,
+        );
+
+        for part in raw.split(['_', '.']) {
+            push_query_search_term(
+                part,
+                &mut seen_strong,
+                &mut strong_terms,
+                &mut seen_generic,
+                &mut generic_terms,
+            );
+            for camel in split_camel_part(part) {
+                push_query_search_term(
+                    &camel,
+                    &mut seen_strong,
+                    &mut strong_terms,
+                    &mut seen_generic,
+                    &mut generic_terms,
+                );
+            }
+        }
+    }
+
+    if strong_terms.is_empty() {
+        generic_terms
+    } else {
+        strong_terms
+    }
+}
+
+fn push_query_search_term(
+    raw: &str,
+    seen_strong: &mut HashSet<String>,
+    strong_terms: &mut Vec<String>,
+    seen_generic: &mut HashSet<String>,
+    generic_terms: &mut Vec<String>,
+) {
+    let term = raw.to_ascii_lowercase();
+    if term.len() <= 2 || is_query_stopword(&term) {
+        return;
+    }
+    if is_generic_query_term(&term) {
+        if seen_generic.insert(term.clone()) {
+            generic_terms.push(term);
+        }
+    } else if seen_strong.insert(term.clone()) {
+        strong_terms.push(term);
+    }
+}
+
+fn is_query_stopword(term: &str) -> bool {
+    matches!(
+        term,
+        "about"
+            | "after"
+            | "also"
+            | "and"
+            | "are"
+            | "can"
+            | "does"
+            | "for"
+            | "from"
+            | "get"
+            | "how"
+            | "into"
+            | "its"
+            | "near"
+            | "the"
+            | "this"
+            | "that"
+            | "was"
+            | "what"
+            | "when"
+            | "where"
+            | "which"
+            | "who"
+            | "why"
+            | "with"
+            | "without"
+            | "defined"
+            | "handled"
+            | "configured"
+            | "located"
+            | "related"
+            | "works"
+            | "used"
+            | "using"
+    )
+}
+
+fn is_generic_query_term(term: &str) -> bool {
+    matches!(
+        term,
+        "handler"
+            | "method"
+            | "native"
+            | "feature"
+            | "features"
+            | "report"
+            | "reports"
+            | "interface"
+            | "interfaces"
+            | "queue"
+            | "flow"
+            | "wire"
+            | "wires"
+            | "wired"
+            | "workflow"
+    )
+}
+
 fn node_type_multiplier(node_type: &NodeType) -> f64 {
     match node_type {
         NodeType::Function | NodeType::Method => 1.30,
@@ -164,9 +307,21 @@ fn normalize_search_terms(terms: &[String]) -> Vec<String> {
             if raw.len() > 2 {
                 normalized.push(raw.to_ascii_lowercase());
             }
-            if !raw.contains('_') {
+            if raw.contains('_') {
                 for part in raw.split('_').filter(|part| part.len() > 2) {
-                    normalized.push(part.to_ascii_lowercase());
+                    let part = part.to_ascii_lowercase();
+                    if !is_generic_query_term(&part) {
+                        normalized.push(part);
+                    }
+                }
+            }
+            for part in split_camel_part(raw)
+                .into_iter()
+                .filter(|part| part.len() > 2)
+            {
+                let part = part.to_ascii_lowercase();
+                if !is_generic_query_term(&part) {
+                    normalized.push(part);
                 }
             }
         }
@@ -174,6 +329,28 @@ fn normalize_search_terms(terms: &[String]) -> Vec<String> {
     normalized.sort();
     normalized.dedup();
     normalized
+}
+
+fn split_camel_part(raw: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let chars: Vec<char> = raw.chars().collect();
+    for (idx, ch) in chars.iter().enumerate() {
+        let prev = idx.checked_sub(1).and_then(|i| chars.get(i)).copied();
+        let next = chars.get(idx + 1).copied();
+        let boundary = idx > 0
+            && ch.is_ascii_uppercase()
+            && (prev.is_some_and(|p| p.is_ascii_lowercase() || p.is_ascii_digit())
+                || next.is_some_and(|n| n.is_ascii_lowercase()));
+        if boundary && !current.is_empty() {
+            parts.push(std::mem::take(&mut current));
+        }
+        current.push(*ch);
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    parts
 }
 
 /// BFS traversal from start nodes up to a maximum depth.
@@ -800,6 +977,54 @@ mod tests {
         let results = score_nodes(&g, &["user".to_string(), "manager".to_string()]);
         assert!(!results.is_empty());
         assert!(results.iter().any(|(_, id)| id == "user"));
+    }
+
+    #[test]
+    fn query_search_terms_splits_identifiers_and_drops_prompt_filler() {
+        let terms = query_search_terms(
+            "Steam Controller Triton webOS native HID feature reports interface queue flow where control_hid wires into sdl_hid_feature_report and RemoteHID",
+        );
+
+        assert!(terms.contains(&"control_hid".to_string()));
+        assert!(terms.contains(&"control".to_string()));
+        assert!(terms.contains(&"hid".to_string()));
+        assert!(terms.contains(&"sdl_hid_feature_report".to_string()));
+        assert!(terms.contains(&"remotehid".to_string()));
+        assert!(terms.contains(&"remote".to_string()));
+        assert!(!terms.contains(&"feature".to_string()));
+        assert!(!terms.contains(&"reports".to_string()));
+        assert!(!terms.contains(&"interface".to_string()));
+        assert!(!terms.contains(&"where".to_string()));
+    }
+
+    #[test]
+    fn query_search_terms_keeps_generic_terms_when_no_specific_terms_exist() {
+        let terms = query_search_terms("where are interfaces wired");
+
+        assert_eq!(terms, vec!["interfaces".to_string(), "wired".to_string()]);
+    }
+
+    #[test]
+    fn test_score_nodes_splits_snake_case_terms() {
+        let mut g = KnowledgeGraph::new();
+        g.add_node(make_node("control_hid", "control_hid()"))
+            .unwrap();
+        g.add_node(make_node("remote_hid", "RemoteHID")).unwrap();
+
+        let results = score_nodes(&g, &["control_hid".to_string()]);
+
+        assert_eq!(results[0].1, "control_hid");
+        assert!(results.iter().any(|(_, id)| id == "remote_hid"));
+    }
+
+    #[test]
+    fn test_score_nodes_does_not_split_identifier_into_generic_report_terms() {
+        let mut g = KnowledgeGraph::new();
+        g.add_node(make_node("report", "Report")).unwrap();
+
+        let results = score_nodes(&g, &["sdl_hid_feature_report".to_string()]);
+
+        assert!(results.is_empty());
     }
 
     #[test]

@@ -6,8 +6,10 @@
 //! HTTP request, plus a few `graphifyq` convenience endpoints.
 
 use std::path::{Path, PathBuf};
+use std::process;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use graphify_core::graph::KnowledgeGraph;
 use serde_json::{Value, json};
@@ -22,6 +24,8 @@ pub struct HttpServerConfig {
     pub bind: String,
     pub mcp_path: String,
     pub registry_path: Option<PathBuf>,
+    /// Exit after this many idle seconds. `None` keeps serving forever.
+    pub idle_timeout_secs: Option<u64>,
 }
 
 struct ServeState {
@@ -35,6 +39,7 @@ impl Default for HttpServerConfig {
             bind: "127.0.0.1:0".to_string(),
             mcp_path: "/mcp".to_string(),
             registry_path: None,
+            idle_timeout_secs: None,
         }
     }
 }
@@ -50,6 +55,8 @@ pub async fn start_http_server(
     let addr = listener.local_addr()?;
     let http_url = format!("http://{addr}");
     let mcp_path = normalize_path(&config.mcp_path);
+    let idle_timeout_secs = config.idle_timeout_secs.filter(|secs| *secs > 0);
+    let last_activity_secs = Arc::new(AtomicU64::new(current_time_secs()));
 
     if let Some(registry_path) = &config.registry_path {
         write_registry(registry_path, graph_path, &http_url, &mcp_path)?;
@@ -68,13 +75,36 @@ pub async fn start_http_server(
     );
 
     loop {
-        let (stream, _) = listener.accept().await?;
+        let accept_result = if let Some(idle_timeout_secs) = idle_timeout_secs {
+            let check_every = Duration::from_secs(idle_timeout_secs.min(30));
+            match tokio::time::timeout(check_every, listener.accept()).await {
+                Ok(result) => result,
+                Err(_) => {
+                    let idle_for = current_time_secs()
+                        .saturating_sub(last_activity_secs.load(Ordering::Relaxed));
+                    if idle_for >= idle_timeout_secs {
+                        info!("HTTP MCP server idle for {idle_for}s; exiting");
+                        if let Some(registry_path) = &config.registry_path {
+                            remove_registry_if_owned(registry_path);
+                        }
+                        return Ok(());
+                    }
+                    continue;
+                }
+            }
+        } else {
+            listener.accept().await
+        };
+        let (stream, _) = accept_result?;
+        last_activity_secs.store(current_time_secs(), Ordering::Relaxed);
         let state = Arc::clone(&state);
         let mcp_path = mcp_path.clone();
+        let last_activity_secs = Arc::clone(&last_activity_secs);
         tokio::spawn(async move {
             if let Err(err) = handle_connection(stream, state, &mcp_path).await {
                 debug!("HTTP connection failed: {err}");
             }
+            last_activity_secs.store(current_time_secs(), Ordering::Relaxed);
         });
     }
 }
@@ -110,6 +140,25 @@ fn write_registry(
 
     std::fs::write(registry_path, serde_json::to_vec_pretty(&payload)?)?;
     Ok(())
+}
+
+fn remove_registry_if_owned(registry_path: &Path) {
+    let Ok(content) = std::fs::read_to_string(registry_path) else {
+        return;
+    };
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return;
+    };
+    if payload["pid"].as_u64() == Some(u64::from(process::id())) {
+        let _ = std::fs::remove_file(registry_path);
+    }
+}
+
+fn current_time_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 async fn handle_connection(
@@ -453,6 +502,7 @@ mod tests {
                     bind: "127.0.0.1:0".to_string(),
                     mcp_path: "mcp".to_string(),
                     registry_path: Some(server_registry_path),
+                    idle_timeout_secs: None,
                 },
             )
             .await

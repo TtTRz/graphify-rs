@@ -80,6 +80,8 @@ LLM cache rules:
 Prefer `graphifyq`; it behaves like `fffq`: it starts or reuses a per-project
 local HTTP MCP sidecar, auto-refreshes stale graphs, writes its registry to
 `.graphify/.graphifyq-server.json`, prints the answer, and exits.
+Its sidecars exit after 900 idle seconds. Use `graphifyq gc --dry-run` /
+`graphifyq gc` to inspect or stop stale/orphan sidecars.
 
 ```bash
 graphifyq ensure

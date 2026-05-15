@@ -253,6 +253,7 @@ Start the MCP (Model Context Protocol) server over JSON-RPC 2.0. Stdio remains t
 | `--http-bind <ADDR>` | `String` | `"127.0.0.1:0"` | HTTP bind address when `--transport=http`. |
 | `--http-path <PATH>` | `String` | `"/mcp"` | HTTP MCP endpoint path. |
 | `--registry-path <PATH>` | `String` | unset | Optional JSON registry written after binding; used by `graphifyq`. |
+| `--idle-timeout-secs <N>` | `u64` | unset | HTTP-only idle exit timeout. `graphifyq` sidecars pass `900` by default. |
 
 #### Available MCP Tools
 
@@ -305,6 +306,8 @@ graphifyq stats --format toon
 graphifyq summary architecture --budget 3000 --format toon
 graphifyq tool pagerank '{"top_n": 20}' --format toon
 graphifyq tool god_nodes '{"top_n": 20}' --format toon
+graphifyq gc --dry-run                  # show stale/orphan sidecars
+graphifyq gc                            # stop stale/orphan sidecars only
 ```
 
 `graphifyq` records its per-repo refresh state in `.graphify/.graphifyq-refresh.json`.
@@ -313,6 +316,8 @@ and includes `--embed` when semantic search is enabled (the default for `ensure`
 Use `--format toon` by default for agent context; text remains the CLI default for humans.
 If a local HTTP sidecar is already running, graphifyq terminates and restarts it after refresh
 so subsequent MCP/query calls load the new graph.
+HTTP sidecars started by `graphifyq` exit after 900 idle seconds. Semantic indexes and encoders
+are loaded lazily on the first semantic query rather than at server startup.
 
 ---
 

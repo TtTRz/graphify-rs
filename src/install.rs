@@ -95,7 +95,9 @@ const CLAUDE_MD_SECTION: &str = r#"## graphify
 This project has a graphify-rs knowledge graph at .graphify/.
 
 Rules:
-- Before answering architecture or codebase questions, run `graphifyq query "<question>" --format toon` when available; it builds/uses the local Model2Vec semantic index by default and auto-refreshes stale graphs every 300s
+- For broad architecture orientation, prefer `graphifyq summary architecture --budget 2000 --format toon`; for focused lookup, use `graphifyq query "<focused identifiers or subsystem>" --format toon`
+- Do not paste whole user prompts into `graphifyq query`; narrow to exact symbols/modules first, then use `semantic_query`, `get_neighbors`, or path tools for follow-up
+- `graphifyq` builds/uses the local Model2Vec semantic index by default and auto-refreshes stale graphs every 300s
 - Read .graphify/GRAPH_REPORT.md for god nodes and community structure when you need broader orientation
 - Default graphifyq agent-context `query`, `summary`, `stats`, and `tool` calls to `--format toon`; omit it only when the user asks for prose/human-readable text
 - If .graphify/wiki/index.md exists, navigate it instead of reading raw files
@@ -112,7 +114,9 @@ const AGENTS_MD_SECTION: &str = r#"## graphify
 This project has a graphify-rs knowledge graph at .graphify/.
 
 Rules:
-- Before answering architecture or codebase questions, prefer `graphifyq query "<question>" --format toon` or `graphifyq summary architecture --format toon` when available; `graphifyq query` builds/uses the local Model2Vec semantic index by default and auto-refreshes stale graphs every 300s
+- For broad architecture orientation, prefer `graphifyq summary architecture --budget 2000 --format toon`; for focused lookup, use `graphifyq query "<focused identifiers or subsystem>" --format toon`
+- Do not paste whole user prompts into `graphifyq query`; narrow to exact symbols/modules first, then use `semantic_query`, `get_neighbors`, or path tools for follow-up
+- `graphifyq` builds/uses the local Model2Vec semantic index by default and auto-refreshes stale graphs every 300s
 - Read .graphify/GRAPH_REPORT.md for god nodes and community structure when you need broader orientation
 - Default graphifyq agent-context `query`, `summary`, `stats`, and `tool` calls to `--format toon`; omit it only when the user asks for prose/human-readable text
 - If .graphify/wiki/index.md exists, navigate it instead of reading raw files

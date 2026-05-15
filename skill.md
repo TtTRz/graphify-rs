@@ -260,6 +260,7 @@ graphifyq summary architecture --budget 3000 --format toon
 ```
 
 `graphifyq` is intentionally like `fffq`: it starts/reuses a per-project local sidecar, stores the registry under `.graphify/.graphifyq-server.json`, and exits after printing the requested context.
+Sidecars started by `graphifyq` exit after 900 idle seconds. Use `graphifyq gc --dry-run` to inspect stale/orphan sidecars and `graphifyq gc` to stop them.
 
 Tools: `query_graph`, `semantic_query`, `get_node`, `get_neighbors`, `get_community`, `god_nodes`, `graph_stats`, `shortest_path`, `find_all_paths`, `weighted_path`, `community_bridges`, `graph_diff`, `pagerank`, `detect_cycles`, `smart_summary`, `find_similar`.
 

@@ -14,7 +14,7 @@ use tracing::{debug, error, info};
 
 use crate::{
     GraphifyOutputFormat, SemanticState, ServeError, bfs, format_value, graph_stats, load_graph,
-    load_semantic_state, score_nodes, subgraph_to_text,
+    load_semantic_state, query_search_terms, score_nodes, subgraph_to_text,
 };
 
 // ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ fn tool_definitions() -> Value {
                     },
                     "budget": {
                         "type": "number",
-                        "description": "Token budget for response (default: 2000)",
+                        "description": "Token budget for response and structured row caps (default: 2000)",
                         "default": 2000
                     },
                     "format": {
@@ -414,6 +414,179 @@ fn subgraph_to_value(
     })
 }
 
+#[derive(Clone, Copy, Debug)]
+struct QueryLimits {
+    max_nodes: usize,
+    max_edges: usize,
+    max_neighbors_per_node: usize,
+    hub_degree_cutoff: usize,
+}
+
+impl QueryLimits {
+    fn for_budget(token_budget: usize) -> Self {
+        Self {
+            max_nodes: output_row_limit(token_budget, 25, 8, 48),
+            max_edges: output_row_limit(token_budget, 16, 12, 96),
+            max_neighbors_per_node: output_row_limit(token_budget, 80, 4, 14),
+            hub_degree_cutoff: output_row_limit(token_budget, 12, 24, 160),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct QueryContext {
+    nodes: Vec<String>,
+    edges: Vec<(String, String)>,
+    truncated: bool,
+    omitted_nodes: usize,
+    omitted_edges: usize,
+}
+
+fn query_context(
+    graph: &KnowledgeGraph,
+    start: &[String],
+    terms: &[String],
+    depth: usize,
+    limits: QueryLimits,
+) -> QueryContext {
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut visited_order: Vec<String> = Vec::with_capacity(limits.max_nodes);
+    let mut edges: Vec<(String, String)> = Vec::with_capacity(limits.max_edges);
+    let mut queue: VecDeque<(String, usize)> = VecDeque::new();
+    let mut truncated = false;
+    let mut omitted_nodes = 0usize;
+    let mut omitted_edges = 0usize;
+
+    for node_id in start {
+        if graph.get_node(node_id).is_none() {
+            continue;
+        }
+        if !visited.insert(node_id.clone()) {
+            continue;
+        }
+        if visited_order.len() >= limits.max_nodes {
+            truncated = true;
+            omitted_nodes += 1;
+            continue;
+        }
+        visited_order.push(node_id.clone());
+        queue.push_back((node_id.clone(), 0));
+    }
+
+    while let Some((current, current_depth)) = queue.pop_front() {
+        if current_depth >= depth {
+            continue;
+        }
+
+        let degree = graph.degree(&current);
+        let per_node_limit = if degree > limits.hub_degree_cutoff {
+            truncated = true;
+            limits.max_neighbors_per_node.min(6)
+        } else {
+            limits.max_neighbors_per_node
+        };
+
+        let mut neighbors = graph.neighbor_ids(&current);
+        neighbors.sort_by(|a, b| {
+            query_node_score(graph, b, terms)
+                .partial_cmp(&query_node_score(graph, a, terms))
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.cmp(b))
+        });
+
+        for (idx, neighbor_id) in neighbors.into_iter().enumerate() {
+            if idx >= per_node_limit {
+                truncated = true;
+                omitted_nodes += 1;
+                continue;
+            }
+
+            if edges.len() >= limits.max_edges {
+                truncated = true;
+                omitted_edges += 1;
+            } else {
+                edges.push((current.clone(), neighbor_id.clone()));
+            }
+
+            if visited.insert(neighbor_id.clone()) {
+                if visited_order.len() >= limits.max_nodes {
+                    truncated = true;
+                    omitted_nodes += 1;
+                    continue;
+                }
+                visited_order.push(neighbor_id.clone());
+                queue.push_back((neighbor_id, current_depth + 1));
+            }
+        }
+    }
+
+    QueryContext {
+        nodes: visited_order,
+        edges,
+        truncated,
+        omitted_nodes,
+        omitted_edges,
+    }
+}
+
+fn query_node_score(graph: &KnowledgeGraph, node_id: &str, terms: &[String]) -> f64 {
+    let Some(node) = graph.get_node(node_id) else {
+        return 0.0;
+    };
+    let label = node.label.to_ascii_lowercase();
+    let id = node.id.to_ascii_lowercase();
+    let path = node.source_file.to_ascii_lowercase();
+
+    let mut score = 0.0f64;
+    for term in terms {
+        let term = term.as_str();
+        if label == term {
+            score += 5.0;
+        } else if label.contains(term) {
+            score += 3.0;
+        }
+        if id == term {
+            score += 4.0;
+        } else if id.contains(term) {
+            score += 2.5;
+        }
+        if path.contains(term) {
+            score += 0.8;
+        }
+    }
+
+    let quality = graphify_core::quality::node_priority(node) as f64;
+    let node_kind = match node.node_type {
+        graphify_core::model::NodeType::Function | graphify_core::model::NodeType::Method => 1.25,
+        graphify_core::model::NodeType::Struct
+        | graphify_core::model::NodeType::Class
+        | graphify_core::model::NodeType::Interface
+        | graphify_core::model::NodeType::Enum
+        | graphify_core::model::NodeType::Trait => 1.1,
+        graphify_core::model::NodeType::Variable
+        | graphify_core::model::NodeType::Constant
+        | graphify_core::model::NodeType::Package => 0.65,
+        _ => 1.0,
+    };
+    let hub_penalty = (graph.degree(node_id) as f64).ln_1p() * 0.08;
+    (score * quality * node_kind) - hub_penalty
+}
+
+fn query_context_to_value(
+    graph: &KnowledgeGraph,
+    context: &QueryContext,
+    start: &[String],
+    terms: &[String],
+) -> Value {
+    let mut value = subgraph_to_value(graph, &context.nodes, &context.edges);
+    value["truncated"] = json!(context.truncated);
+    value["omitted_nodes"] = json!(context.omitted_nodes);
+    value["omitted_edges"] = json!(context.omitted_edges);
+    value["seed_count"] = json!(start.len());
+    value["terms"] = json!(terms);
+    value
+}
+
 fn output_row_limit(token_budget: usize, divisor: usize, min: usize, max: usize) -> usize {
     (token_budget / divisor).clamp(min, max)
 }
@@ -615,11 +788,7 @@ fn handle_query_graph(
         return tool_result_error("Missing required parameter: question");
     }
 
-    let terms: Vec<String> = question
-        .split_whitespace()
-        .filter(|w| w.len() > 2)
-        .map(|w| w.to_lowercase())
-        .collect();
+    let terms = query_search_terms(question);
 
     if terms.is_empty() {
         return tool_result_text("No meaningful search terms found in the question.");
@@ -648,13 +817,23 @@ fn handle_query_graph(
         return tool_result_text("No matching nodes found for the given question.");
     }
 
-    let (nodes, edges) = bfs(graph, &start, 2);
+    let context = query_context(graph, &start, &terms, 2, QueryLimits::for_budget(budget));
     let format = output_format(args);
     if format != GraphifyOutputFormat::Text {
-        return tool_result_value(&subgraph_to_value(graph, &nodes, &edges), format);
+        return tool_result_value(
+            &query_context_to_value(graph, &context, &start, &terms),
+            format,
+        );
     }
 
-    tool_result_text(&subgraph_to_text(graph, &nodes, &edges, budget))
+    let mut text = subgraph_to_text(graph, &context.nodes, &context.edges, budget);
+    if context.truncated {
+        text.push_str(&format!(
+            "\n... (bounded graph context: omitted {} node(s), {} edge(s))\n",
+            context.omitted_nodes, context.omitted_edges
+        ));
+    }
+    tool_result_text(&text)
 }
 
 fn dedupe_start_nodes(nodes: Vec<String>, limit: usize) -> Vec<String> {
@@ -1410,6 +1589,84 @@ mod tests {
         assert!(text.contains("kind: query_graph"));
         assert!(text.contains("nodes["));
         assert!(text.contains("edges["));
+    }
+
+    #[test]
+    fn query_graph_json_respects_budget_and_caps_hub_traversal() {
+        let mut g = KnowledgeGraph::new();
+        g.add_node(make_node("target", "TargetRemoteHID", Some(0)))
+            .unwrap();
+        g.add_node(make_node("hub", "FeatureReportsInterface", Some(0)))
+            .unwrap();
+        g.add_edge(make_edge("target", "hub")).unwrap();
+
+        for idx in 0..80 {
+            let id = format!("leaf_{idx}");
+            let label = format!("FeatureReportLeaf{idx}");
+            g.add_node(make_node(&id, &label, Some(1))).unwrap();
+            g.add_edge(make_edge("hub", &id)).unwrap();
+        }
+
+        let req = json!({
+            "jsonrpc": "2.0", "method": "tools/call", "id": 31,
+            "params": {
+                "name": "query_graph",
+                "arguments": {
+                    "question": "where TargetRemoteHID feature reports interface flow wire",
+                    "budget": 500,
+                    "format": "json"
+                }
+            }
+        });
+        let resp = handle_jsonrpc(&g, &req).unwrap();
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        let value: Value = serde_json::from_str(text).unwrap();
+
+        assert_eq!(value["kind"], "query_graph");
+        assert_eq!(value["truncated"], true);
+        assert!(value["nodes"].as_array().unwrap().len() <= 24);
+        assert!(value["edges"].as_array().unwrap().len() <= 32);
+        assert!(text.len() < 8_000);
+    }
+
+    #[test]
+    fn query_graph_toon_marks_truncation_without_dumping_full_hub_neighborhood() {
+        let mut g = KnowledgeGraph::new();
+        g.add_node(make_node("control_hid", "control_hid()", Some(0)))
+            .unwrap();
+        g.add_node(make_node("remote_hid", "RemoteHID", Some(0)))
+            .unwrap();
+        g.add_node(make_node("hub", "FeatureReportsInterface", Some(0)))
+            .unwrap();
+        g.add_edge(make_edge("control_hid", "hub")).unwrap();
+        g.add_edge(make_edge("hub", "remote_hid")).unwrap();
+
+        for idx in 0..100 {
+            let id = format!("generic_{idx}");
+            let label = format!("FeatureReportInterface{idx}");
+            g.add_node(make_node(&id, &label, Some(1))).unwrap();
+            g.add_edge(make_edge("hub", &id)).unwrap();
+        }
+
+        let req = json!({
+            "jsonrpc": "2.0", "method": "tools/call", "id": 32,
+            "params": {
+                "name": "query_graph",
+                "arguments": {
+                    "question": "Steam Controller Triton webOS native HID feature reports interface queue flow where control_hid wires into RemoteHID",
+                    "budget": 500,
+                    "format": "toon"
+                }
+            }
+        });
+        let resp = handle_jsonrpc(&g, &req).unwrap();
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+
+        assert!(text.contains("truncated: true"));
+        assert!(text.contains("control_hid()"));
+        assert!(text.contains("RemoteHID"));
+        assert!(text.len() < 8_000);
+        assert!(!text.contains("FeatureReportInterface99"));
     }
 
     #[test]

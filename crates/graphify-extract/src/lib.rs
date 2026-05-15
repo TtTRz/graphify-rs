@@ -191,11 +191,7 @@ pub fn extract(paths: &[PathBuf]) -> ExtractionResult {
         combined.hyperedges.extend(r.hyperedges);
     }
 
-    // Cross-file import resolution for Python
-    resolve_python_imports(&mut combined);
-
-    // Cross-file import resolution for JS/TS, Go, and Rust
-    resolve_cross_file_imports(&mut combined);
+    resolve_import_relationships(&mut combined);
 
     info!(
         "extraction complete: {} nodes, {} edges",
@@ -204,6 +200,16 @@ pub fn extract(paths: &[PathBuf]) -> ExtractionResult {
     );
 
     combined
+}
+
+/// Resolve import edges into cross-file relationship edges after multiple
+/// extraction results have been merged.
+///
+/// This is intentionally idempotent so callers can run it both after direct
+/// multi-file extraction and after cache-backed per-file extraction.
+pub fn resolve_import_relationships(result: &mut ExtractionResult) {
+    resolve_python_imports(result);
+    resolve_cross_file_imports(result);
 }
 
 /// Resolve Python `import` / `from ... import` edges to actual module/function
@@ -243,6 +249,12 @@ fn resolve_python_imports(result: &mut ExtractionResult) {
 
     // Collect star import edges for expansion
     let mut star_expansions: Vec<GraphEdge> = Vec::new();
+    let mut seen_star_uses: HashSet<(String, String)> = result
+        .edges
+        .iter()
+        .filter(|edge| edge.relation == "uses")
+        .map(|edge| (edge.source.clone(), edge.target.clone()))
+        .collect();
 
     // For every edge with relation "imports", try to resolve the target
     for edge in &mut result.edges {
@@ -260,6 +272,9 @@ fn resolve_python_imports(result: &mut ExtractionResult) {
                 let module_name = import_label.trim_end_matches(".*").trim_end_matches(" *");
                 if let Some(entity_ids) = stem_to_entity_ids.get(module_name) {
                     for target_id in entity_ids {
+                        if !seen_star_uses.insert((edge.source.clone(), target_id.clone())) {
+                            continue;
+                        }
                         star_expansions.push(GraphEdge {
                             source: edge.source.clone(),
                             target: target_id.clone(),
@@ -298,6 +313,8 @@ fn resolve_python_imports(result: &mut ExtractionResult) {
 /// stem and then creates `uses` edges from entities in the importing file to
 /// entities defined in the target module. This turns file-level import edges
 /// into entity-level relationship edges.
+const MAX_IMPORT_ENTITY_EDGE_EXPANSION: usize = 500;
+
 fn resolve_cross_file_imports(result: &mut ExtractionResult) {
     // Step 1: Build lookup indexes in a single pass over nodes.
     //   - id_to_label: node_id → label (for fast import label lookup)
@@ -319,12 +336,14 @@ fn resolve_cross_file_imports(result: &mut ExtractionResult) {
 
     // Build source_file → [entity_node_id] and id_to_label in one pass over edges
     let mut source_file_entities: HashMap<String, Vec<String>> = HashMap::new();
+    let mut entity_to_file_id: HashMap<String, String> = HashMap::new();
     for edge in &result.edges {
         if edge.relation == "defines" {
             source_file_entities
                 .entry(edge.source_file.clone())
                 .or_default()
                 .push(edge.target.clone());
+            entity_to_file_id.insert(edge.target.clone(), edge.source.clone());
         }
     }
 
@@ -377,7 +396,12 @@ fn resolve_cross_file_imports(result: &mut ExtractionResult) {
 
     // Step 2: Resolve imports → create uses edges
     let mut new_edges: Vec<GraphEdge> = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen: HashSet<(String, String)> = result
+        .edges
+        .iter()
+        .filter(|edge| edge.relation == "uses")
+        .map(|edge| (edge.source.clone(), edge.target.clone()))
+        .collect();
 
     for edge in &result.edges {
         if edge.relation != "imports" {
@@ -440,6 +464,36 @@ fn resolve_cross_file_imports(result: &mut ExtractionResult) {
         };
 
         // Create uses edges: each entity in the importing file → each entity in the target module
+        if local_entities.len().saturating_mul(target_entities.len())
+            > MAX_IMPORT_ENTITY_EDGE_EXPANSION
+        {
+            for (_, target_id, _) in &target_entities {
+                let Some(target_file_id) = entity_to_file_id.get(target_id) else {
+                    continue;
+                };
+                if &edge.source == target_file_id {
+                    continue;
+                }
+                let key = (edge.source.clone(), target_file_id.clone());
+                if seen.contains(&key) {
+                    continue;
+                }
+                seen.insert(key);
+                new_edges.push(GraphEdge {
+                    source: edge.source.clone(),
+                    target: target_file_id.clone(),
+                    relation: "uses".to_string(),
+                    confidence: Confidence::Inferred,
+                    confidence_score: 0.8,
+                    source_file: source_file.clone(),
+                    source_location: None,
+                    weight: 0.8,
+                    extra: Default::default(),
+                });
+            }
+            continue;
+        }
+
         for local_id in local_entities {
             for (_, target_id, _) in &target_entities {
                 if local_id == target_id {
@@ -817,6 +871,128 @@ mod tests {
             weight: 1.0,
             extra: Default::default(),
         }
+    }
+
+    #[test]
+    fn post_merge_import_resolution_creates_cross_file_edges_once() {
+        let mut result = ExtractionResult {
+            nodes: vec![
+                make_test_node("file_main", "main", "cmd/main.go", NodeType::File),
+                make_test_node("server", "Server", "cmd/main.go", NodeType::Struct),
+                make_test_node(
+                    "import_utils",
+                    "myproject/pkg/utils",
+                    "cmd/main.go",
+                    NodeType::Package,
+                ),
+                make_test_node(
+                    "file_helpers",
+                    "helpers",
+                    "pkg/utils/helpers.go",
+                    NodeType::File,
+                ),
+                make_test_node(
+                    "parse_config",
+                    "ParseConfig",
+                    "pkg/utils/helpers.go",
+                    NodeType::Function,
+                ),
+            ],
+            edges: vec![
+                make_test_edge("file_main", "server", "defines", "cmd/main.go"),
+                make_test_edge("file_main", "import_utils", "imports", "cmd/main.go"),
+                make_test_edge(
+                    "file_helpers",
+                    "parse_config",
+                    "defines",
+                    "pkg/utils/helpers.go",
+                ),
+            ],
+            hyperedges: vec![],
+        };
+
+        resolve_import_relationships(&mut result);
+        resolve_import_relationships(&mut result);
+
+        let uses_edges = result
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.relation == "uses" && edge.source == "server" && edge.target == "parse_config"
+            })
+            .count();
+        assert_eq!(uses_edges, 1);
+    }
+
+    #[test]
+    fn cross_file_import_resolution_caps_large_entity_expansions_at_file_edges() {
+        let mut nodes = vec![
+            make_test_node("file_main", "main", "cmd/main.go", NodeType::File),
+            make_test_node(
+                "import_utils",
+                "myproject/pkg/utils",
+                "cmd/main.go",
+                NodeType::Package,
+            ),
+            make_test_node(
+                "file_utils",
+                "utils",
+                "pkg/utils/helpers.go",
+                NodeType::File,
+            ),
+        ];
+        let mut edges = vec![make_test_edge(
+            "file_main",
+            "import_utils",
+            "imports",
+            "cmd/main.go",
+        )];
+        for idx in 0..30 {
+            let local = format!("local_{idx}");
+            nodes.push(make_test_node(
+                &local,
+                &format!("Local{idx}"),
+                "cmd/main.go",
+                NodeType::Function,
+            ));
+            edges.push(make_test_edge(
+                "file_main",
+                &local,
+                "defines",
+                "cmd/main.go",
+            ));
+        }
+        for idx in 0..30 {
+            let target = format!("target_{idx}");
+            nodes.push(make_test_node(
+                &target,
+                &format!("Target{idx}"),
+                "pkg/utils/helpers.go",
+                NodeType::Function,
+            ));
+            edges.push(make_test_edge(
+                "file_utils",
+                &target,
+                "defines",
+                "pkg/utils/helpers.go",
+            ));
+        }
+        let mut result = ExtractionResult {
+            nodes,
+            edges,
+            hyperedges: vec![],
+        };
+
+        resolve_cross_file_imports(&mut result);
+
+        let uses_edges = result
+            .edges
+            .iter()
+            .filter(|edge| edge.relation == "uses")
+            .collect::<Vec<_>>();
+        assert_eq!(uses_edges.len(), 1);
+        assert_eq!(uses_edges[0].source, "file_main");
+        assert_eq!(uses_edges[0].target, "file_utils");
     }
 
     // -----------------------------------------------------------------------

@@ -72,6 +72,7 @@ graphifyq ensure
 graphifyq ensure --no-auto-refresh
 graphifyq query "QUESTION" --format toon
 graphifyq summary architecture --budget 3000 --format toon
+graphifyq gc --dry-run
 graphifyq stats --format toon
 ```
 
