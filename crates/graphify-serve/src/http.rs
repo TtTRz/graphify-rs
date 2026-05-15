@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use graphify_core::graph::KnowledgeGraph;
@@ -57,6 +57,7 @@ pub async fn start_http_server(
     let mcp_path = normalize_path(&config.mcp_path);
     let idle_timeout_secs = config.idle_timeout_secs.filter(|secs| *secs > 0);
     let last_activity_secs = Arc::new(AtomicU64::new(current_time_secs()));
+    let active_connections = Arc::new(AtomicUsize::new(0));
 
     if let Some(registry_path) = &config.registry_path {
         write_registry(registry_path, graph_path, &http_url, &mcp_path)?;
@@ -82,7 +83,9 @@ pub async fn start_http_server(
                 Err(_) => {
                     let idle_for = current_time_secs()
                         .saturating_sub(last_activity_secs.load(Ordering::Relaxed));
-                    if idle_for >= idle_timeout_secs {
+                    if active_connections.load(Ordering::Relaxed) == 0
+                        && idle_for >= idle_timeout_secs
+                    {
                         info!("HTTP MCP server idle for {idle_for}s; exiting");
                         if let Some(registry_path) = &config.registry_path {
                             remove_registry_if_owned(registry_path);
@@ -97,14 +100,17 @@ pub async fn start_http_server(
         };
         let (stream, _) = accept_result?;
         last_activity_secs.store(current_time_secs(), Ordering::Relaxed);
+        active_connections.fetch_add(1, Ordering::Relaxed);
         let state = Arc::clone(&state);
         let mcp_path = mcp_path.clone();
         let last_activity_secs = Arc::clone(&last_activity_secs);
+        let active_connections = Arc::clone(&active_connections);
         tokio::spawn(async move {
             if let Err(err) = handle_connection(stream, state, &mcp_path).await {
                 debug!("HTTP connection failed: {err}");
             }
             last_activity_secs.store(current_time_secs(), Ordering::Relaxed);
+            active_connections.fetch_sub(1, Ordering::Relaxed);
         });
     }
 }
@@ -591,6 +597,53 @@ mod tests {
         handle.abort();
     }
 
+    #[tokio::test]
+    async fn idle_timeout_waits_for_active_connection() {
+        let dir = tempdir().unwrap();
+        let graph_path = dir.path().join("graph.json");
+        let registry_path = dir.path().join("server.json");
+        std::fs::write(
+            &graph_path,
+            serde_json::to_vec(&make_graph().to_node_link_json()).unwrap(),
+        )
+        .unwrap();
+
+        let server_graph_path = graph_path.clone();
+        let server_registry_path = registry_path.clone();
+        let handle = tokio::spawn(async move {
+            start_http_server(
+                &server_graph_path,
+                HttpServerConfig {
+                    bind: "127.0.0.1:0".to_string(),
+                    mcp_path: "/mcp".to_string(),
+                    registry_path: Some(server_registry_path),
+                    idle_timeout_secs: Some(1),
+                },
+            )
+            .await
+        });
+
+        let registry = wait_for_registry(&registry_path).await;
+        let mut stream = tokio::net::TcpStream::connect(
+            registry
+                .http_url
+                .strip_prefix("http://")
+                .unwrap_or(&registry.http_url),
+        )
+        .await
+        .unwrap();
+        tokio::io::AsyncWriteExt::write_all(&mut stream, b"GET /health HTTP/1.1\r\n")
+            .await
+            .unwrap();
+
+        sleep(Duration::from_millis(1300)).await;
+        assert!(registry_path.exists());
+
+        drop(stream);
+        wait_for_registry_removed(&registry_path).await;
+        assert!(handle.await.unwrap().is_ok());
+    }
+
     #[derive(Deserialize)]
     struct TestRegistry {
         http_url: String,
@@ -607,5 +660,15 @@ mod tests {
             sleep(Duration::from_millis(20)).await;
         }
         panic!("registry was not written");
+    }
+
+    async fn wait_for_registry_removed(path: &Path) {
+        for _ in 0..50 {
+            if !path.exists() {
+                return;
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+        panic!("registry was not removed");
     }
 }

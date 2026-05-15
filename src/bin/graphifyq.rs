@@ -812,13 +812,22 @@ fn parse_sidecar_ps_line(line: &str) -> Option<SidecarProcess> {
     let mut command_parts = command.split_whitespace();
     let executable = command_parts.next()?;
     let subcommand = command_parts.next()?;
-    if !executable.ends_with("graphify-rs") || subcommand != "serve" {
+    if !is_graphify_rs_executable(executable) || subcommand != "serve" {
         return None;
     }
     Some(SidecarProcess {
         pid,
         registry_path: flag_value(command, "--registry-path").map(PathBuf::from),
     })
+}
+
+fn is_graphify_rs_executable(executable: &str) -> bool {
+    matches!(
+        Path::new(executable)
+            .file_name()
+            .and_then(|name| name.to_str()),
+        Some("graphify-rs" | "graphify-rs.exe")
+    )
 }
 
 fn sidecar_is_stale(sidecar: &SidecarProcess) -> bool {
@@ -835,13 +844,34 @@ fn flag_value(command: &str, flag: &str) -> Option<String> {
     let mut parts = command.split_whitespace();
     while let Some(part) = parts.next() {
         if part == flag {
-            return parts.next().map(ToString::to_string);
+            return collect_flag_value(&mut parts);
         }
         if let Some(value) = part.strip_prefix(&format!("{flag}=")) {
-            return Some(value.to_string());
+            let mut values = vec![value.to_string()];
+            for next in parts.by_ref() {
+                if next.starts_with("--") {
+                    break;
+                }
+                values.push(next.to_string());
+            }
+            return Some(values.join(" "));
         }
     }
     None
+}
+
+fn collect_flag_value<'a, I>(parts: &mut I) -> Option<String>
+where
+    I: Iterator<Item = &'a str>,
+{
+    let mut values = Vec::new();
+    for part in parts.by_ref() {
+        if part.starts_with("--") {
+            break;
+        }
+        values.push(part.to_string());
+    }
+    (!values.is_empty()).then(|| values.join(" "))
 }
 
 async fn wait_for_registry(path: &Path, require_semantic: bool) -> Result<Registry> {
@@ -1149,6 +1179,13 @@ mod tests {
     }
 
     #[test]
+    fn parse_sidecar_ps_line_ignores_executable_suffix_traps() {
+        let line = " 123 /tmp/notgraphify-rs serve --registry-path /tmp/not-a-real-sidecar.json";
+
+        assert_eq!(parse_sidecar_ps_line(line), None);
+    }
+
+    #[test]
     fn flag_value_supports_equals_and_split_forms() {
         assert_eq!(
             flag_value(
@@ -1163,6 +1200,17 @@ mod tests {
                 "--registry-path"
             ),
             Some("/tmp/b".to_string())
+        );
+    }
+
+    #[test]
+    fn flag_value_preserves_spaced_paths_until_next_flag() {
+        assert_eq!(
+            flag_value(
+                "graphify-rs serve --registry-path /tmp/my project/.graphify/server.json --graph /tmp/my project/.graphify/graph.json",
+                "--registry-path",
+            ),
+            Some("/tmp/my project/.graphify/server.json".to_string())
         );
     }
 

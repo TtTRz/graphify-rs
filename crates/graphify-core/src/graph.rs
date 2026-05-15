@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{Read, Write};
 
 use petgraph::Undirected;
 use petgraph::stable_graph::{NodeIndex, StableGraph};
@@ -253,6 +253,12 @@ impl KnowledgeGraph {
 
         Ok(kg)
     }
+
+    /// Deserialize a NetworkX `node_link_data` JSON graph from a reader.
+    pub fn from_node_link_reader<R: Read>(reader: R) -> Result<Self> {
+        let value: Value = serde_json::from_reader(reader)?;
+        Self::from_node_link_json(&value)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -410,6 +416,24 @@ mod tests {
             streamed["links"].as_array().unwrap().len(),
             in_mem["links"].as_array().unwrap().len()
         );
+    }
+
+    #[test]
+    fn from_node_link_reader_matches_value_import() {
+        let mut kg = KnowledgeGraph::new();
+        kg.add_node(make_node("a")).unwrap();
+        kg.add_node(make_node("b")).unwrap();
+        kg.add_edge(make_edge("a", "b")).unwrap();
+        let json = kg.to_node_link_json();
+        let bytes = serde_json::to_vec(&json).unwrap();
+
+        let from_reader = KnowledgeGraph::from_node_link_reader(bytes.as_slice()).unwrap();
+        let from_value = KnowledgeGraph::from_node_link_json(&json).unwrap();
+
+        assert_eq!(from_reader.node_count(), from_value.node_count());
+        assert_eq!(from_reader.edge_count(), from_value.edge_count());
+        assert!(from_reader.get_node("a").is_some());
+        assert!(from_reader.get_node("b").is_some());
     }
 
     #[test]

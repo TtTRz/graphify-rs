@@ -425,9 +425,9 @@ struct QueryLimits {
 impl QueryLimits {
     fn for_budget(token_budget: usize) -> Self {
         Self {
-            max_nodes: output_row_limit(token_budget, 25, 8, 48),
-            max_edges: output_row_limit(token_budget, 16, 12, 96),
-            max_neighbors_per_node: output_row_limit(token_budget, 80, 4, 14),
+            max_nodes: output_row_limit(token_budget, 40, 6, 36),
+            max_edges: output_row_limit(token_budget, 25, 8, 64),
+            max_neighbors_per_node: output_row_limit(token_budget, 120, 3, 10),
             hub_degree_cutoff: output_row_limit(token_budget, 12, 24, 160),
         }
     }
@@ -563,6 +563,7 @@ fn query_node_score(graph: &KnowledgeGraph, node_id: &str, terms: &[String]) -> 
         | graphify_core::model::NodeType::Interface
         | graphify_core::model::NodeType::Enum
         | graphify_core::model::NodeType::Trait => 1.1,
+        graphify_core::model::NodeType::File | graphify_core::model::NodeType::Module => 0.45,
         graphify_core::model::NodeType::Variable
         | graphify_core::model::NodeType::Constant
         | graphify_core::model::NodeType::Package => 0.65,
@@ -572,11 +573,27 @@ fn query_node_score(graph: &KnowledgeGraph, node_id: &str, terms: &[String]) -> 
     (score * quality * node_kind) - hub_penalty
 }
 
+fn query_seed_candidate(graph: &KnowledgeGraph, node_id: &str, terms: &[String]) -> bool {
+    let Some(node) = graph.get_node(node_id) else {
+        return false;
+    };
+    if query_node_score(graph, node_id, terms) > 0.0 {
+        return true;
+    }
+    !matches!(
+        node.node_type,
+        graphify_core::model::NodeType::File
+            | graphify_core::model::NodeType::Module
+            | graphify_core::model::NodeType::Package
+    )
+}
+
 fn query_context_to_value(
     graph: &KnowledgeGraph,
     context: &QueryContext,
     start: &[String],
     terms: &[String],
+    warnings: &[String],
 ) -> Value {
     let mut value = subgraph_to_value(graph, &context.nodes, &context.edges);
     value["truncated"] = json!(context.truncated);
@@ -584,6 +601,9 @@ fn query_context_to_value(
     value["omitted_edges"] = json!(context.omitted_edges);
     value["seed_count"] = json!(start.len());
     value["terms"] = json!(terms);
+    if !warnings.is_empty() {
+        value["warnings"] = json!(warnings);
+    }
     value
 }
 
@@ -798,15 +818,30 @@ fn handle_query_graph(
     // discovery, but exact function/config names should not disappear behind
     // migrations, generated stubs, or project docs.
     let scored = score_nodes(graph, &terms);
-    let mut start: Vec<String> = scored.iter().take(6).map(|(_, id)| id.clone()).collect();
+    let mut start: Vec<String> = scored
+        .iter()
+        .map(|(_, id)| id)
+        .filter(|id| query_seed_candidate(graph, id, &terms))
+        .take(6)
+        .cloned()
+        .collect();
 
+    let mut warnings = Vec::new();
     if let Some(semantic) = semantic {
         match semantic.query(graph, question, 8) {
             Ok(matches) => {
-                start.extend(matches.into_iter().map(|m| m.node_id));
+                start.extend(
+                    matches
+                        .into_iter()
+                        .map(|m| m.node_id)
+                        .filter(|id| query_seed_candidate(graph, id, &terms)),
+                );
             }
             Err(err) => {
                 debug!("semantic query unavailable, falling back to lexical query: {err}");
+                warnings.push(format!(
+                    "semantic query unavailable; falling back to lexical query: {err}"
+                ));
             }
         }
     }
@@ -821,12 +856,22 @@ fn handle_query_graph(
     let format = output_format(args);
     if format != GraphifyOutputFormat::Text {
         return tool_result_value(
-            &query_context_to_value(graph, &context, &start, &terms),
+            &query_context_to_value(graph, &context, &start, &terms, &warnings),
             format,
         );
     }
 
-    let mut text = subgraph_to_text(graph, &context.nodes, &context.edges, budget);
+    let mut text = String::new();
+    for warning in &warnings {
+        text.push_str(warning);
+        text.push('\n');
+    }
+    text.push_str(&subgraph_to_text(
+        graph,
+        &context.nodes,
+        &context.edges,
+        budget,
+    ));
     if context.truncated {
         text.push_str(&format!(
             "\n... (bounded graph context: omitted {} node(s), {} edge(s))\n",
@@ -1488,6 +1533,7 @@ mod tests {
     use super::*;
     use graphify_core::confidence::Confidence;
     use graphify_core::model::{GraphEdge, GraphNode, NodeType};
+    use graphify_embed::{IndexedNode, SemanticIndex, write_index};
 
     fn make_node(id: &str, label: &str, community: Option<usize>) -> GraphNode {
         GraphNode {
@@ -1680,6 +1726,43 @@ mod tests {
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert_eq!(resp["result"]["isError"], true);
         assert!(text.contains("graphify-rs build --embed"));
+    }
+
+    #[test]
+    fn query_graph_reports_semantic_fallback_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        let graph_path = dir.path().join("graph.json");
+        let index_path = graphify_embed::default_index_path_for_graph(&graph_path);
+        let g = test_graph();
+        write_index(
+            &SemanticIndex {
+                version: 1,
+                model: "model2vec:__definitely_missing_model__".into(),
+                graph_fingerprint: "stale".into(),
+                dim: 1,
+                nodes: vec![IndexedNode {
+                    node_id: "auth".into(),
+                    text: "auth service".into(),
+                    embedding: vec![1.0],
+                }],
+            },
+            &index_path,
+        )
+        .unwrap();
+        let semantic = SemanticState::load_for_graph_path(&graph_path, &g)
+            .unwrap()
+            .unwrap();
+        let req = json!({
+            "jsonrpc": "2.0", "method": "tools/call", "id": 34,
+            "params": {"name": "query_graph", "arguments": {"question": "auth service"}}
+        });
+
+        let resp = handle_jsonrpc_with_semantic(&g, Some(&semantic), &req).unwrap();
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+
+        assert!(text.contains("semantic query unavailable"));
+        assert!(text.contains("falling back to lexical query"));
+        assert!(text.contains("AuthService"));
     }
 
     #[test]
