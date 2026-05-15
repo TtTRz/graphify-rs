@@ -619,6 +619,9 @@ fn snippet_for_node(
         return None;
     }
     let zero_based = line.saturating_sub(1);
+    if zero_based >= lines.len() {
+        return None;
+    }
     let start = zero_based.saturating_sub(SNIPPET_CONTEXT_LINES);
     let end = (zero_based + SNIPPET_CONTEXT_LINES + 1).min(lines.len());
     let mut snippet = lines[start..end].join("\n");
@@ -1065,6 +1068,25 @@ mod tests {
         assert!(snippet.ends_with('…'));
         assert!(snippet.is_char_boundary(snippet.len()));
         assert_eq!(snippet.chars().count(), MAX_SNIPPET_CHARS + 1);
+    }
+
+    #[test]
+    fn snippet_ignores_locations_past_end_of_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/short.go"), "package main\n").unwrap();
+        let node = GraphNode {
+            id: "short".into(),
+            label: "short".into(),
+            source_file: "./src/short.go".into(),
+            source_location: Some("L30".into()),
+            node_type: NodeType::Function,
+            community: None,
+            extra: HashMap::new(),
+        };
+        let mut file_cache = HashMap::new();
+
+        assert!(snippet_for_node(dir.path(), &node, &mut file_cache).is_none());
     }
 
     #[test]
