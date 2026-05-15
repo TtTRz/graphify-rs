@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 
 use petgraph::Undirected;
 use petgraph::stable_graph::{NodeIndex, StableGraph};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use tracing::warn;
 
@@ -23,6 +24,14 @@ pub struct KnowledgeGraph {
     index_map: HashMap<String, NodeIndex>,
     pub communities: Vec<CommunityInfo>,
     pub hyperedges: Vec<Hyperedge>,
+}
+
+#[derive(Deserialize)]
+struct NodeLinkData {
+    #[serde(default)]
+    nodes: Vec<GraphNode>,
+    #[serde(default)]
+    links: Vec<GraphEdge>,
 }
 
 impl Default for KnowledgeGraph {
@@ -227,37 +236,42 @@ impl KnowledgeGraph {
 
     /// Deserialize from the NetworkX `node_link_data` JSON format.
     pub fn from_node_link_json(value: &Value) -> Result<Self> {
-        let mut kg = Self::new();
-
-        // Nodes
-        if let Some(nodes) = value.get("nodes").and_then(|v| v.as_array()) {
-            for nv in nodes {
-                let node: GraphNode = serde_json::from_value(nv.clone())
-                    .map_err(GraphifyError::SerializationError)?;
-                if let Err(e) = kg.add_node(node) {
-                    warn!("skipping node during import: {e}");
-                }
-            }
-        }
-
-        // Edges (field name is "links" in node_link_data)
-        if let Some(links) = value.get("links").and_then(|v| v.as_array()) {
-            for lv in links {
-                let edge: GraphEdge = serde_json::from_value(lv.clone())
-                    .map_err(GraphifyError::SerializationError)?;
-                if let Err(e) = kg.add_edge(edge) {
-                    warn!("skipping edge during import: {e}");
-                }
-            }
-        }
-
-        Ok(kg)
+        let nodes = value
+            .get("nodes")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .map(|v| serde_json::from_value(v.clone()).map_err(GraphifyError::SerializationError))
+            .collect::<Result<Vec<GraphNode>>>()?;
+        let links = value
+            .get("links")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .map(|v| serde_json::from_value(v.clone()).map_err(GraphifyError::SerializationError))
+            .collect::<Result<Vec<GraphEdge>>>()?;
+        Self::from_node_link_parts(nodes, links)
     }
 
     /// Deserialize a NetworkX `node_link_data` JSON graph from a reader.
     pub fn from_node_link_reader<R: Read>(reader: R) -> Result<Self> {
-        let value: Value = serde_json::from_reader(reader)?;
-        Self::from_node_link_json(&value)
+        let data: NodeLinkData = serde_json::from_reader(reader)?;
+        Self::from_node_link_parts(data.nodes, data.links)
+    }
+
+    fn from_node_link_parts(nodes: Vec<GraphNode>, links: Vec<GraphEdge>) -> Result<Self> {
+        let mut kg = Self::new();
+        for node in nodes {
+            if let Err(e) = kg.add_node(node) {
+                warn!("skipping node during import: {e}");
+            }
+        }
+        for edge in links {
+            if let Err(e) = kg.add_edge(edge) {
+                warn!("skipping edge during import: {e}");
+            }
+        }
+        Ok(kg)
     }
 }
 
