@@ -163,6 +163,8 @@ pub fn extract(paths: &[PathBuf]) -> ExtractionResult {
 
     resolve_cross_file_imports(&mut combined);
 
+    resolve_cross_file_calls(&mut combined);
+
     info!(
         "extraction complete: {} nodes, {} edges",
         combined.nodes.len(),
@@ -469,6 +471,63 @@ fn resolve_cross_file_imports(result: &mut ExtractionResult) {
     if !new_edges.is_empty() {
         debug!(
             "cross-file import resolution: created {} inferred uses edges",
+            new_edges.len()
+        );
+    }
+
+    result.edges.extend(new_edges);
+}
+
+/// Derive cross-file "calls" edges from "uses" edges created by import resolution.
+///
+/// If function A in file X uses entity B from file Y (via import resolution),
+/// it likely also calls B. This piggybacks on the existing "uses" logic rather
+/// than re-implementing import matching.
+fn resolve_cross_file_calls(result: &mut ExtractionResult) {
+    let callable_ids: HashSet<String> = result
+        .nodes
+        .iter()
+        .filter(|n| matches!(n.node_type, NodeType::Function | NodeType::Method))
+        .map(|n| n.id.clone())
+        .collect();
+
+    let existing_calls: HashSet<(String, String)> = result
+        .edges
+        .iter()
+        .filter(|e| e.relation == "calls")
+        .map(|e| (e.source.clone(), e.target.clone()))
+        .collect();
+
+    let uses_edges: Vec<(String, String, String)> = result
+        .edges
+        .iter()
+        .filter(|e| e.relation == "uses" && callable_ids.contains(&e.source))
+        .map(|e| (e.source.clone(), e.target.clone(), e.source_file.clone()))
+        .collect();
+
+    let mut new_edges: Vec<GraphEdge> = Vec::new();
+
+    for (source, target, source_file) in uses_edges {
+        let key = (source.clone(), target.clone());
+        if existing_calls.contains(&key) {
+            continue;
+        }
+        new_edges.push(GraphEdge {
+            source,
+            target,
+            relation: "calls".to_string(),
+            confidence: Confidence::Inferred,
+            confidence_score: 0.5,
+            source_file,
+            source_location: None,
+            weight: 0.5,
+            extra: HashMap::new(),
+        });
+    }
+
+    if !new_edges.is_empty() {
+        debug!(
+            "cross-file call resolution: created {} inferred calls edges",
             new_edges.len()
         );
     }

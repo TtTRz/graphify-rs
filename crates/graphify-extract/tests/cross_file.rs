@@ -1,9 +1,8 @@
 //! Integration tests for cross-file import resolution and dispatch.
 
-use graphify_extract::{extract, language_for_path};
 use std::path::Path;
 
-// Dispatch
+use graphify_extract::{extract, language_for_path};
 
 #[test]
 fn language_for_path_works() {

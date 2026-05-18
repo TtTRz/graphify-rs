@@ -51,6 +51,16 @@ pub(crate) fn tool_definitions() -> Value {
                         "type": "number",
                         "description": "Traversal depth (default: 1)",
                         "default": 1
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return (default: 50)",
+                        "default": 50
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Number of results to skip (default: 0)",
+                        "default": 0
                     }
                 },
                 "required": ["node_id"]
@@ -65,6 +75,16 @@ pub(crate) fn tool_definitions() -> Value {
                     "community_id": {
                         "type": "number",
                         "description": "The community ID"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return (default: 50)",
+                        "default": 50
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Number of results to skip (default: 0)",
+                        "default": 0
                     }
                 },
                 "required": ["community_id"]

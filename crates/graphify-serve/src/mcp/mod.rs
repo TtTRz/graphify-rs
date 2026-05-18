@@ -305,7 +305,7 @@ mod tests {
         });
         let resp = dispatch(&g, &req).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("neighbor_count"));
+        assert!(text.contains("total_neighbors"));
     }
 
     #[test]

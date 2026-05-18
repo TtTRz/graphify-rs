@@ -91,6 +91,8 @@ pub(crate) fn handle_get_node(graph: &KnowledgeGraph, args: &Value) -> Value {
 pub(crate) fn handle_get_neighbors(graph: &KnowledgeGraph, args: &Value) -> Value {
     let node_id = args["node_id"].as_str().unwrap_or("");
     let depth = args["depth"].as_u64().unwrap_or(1) as usize;
+    let limit = args["limit"].as_u64().unwrap_or(50) as usize;
+    let offset = args["offset"].as_u64().unwrap_or(0) as usize;
 
     if node_id.is_empty() {
         return tool_result_error("Missing required parameter: node_id");
@@ -124,11 +126,17 @@ pub(crate) fn handle_get_neighbors(graph: &KnowledgeGraph, args: &Value) -> Valu
         }
     }
 
+    let total = neighbor_info.len();
+    let paginated: Vec<_> = neighbor_info.into_iter().skip(offset).take(limit).collect();
+
     let result = json!({
         "node_id": node_id,
         "depth": depth,
-        "neighbor_count": neighbor_info.len(),
-        "neighbors": neighbor_info,
+        "total_neighbors": total,
+        "offset": offset,
+        "limit": limit,
+        "returned": paginated.len(),
+        "neighbors": paginated,
     });
 
     tool_result_json(&result)
@@ -139,6 +147,8 @@ pub(crate) fn handle_get_community(graph: &KnowledgeGraph, args: &Value) -> Valu
         Some(id) => id as usize,
         None => return tool_result_error("Missing required parameter: community_id"),
     };
+    let limit = args["limit"].as_u64().unwrap_or(50) as usize;
+    let offset = args["offset"].as_u64().unwrap_or(0) as usize;
 
     let mut members: Vec<Value> = Vec::new();
     for node_id in graph.node_ids() {
@@ -165,10 +175,16 @@ pub(crate) fn handle_get_community(graph: &KnowledgeGraph, args: &Value) -> Valu
         db.cmp(&da)
     });
 
+    let total = members.len();
+    let paginated: Vec<_> = members.into_iter().skip(offset).take(limit).collect();
+
     let result = json!({
         "community_id": community_id,
-        "member_count": members.len(),
-        "members": members,
+        "total_members": total,
+        "offset": offset,
+        "limit": limit,
+        "returned": paginated.len(),
+        "members": paginated,
     });
 
     tool_result_json(&result)

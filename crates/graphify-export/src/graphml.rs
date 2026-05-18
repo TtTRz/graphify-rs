@@ -15,60 +15,49 @@ pub fn export_graphml(graph: &KnowledgeGraph, output_dir: &Path) -> anyhow::Resu
     writeln!(
         xml,
         r#"<graphml xmlns="http://graphml.graphdrawing.org/xmlns""#
-    )
-    .unwrap();
+    )?;
     writeln!(
         xml,
         r#"         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance""#
-    )
-    .unwrap();
+    )?;
     writeln!(
         xml,
         r#"         xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">"#
-    )
-    .unwrap();
+    )?;
 
     writeln!(
         xml,
         r#"  <key id="label" for="node" attr.name="label" attr.type="string"/>"#
-    )
-    .unwrap();
+    )?;
     writeln!(
         xml,
         r#"  <key id="node_type" for="node" attr.name="node_type" attr.type="string"/>"#
-    )
-    .unwrap();
+    )?;
     writeln!(
         xml,
         r#"  <key id="source_file" for="node" attr.name="source_file" attr.type="string"/>"#
-    )
-    .unwrap();
+    )?;
     writeln!(
         xml,
         r#"  <key id="community" for="node" attr.name="community" attr.type="int"/>"#
-    )
-    .unwrap();
+    )?;
 
     writeln!(
         xml,
         r#"  <key id="relation" for="edge" attr.name="relation" attr.type="string"/>"#
-    )
-    .unwrap();
+    )?;
     writeln!(
         xml,
         r#"  <key id="confidence" for="edge" attr.name="confidence" attr.type="string"/>"#
-    )
-    .unwrap();
+    )?;
     writeln!(
         xml,
         r#"  <key id="confidence_score" for="edge" attr.name="confidence_score" attr.type="double"/>"#
-    )
-    .unwrap();
+    )?;
     writeln!(
         xml,
         r#"  <key id="weight" for="edge" attr.name="weight" attr.type="double"/>"#
-    )
-    .unwrap();
+    )?;
 
     writeln!(xml, r#"  <graph id="G" edgedefault="undirected">"#)?;
 
@@ -78,20 +67,17 @@ pub fn export_graphml(graph: &KnowledgeGraph, output_dir: &Path) -> anyhow::Resu
             xml,
             r#"      <data key="label">{}</data>"#,
             xml_escape(&node.label)
-        )
-        .unwrap();
+        )?;
         writeln!(
             xml,
             r#"      <data key="node_type">{}</data>"#,
             node.node_type
-        )
-        .unwrap();
+        )?;
         writeln!(
             xml,
             r#"      <data key="source_file">{}</data>"#,
             xml_escape(&node.source_file)
-        )
-        .unwrap();
+        )?;
         if let Some(c) = node.community {
             writeln!(xml, r#"      <data key="community">{c}</data>"#)?;
         }
@@ -105,26 +91,22 @@ pub fn export_graphml(graph: &KnowledgeGraph, output_dir: &Path) -> anyhow::Resu
             i,
             xml_escape(&edge.source),
             xml_escape(&edge.target)
-        )
-        .unwrap();
+        )?;
         writeln!(
             xml,
             r#"      <data key="relation">{}</data>"#,
             xml_escape(&edge.relation)
-        )
-        .unwrap();
+        )?;
         writeln!(
             xml,
             r#"      <data key="confidence">{}</data>"#,
             edge.confidence
-        )
-        .unwrap();
+        )?;
         writeln!(
             xml,
             r#"      <data key="confidence_score">{}</data>"#,
             edge.confidence_score
-        )
-        .unwrap();
+        )?;
         writeln!(xml, r#"      <data key="weight">{}</data>"#, edge.weight)?;
         writeln!(xml, "    </edge>")?;
     }

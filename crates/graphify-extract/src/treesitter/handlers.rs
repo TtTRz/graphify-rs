@@ -278,11 +278,14 @@ pub(crate) fn handle_function(
         ));
     }
 
-    if let Some(body) = node.child_by_field_name(config.body_field) {
-        ctx.function_bodies
-            .push((func_nid, body.start_byte(), body.end_byte()));
-    } else {
-        ctx.function_bodies
-            .push((func_nid, node.start_byte(), node.end_byte()));
+    let body_node = node.child_by_field_name(config.body_field).unwrap_or(node);
+    let callees = super::collect_callees(body_node, source, config);
+    for name in callees {
+        ctx.raw_calls.push((func_nid.clone(), name));
+    }
+
+    if ctx.lang == "ruby" {
+        ctx.ruby_bodies
+            .push((func_nid, body_node.start_byte(), body_node.end_byte()));
     }
 }

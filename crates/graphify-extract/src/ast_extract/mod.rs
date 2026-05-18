@@ -258,18 +258,22 @@ pub(crate) fn infer_calls(
             if caller_id == callee_id {
                 continue;
             }
-            // Check if callee_name appears in caller body as a call (name followed by `(`)
             let pattern = format!(r"\b{}\s*\(", regex::escape(callee_name));
-            if let Ok(re) = regex::Regex::new(&pattern)
-                && re.is_match(&body)
-            {
-                edges.push(make_edge(
-                    caller_id,
-                    callee_id,
-                    "calls",
-                    path,
-                    Confidence::Inferred,
-                ));
+            if let Ok(re) = regex::Regex::new(&pattern) {
+                for mat in re.find_iter(&body) {
+                    let start = mat.start();
+                    if start > 0 && body.as_bytes()[start - 1] == b'.' {
+                        continue;
+                    }
+                    edges.push(make_edge(
+                        caller_id,
+                        callee_id,
+                        "calls",
+                        path,
+                        Confidence::Inferred,
+                    ));
+                    break;
+                }
             }
         }
     }

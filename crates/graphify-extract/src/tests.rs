@@ -884,3 +884,123 @@ fn dart_resolver_handles_part_directive() {
     let result = resolve_dart_import("part 'src/models.dart'", &entities);
     assert!(!result.is_empty(), "Dart part directive should resolve");
 }
+
+// --- resolve_cross_file_calls tests ---
+
+#[test]
+fn cross_file_calls_derived_from_uses_edges() {
+    let mut result = ExtractionResult {
+        nodes: vec![
+            make_test_node("file_main", "main", "src/main.rs", NodeType::File),
+            make_test_node("run", "run()", "src/main.rs", NodeType::Function),
+            make_test_node("file_model", "model", "src/model.rs", NodeType::File),
+            make_test_node("init", "init()", "src/model.rs", NodeType::Function),
+        ],
+        edges: vec![
+            make_test_edge("file_main", "run", "defines", "src/main.rs"),
+            make_test_edge("file_model", "init", "defines", "src/model.rs"),
+            make_test_edge("run", "init", "uses", "src/main.rs"),
+        ],
+        hyperedges: vec![],
+    };
+
+    resolve_cross_file_calls(&mut result);
+
+    let calls_edges: Vec<_> = result
+        .edges
+        .iter()
+        .filter(|e| e.relation == "calls")
+        .collect();
+
+    assert_eq!(calls_edges.len(), 1, "expected 1 calls edge, got {}", calls_edges.len());
+    assert_eq!(calls_edges[0].source, "run");
+    assert_eq!(calls_edges[0].target, "init");
+    assert_eq!(calls_edges[0].confidence, Confidence::Inferred);
+    assert!((calls_edges[0].weight - 0.5).abs() < f64::EPSILON);
+}
+
+#[test]
+fn cross_file_calls_skips_non_function_source() {
+    let mut result = ExtractionResult {
+        nodes: vec![
+            make_test_node("file_main", "main", "src/main.rs", NodeType::File),
+            make_test_node("app", "App", "src/main.rs", NodeType::Struct),
+            make_test_node("file_model", "model", "src/model.rs", NodeType::File),
+            make_test_node("config", "Config", "src/model.rs", NodeType::Struct),
+        ],
+        edges: vec![
+            make_test_edge("file_main", "app", "defines", "src/main.rs"),
+            make_test_edge("file_model", "config", "defines", "src/model.rs"),
+            make_test_edge("app", "config", "uses", "src/main.rs"),
+        ],
+        hyperedges: vec![],
+    };
+
+    resolve_cross_file_calls(&mut result);
+
+    let calls_edges: Vec<_> = result
+        .edges
+        .iter()
+        .filter(|e| e.relation == "calls")
+        .collect();
+
+    assert!(calls_edges.is_empty(), "Struct→Struct uses should not produce calls edge");
+}
+
+#[test]
+fn cross_file_calls_no_duplicate_with_existing() {
+    let mut result = ExtractionResult {
+        nodes: vec![
+            make_test_node("run", "run()", "src/main.rs", NodeType::Function),
+            make_test_node("init", "init()", "src/model.rs", NodeType::Function),
+        ],
+        edges: vec![
+            GraphEdge {
+                source: "run".to_string(),
+                target: "init".to_string(),
+                relation: "calls".to_string(),
+                confidence: Confidence::Extracted,
+                confidence_score: 1.0,
+                source_file: "src/main.rs".to_string(),
+                source_location: None,
+                weight: 1.0,
+                extra: HashMap::new(),
+            },
+            make_test_edge("run", "init", "uses", "src/main.rs"),
+        ],
+        hyperedges: vec![],
+    };
+
+    resolve_cross_file_calls(&mut result);
+
+    let calls_edges: Vec<_> = result
+        .edges
+        .iter()
+        .filter(|e| e.relation == "calls")
+        .collect();
+
+    assert_eq!(calls_edges.len(), 1, "should not duplicate existing calls edge");
+}
+
+#[test]
+fn cross_file_calls_no_edges_without_uses() {
+    let mut result = ExtractionResult {
+        nodes: vec![
+            make_test_node("run", "run()", "src/main.rs", NodeType::Function),
+        ],
+        edges: vec![
+            make_test_edge("file_main", "run", "defines", "src/main.rs"),
+        ],
+        hyperedges: vec![],
+    };
+
+    resolve_cross_file_calls(&mut result);
+
+    let calls_edges: Vec<_> = result
+        .edges
+        .iter()
+        .filter(|e| e.relation == "calls")
+        .collect();
+
+    assert!(calls_edges.is_empty(), "should not create calls edges without uses edges");
+}

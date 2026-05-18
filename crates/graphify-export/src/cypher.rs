@@ -101,7 +101,9 @@ fn build_unique_var_names(graph: &KnowledgeGraph) -> HashMap<String, String> {
     let mut result = HashMap::new();
     for (sanitized, mut ids) in name_to_ids {
         if ids.len() == 1 {
-            result.insert(ids.pop().unwrap(), sanitized);
+            if let Some(primary_id) = ids.pop() {
+                result.insert(primary_id, sanitized);
+            }
         } else {
             for (i, id) in ids.into_iter().enumerate() {
                 result.insert(id, format!("{sanitized}_{i}"));

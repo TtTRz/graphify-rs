@@ -45,7 +45,8 @@ fn extract_with_treesitter(
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
     let mut seen_ids = HashSet::new();
-    let mut function_bodies: Vec<(String, usize, usize)> = Vec::new();
+    let mut raw_calls: Vec<(String, String)> = Vec::new();
+    let mut ruby_bodies: Vec<(String, usize, usize)> = Vec::new();
 
     let file_nid = make_id(&[&str_path]);
     seen_ids.insert(file_nid.clone());
@@ -67,7 +68,8 @@ fn extract_with_treesitter(
             nodes: &mut nodes,
             edges: &mut edges,
             seen_ids: &mut seen_ids,
-            function_bodies: &mut function_bodies,
+            raw_calls: &mut raw_calls,
+            ruby_bodies: &mut ruby_bodies,
         };
         walk_node(root, source, config, &mut ctx, None);
     }
@@ -86,42 +88,64 @@ fn extract_with_treesitter(
         .collect();
 
     let mut seen_calls: HashSet<(String, String)> = HashSet::new();
-    for (caller_nid, body_start, body_end) in &function_bodies {
-        let body_text = &source[*body_start..*body_end];
-        let body_str = String::from_utf8_lossy(body_text);
-        let body_lower = body_str.to_lowercase();
-        for (func_label, callee_nid) in &label_to_nid {
+    for (caller_nid, callee_name) in &raw_calls {
+        let name_lower = callee_name.to_lowercase();
+        if let Some(callee_nid) = label_to_nid.get(&name_lower) {
             if callee_nid == caller_nid {
                 continue;
             }
-            let has_paren_call = body_lower.contains(&format!("{func_label}("));
-            let has_noparen_call = if lang == "ruby" {
-                body_lower.find(func_label.as_str()).is_some_and(|pos| {
-                    let after = pos + func_label.len();
-                    if after >= body_lower.len() {
-                        true
-                    } else {
-                        let next_ch = body_lower.as_bytes()[after];
-                        !next_ch.is_ascii_alphanumeric() && next_ch != b'_'
-                    }
-                })
-            } else {
-                false
-            };
-            if has_paren_call || has_noparen_call {
-                let key = (caller_nid.clone(), callee_nid.clone());
-                if seen_calls.insert(key) {
-                    edges.push(GraphEdge {
-                        source: caller_nid.clone(),
-                        target: callee_nid.clone(),
-                        relation: "calls".to_string(),
-                        confidence: Confidence::Inferred,
-                        confidence_score: Confidence::Inferred.default_score(),
-                        source_file: str_path.to_string(),
-                        source_location: None,
-                        weight: 1.0,
-                        extra: HashMap::new(),
+            let key = (caller_nid.clone(), callee_nid.clone());
+            if seen_calls.insert(key) {
+                edges.push(GraphEdge {
+                    source: caller_nid.clone(),
+                    target: callee_nid.clone(),
+                    relation: "calls".to_string(),
+                    confidence: Confidence::Inferred,
+                    confidence_score: Confidence::Inferred.default_score(),
+                    source_file: str_path.to_string(),
+                    source_location: None,
+                    weight: 1.0,
+                    extra: HashMap::new(),
+                });
+            }
+        }
+    }
+
+    if lang == "ruby" {
+        for (caller_nid, body_start, body_end) in &ruby_bodies {
+            let body_text = &source[*body_start..*body_end];
+            let body_str = String::from_utf8_lossy(body_text);
+            let body_lower = body_str.to_lowercase();
+            for (func_label, callee_nid) in &label_to_nid {
+                if callee_nid == caller_nid {
+                    continue;
+                }
+                let found = body_lower
+                    .find(func_label.as_str())
+                    .is_some_and(|pos| {
+                        let after = pos + func_label.len();
+                        if after >= body_lower.len() {
+                            true
+                        } else {
+                            let next_ch = body_lower.as_bytes()[after];
+                            !next_ch.is_ascii_alphanumeric() && next_ch != b'_'
+                        }
                     });
+                if found {
+                    let key = (caller_nid.clone(), callee_nid.clone());
+                    if seen_calls.insert(key) {
+                        edges.push(GraphEdge {
+                            source: caller_nid.clone(),
+                            target: callee_nid.clone(),
+                            relation: "calls".to_string(),
+                            confidence: Confidence::Inferred,
+                            confidence_score: Confidence::Inferred.default_score(),
+                            source_file: str_path.to_string(),
+                            source_location: None,
+                            weight: 1.0,
+                            extra: HashMap::new(),
+                        });
+                    }
                 }
             }
         }
@@ -142,6 +166,77 @@ fn extract_with_treesitter(
     })
 }
 
+fn collect_callees(body: Node, source: &[u8], config: &TsConfig) -> Vec<String> {
+    let mut callees = Vec::new();
+    collect_callees_recursive(body, source, config, &mut callees);
+    callees
+}
+
+fn collect_callees_recursive(
+    node: Node,
+    source: &[u8],
+    config: &TsConfig,
+    callees: &mut Vec<String>,
+) {
+    if config.call_types.contains(node.kind())
+        && let Some(name) = extract_callee_name(node, source, config)
+    {
+        callees.push(name);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_callees_recursive(child, source, config, callees);
+    }
+}
+
+fn extract_callee_name(call_node: Node, source: &[u8], config: &TsConfig) -> Option<String> {
+    let func_node = call_node.child_by_field_name(config.call_function_field)?;
+    extract_name_from_callee(func_node, source)
+}
+
+fn extract_name_from_callee(node: Node, source: &[u8]) -> Option<String> {
+    match node.kind() {
+        "identifier" | "field_identifier" => Some(node_text(node, source)),
+        "attribute" => node
+            .child_by_field_name("attribute")
+            .map(|n| node_text(n, source)),
+        "field_expression" | "member_expression" => node
+            .child_by_field_name("field")
+            .or_else(|| node.child_by_field_name("property"))
+            .map(|n| node_text(n, source)),
+        "scoped_identifier" | "qualified_identifier" => node
+            .child_by_field_name("name")
+            .map(|n| node_text(n, source)),
+        "selector_expression" => node
+            .child_by_field_name("field")
+            .map(|n| node_text(n, source)),
+        _ => None,
+    }
+}
+
+enum ElixirCallKind {
+    Import,
+    Class,
+    Function,
+    Other,
+}
+
+fn classify_elixir_call(node: Node, source: &[u8], config: &TsConfig) -> ElixirCallKind {
+    let target = node
+        .child_by_field_name(config.name_field)
+        .map(|n| node_text(n, source))
+        .unwrap_or_default();
+    match target.as_str() {
+        "import" | "use" | "require" | "alias" => ElixirCallKind::Import,
+        "defmodule" | "defprotocol" | "defimpl" => ElixirCallKind::Class,
+        "def" | "defp" | "defmacro" | "defmacrop" | "defguard" | "defguardp" | "defdelegate" => {
+            ElixirCallKind::Function
+        }
+        _ => ElixirCallKind::Other,
+    }
+}
+
 pub(crate) fn walk_node(
     node: Node,
     source: &[u8],
@@ -151,13 +246,9 @@ pub(crate) fn walk_node(
 ) {
     let kind = node.kind();
 
-    if config.import_types.contains(kind) {
-        if ctx.lang == "ruby" && kind == "call" {
-            let method_name = node
-                .child_by_field_name("method")
-                .map(|n| node_text(n, source))
-                .unwrap_or_default();
-            if method_name == "require" || method_name == "require_relative" {
+    if ctx.lang == "elixir" && kind == "call" {
+        match classify_elixir_call(node, source, config) {
+            ElixirCallKind::Import => {
                 imports::extract_import(
                     node,
                     source,
@@ -169,12 +260,23 @@ pub(crate) fn walk_node(
                 );
                 return;
             }
-        } else if ctx.lang == "elixir" && kind == "call" {
-            let target = node
-                .child_by_field_name(config.name_field)
+            ElixirCallKind::Class => {
+                handlers::handle_class_like(node, source, config, ctx);
+                return;
+            }
+            ElixirCallKind::Function => {
+                handlers::handle_function(node, source, config, ctx, parent_class_nid);
+                return;
+            }
+            ElixirCallKind::Other => {}
+        }
+    } else if config.import_types.contains(kind) {
+        if ctx.lang == "ruby" && kind == "call" {
+            let method_name = node
+                .child_by_field_name("method")
                 .map(|n| node_text(n, source))
                 .unwrap_or_default();
-            if matches!(target.as_str(), "import" | "use" | "require" | "alias") {
+            if method_name == "require" || method_name == "require_relative" {
                 imports::extract_import(
                     node,
                     source,
@@ -198,47 +300,12 @@ pub(crate) fn walk_node(
             );
             return;
         }
-    }
-
-    if config.class_types.contains(kind) {
-        if ctx.lang == "elixir" && kind == "call" {
-            let target = node
-                .child_by_field_name(config.name_field)
-                .map(|n| node_text(n, source))
-                .unwrap_or_default();
-            if target == "defmodule" || target == "defprotocol" || target == "defimpl" {
-                handlers::handle_class_like(node, source, config, ctx);
-                return;
-            }
-        } else {
-            handlers::handle_class_like(node, source, config, ctx);
-            return;
-        }
-    }
-
-    if config.function_types.contains(kind) {
-        if ctx.lang == "elixir" && kind == "call" {
-            let target = node
-                .child_by_field_name(config.name_field)
-                .map(|n| node_text(n, source))
-                .unwrap_or_default();
-            if matches!(
-                target.as_str(),
-                "def"
-                    | "defp"
-                    | "defmacro"
-                    | "defmacrop"
-                    | "defguard"
-                    | "defguardp"
-                    | "defdelegate"
-            ) {
-                handlers::handle_function(node, source, config, ctx, parent_class_nid);
-                return;
-            }
-        } else {
-            handlers::handle_function(node, source, config, ctx, parent_class_nid);
-            return;
-        }
+    } else if config.class_types.contains(kind) {
+        handlers::handle_class_like(node, source, config, ctx);
+        return;
+    } else if config.function_types.contains(kind) {
+        handlers::handle_function(node, source, config, ctx, parent_class_nid);
+        return;
     }
 
     let mut cursor = node.walk();
@@ -254,7 +321,8 @@ pub(crate) struct WalkContext<'a> {
     pub nodes: &'a mut Vec<GraphNode>,
     pub edges: &'a mut Vec<GraphEdge>,
     pub seen_ids: &'a mut HashSet<String>,
-    pub function_bodies: &'a mut Vec<(String, usize, usize)>,
+    pub raw_calls: &'a mut Vec<(String, String)>,
+    pub ruby_bodies: &'a mut Vec<(String, usize, usize)>,
 }
 
 pub(crate) fn node_text(node: Node, source: &[u8]) -> String {
