@@ -21,7 +21,6 @@ pub fn temporal_analysis(
     repo_root: &Path,
     top_n: usize,
 ) -> Vec<TemporalNode> {
-    // Collect unique source files from nodes
     let mut file_stats: HashMap<String, (usize, String)> = HashMap::new(); // file → (commit_count, last_date)
 
     let source_files: Vec<String> = graph
@@ -42,10 +41,8 @@ pub fn temporal_analysis(
         return Vec::new();
     }
 
-    // Get current date for age calculation
     let now = chrono_days_since_epoch();
 
-    // Max degree for normalization
     let max_degree = graph
         .node_ids()
         .iter()
@@ -110,30 +107,51 @@ fn git_file_stats(repo_root: &Path, file: &str) -> Option<(usize, String)> {
 }
 
 /// Simple day counter: days since 2020-01-01 from an ISO date string.
+/// Uses the same calculation as [`chrono_days_since_epoch`] to avoid
+/// offset from using different approximations.
 fn date_to_age(date_str: &str, now_days: u64) -> u64 {
+    match days_since_epoch_2020(date_str) {
+        Some(file_days) => now_days.saturating_sub(file_days).max(1),
+        None => 1,
+    }
+}
+
+/// Compute approximate days since 2020-01-01 from an ISO date string.
+/// Uses cumulative days per month to avoid the 30-day/month approximation
+/// which caused up to ~30 day offset vs the precise epoch calculation.
+/// Returns `None` for invalid date strings.
+fn days_since_epoch_2020(date_str: &str) -> Option<u64> {
     let parts: Vec<u64> = date_str.split('-').filter_map(|p| p.parse().ok()).collect();
     if parts.len() < 3 {
-        return 1;
+        return None;
     }
-    let file_days = (parts[0] - 2020) * 365 + parts[1] * 30 + parts[2];
-    now_days.saturating_sub(file_days).max(1)
+    let (y, m, d) = (parts[0], parts[1], parts[2]);
+    if m == 0 || m > 12 || d == 0 {
+        return None;
+    }
+    const CUM_DAYS: [u64; 12] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+    let leap_extra = if m > 2 && (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)) {
+        1
+    } else {
+        0
+    };
+    Some(
+        (y.saturating_sub(2020)) * 365
+            + CUM_DAYS.get(m as usize - 1).copied().unwrap_or(0)
+            + leap_extra
+            + d
+            - 1,
+    )
 }
 
 /// Approximate days since 2020-01-01 for "now".
 fn chrono_days_since_epoch() -> u64 {
-    // Use git to get current date for consistency
-    let output = Command::new("date")
-        .args(["+%Y-%m-%d"])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .unwrap_or_else(|| "2026-04-13".to_string());
-    let trimmed = output.trim();
-    let parts: Vec<u64> = trimmed.split('-').filter_map(|p| p.parse().ok()).collect();
-    if parts.len() < 3 {
-        return 2300; // ~2026
-    }
-    (parts[0] - 2020) * 365 + parts[1] * 30 + parts[2]
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    secs.saturating_sub(1577836800) / 86400
 }
 
 #[cfg(test)]
@@ -142,13 +160,28 @@ mod tests {
 
     #[test]
     fn date_to_age_computes_correctly() {
-        let now = (2026 - 2020) * 365 + 4 * 30 + 13; // ~2026-04-13
+        // 2026-04-13 in epoch-2020 days:
+        // 6 * 365 + CUM_DAYS[3] (90) + 13 = 2283
+        let now = 6 * 365 + 90 + 13;
         let age = date_to_age("2026-01-01", now);
-        assert!(age > 0 && age < 200);
+        // 2026-01-01 = 6*365 + 0 + 1 = 2191; 2283 - 2191 = 92
+        assert!(age > 0 && age < 200, "age = {age}");
     }
 
     #[test]
     fn date_to_age_invalid_returns_1() {
         assert_eq!(date_to_age("invalid", 2300), 1);
+    }
+
+    #[test]
+    fn days_since_epoch_consistent() {
+        // 2020-01-01 is the epoch, so day 0
+        assert_eq!(days_since_epoch_2020("2020-01-01"), Some(0));
+        // 2020-02-01 = 31 days after epoch
+        assert_eq!(days_since_epoch_2020("2020-02-01"), Some(31));
+        // 2021-01-01 = 365 days after epoch
+        assert_eq!(days_since_epoch_2020("2021-01-01"), Some(365));
+        // 2020-03-01 = 31 + 29 (leap) + 0 = 60
+        assert_eq!(days_since_epoch_2020("2020-03-01"), Some(60));
     }
 }

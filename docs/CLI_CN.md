@@ -44,7 +44,7 @@ graphify-rs -q -j 2 serve               # 静默模式，2 个线程
 
 ### `graphify-rs build`
 
-从目录中的文件构建知识图谱。这是主要的处理流程：检测文件 -> AST 提取（第一遍）-> Claude API 语义提取（第二遍）-> 构建图谱 -> 社区聚类 -> 分析 -> 导出。
+从目录中的文件构建知识图谱。这是主要的处理流程：检测文件 -> AST 提取（第一遍）-> LLM API 语义提取（第二遍）-> 构建图谱 -> 社区聚类 -> 分析 -> 导出。
 
 #### 参数
 
@@ -52,7 +52,7 @@ graphify-rs -q -j 2 serve               # 静默模式，2 个线程
 |------|------|------|--------|------|
 | `--path <PATH>` | `-p` | `String` | `"."` | 扫描源文件的根目录。 |
 | `--output <DIR>` | `-o` | `String` | `"graphify-out"` | 所有生成文件的输出目录。 |
-| `--no-llm` | | `bool` | `false` | 跳过 Claude API 语义提取（第二遍），仅运行 AST 提取。 |
+| `--no-llm` | | `bool` | `false` | 跳过 LLM 语义提取（第二遍），仅运行 AST 提取。 |
 | `--code-only` | | `bool` | `false` | 仅处理代码文件，跳过文档和论文。 |
 | `--update` | | `bool` | `false` | 增量重建：仅重新提取自上次构建以来新增/修改的文件。 |
 | `--format <FMT,...>` | | `String`（逗号分隔） | 所有格式 | 要生成的导出格式。可选：`json`、`html`、`graphml`、`cypher`、`svg`、`wiki`、`obsidian`、`report`。 |
@@ -90,7 +90,7 @@ graphify-rs build --update --code-only --no-llm --format json,report
 
 1. **检测** — 扫描 `--path` 目录中的代码、文档、论文和图片文件（遵循 `.graphifyignore`，跳过敏感文件）。
 2. **AST 提取（第一遍）** — 对代码文件进行确定性的 tree-sitter + 正则提取。按文件 SHA256 缓存于 `<output>/cache/`。
-3. **语义提取（第二遍）** — 对文档/论文进行并发 Claude API 提取（使用 `--no-llm` 或 `--code-only` 时跳过）。需要设置 `ANTHROPIC_API_KEY` 环境变量。并发数 = `min(--jobs, 8)`，默认 4。
+3. **语义提取（第二遍）** — 对文档/论文进行并发 LLM 提取（使用 `--no-llm` 或 `--code-only` 时跳过）。支持 Anthropic、OpenAI、Ollama 和 OpenAI 兼容端点。通过 `graphify.toml` 的 `[llm]` 段配置，或设置 `ANTHROPIC_API_KEY` 环境变量以向后兼容。并发数 = `min(--jobs, 8)`，默认 4。
 4. **构建图谱** — 组装节点和边，去重。
 5. **社区聚类** — Leiden 社区检测 + 内聚度评分。
 6. **分析** — God 节点、意外连接、建议问题。
@@ -198,6 +198,8 @@ graphify-rs watch --path src --output my-graph
 ### `graphify-rs serve`
 
 启动 MCP（Model Context Protocol）服务器，通过 JSON-RPC 2.0（stdio）提供服务。提供 15 个 AI 智能体可直接调用的工具。
+
+如果指定的图谱文件不存在，`serve` 会自动对当前目录执行快速 AST-only 构建（`--no-llm --code-only --format json`）后再启动服务器。这意味着 `graphify-rs serve` 可以作为零配置入口——无需手动执行 `build` 步骤。
 
 #### 参数
 
@@ -563,6 +565,47 @@ graphify-rs save-result \
 | `code_only` | `bool` | `false` | `--code-only` | 仅处理代码文件（跳过文档/论文）。 |
 | `formats` | `String[]` | `[]`（所有格式） | `--format` | 要生成的导出格式。 |
 
+### LLM 配置（`[llm]`）
+
+配置语义提取（第二遍）的 LLM 提供者。当此段不存在时，回退到 `ANTHROPIC_API_KEY` 环境变量以向后兼容。
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `provider` | `String` | *必填* | LLM 提供者：`anthropic`、`openai`、`ollama` 或 `openai_compatible`。 |
+| `model` | `String` | *必填* | 模型名称（如 `claude-sonnet-4.6`、`gpt-4o`、`llama3`）。无默认值。 |
+| `anthropic_api_key` | `String` | 环境变量 `ANTHROPIC_API_KEY` | Anthropic API 密钥。依次回退到环境变量、Claude Code OAuth 令牌。 |
+| `anthropic_base_url` | `String` | `https://api.anthropic.com` | 覆盖 Anthropic API 端点。 |
+| `openai_api_key` | `String` | 环境变量 `OPENAI_API_KEY` | OpenAI API 密钥。回退到环境变量。 |
+| `openai_base_url` | `String` | `https://api.openai.com/v1` | 覆盖 OpenAI API 端点。 |
+| `ollama_base_url` | `String` | `http://localhost:11434` | 覆盖 Ollama API 端点。 |
+| `openai_compatible_api_key` | `String` | — | OpenAI 兼容端点的可选 API 密钥。 |
+| `openai_compatible_base_url` | `String` | *必填* | OpenAI 兼容端点的基础 URL（如 vLLM、LM Studio）。 |
+
+### LLM 示例
+
+```toml
+# 使用 Anthropic Claude + OAuth（如已通过 Claude Code 登录则无需 API 密钥）
+[llm]
+provider = "anthropic"
+model = "claude-sonnet-4.6"
+
+# 使用 OpenAI GPT-4o
+[llm]
+provider = "openai"
+model = "gpt-4o"
+
+# 使用本地 Ollama
+[llm]
+provider = "ollama"
+model = "llama3"
+
+# 使用自定义 OpenAI 兼容端点（vLLM、LM Studio 等）
+[llm]
+provider = "openai_compatible"
+model = "my-fine-tuned-model"
+openai_compatible_base_url = "http://localhost:8000/v1"
+```
+
 ### 优先级规则
 
 1. **CLI 参数**始终具有最高优先级。
@@ -581,7 +624,7 @@ graphify-rs save-result \
 # 始终输出到自定义目录
 output = "knowledge-graph"
 
-# 默认跳过 Claude API 调用
+# 默认跳过 LLM 调用
 no_llm = true
 
 # 只生成 JSON 和 HTML
@@ -592,7 +635,8 @@ formats = ["json", "html"]
 
 | 变量 | 说明 |
 |------|------|
-| `ANTHROPIC_API_KEY` | 语义提取（第二遍）所需。没有此变量时，文档/论文文件仅运行 AST 提取。 |
+| `ANTHROPIC_API_KEY` | Anthropic Claude 的 API 密钥（第二遍）。当 `[llm]` 配置段不存在时也作为回退使用。 |
+| `OPENAI_API_KEY` | OpenAI 的 API 密钥（第二遍）。回退自 `[llm]` 配置中的 `openai_api_key`。 |
 | `RUST_LOG` | 日志级别过滤器（默认：`warn`）。被 `-v`（`debug`）或 `-q`（`error`）覆盖。 |
 
 ---

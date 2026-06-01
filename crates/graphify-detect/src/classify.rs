@@ -11,10 +11,6 @@ use crate::constants::{
     PAPER_PEEK_CHARS, PAPER_SIGNAL_THRESHOLD, PAPER_SIGNALS,
 };
 
-// ---------------------------------------------------------------------------
-// FileType
-// ---------------------------------------------------------------------------
-
 /// The broad category a file belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -40,20 +36,12 @@ impl std::fmt::Display for FileType {
     }
 }
 
-// ---------------------------------------------------------------------------
-// DetectedFile
-// ---------------------------------------------------------------------------
-
 /// A discovered file together with its classification.
 #[derive(Debug, Clone)]
 pub struct DetectedFile {
     pub path: std::path::PathBuf,
     pub file_type: FileType,
 }
-
-// ---------------------------------------------------------------------------
-// classify_file
-// ---------------------------------------------------------------------------
 
 /// Classify a file by its extension (and, for ambiguous cases, a peek at its
 /// content).  Returns `None` if the file type is not recognised.
@@ -65,7 +53,6 @@ pub fn classify_file(path: &Path) -> Option<FileType> {
     }
 
     if PAPER_EXTENSIONS.contains(&ext.as_str()) {
-        // PDFs inside Xcode asset catalogs are treated as images, skip them.
         if is_inside_xcode_asset(path) {
             return None;
         }
@@ -73,7 +60,6 @@ pub fn classify_file(path: &Path) -> Option<FileType> {
     }
 
     if DOC_EXTENSIONS.contains(&ext.as_str()) {
-        // Text files that look like academic papers get classified as Paper.
         if looks_like_paper(path) {
             return Some(FileType::Paper);
         }
@@ -81,7 +67,6 @@ pub fn classify_file(path: &Path) -> Option<FileType> {
     }
 
     if IMAGE_EXTENSIONS.contains(&ext.as_str()) {
-        // Images inside Xcode asset catalogs are skipped.
         if is_inside_xcode_asset(path) {
             return None;
         }
@@ -94,10 +79,6 @@ pub fn classify_file(path: &Path) -> Option<FileType> {
 
     None
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 /// Return the lowercase extension including the leading dot, e.g. `".rs"`.
 fn extension_lower(path: &Path) -> Option<String> {
@@ -121,21 +102,23 @@ fn is_inside_xcode_asset(path: &Path) -> bool {
 /// Heuristic: read the first N chars and count regex hits from [`PAPER_SIGNALS`].
 /// Returns `true` when the hit count reaches [`PAPER_SIGNAL_THRESHOLD`].
 fn looks_like_paper(path: &Path) -> bool {
-    let content = match fs::read_to_string(path) {
-        Ok(s) => s,
+    use std::io::Read;
+    let mut file = match fs::File::open(path) {
+        Ok(f) => f,
         Err(_) => return false,
     };
-
-    let peek: &str = if content.len() > PAPER_PEEK_CHARS {
-        // Find a valid char boundary at or before PAPER_PEEK_CHARS
-        let mut end = PAPER_PEEK_CHARS;
-        while end > 0 && !content.is_char_boundary(end) {
-            end -= 1;
-        }
-        &content[..end]
-    } else {
-        &content
+    let mut buf = vec![0u8; PAPER_PEEK_CHARS];
+    let n = match file.read(&mut buf) {
+        Ok(n) => n,
+        Err(_) => return false,
     };
+    buf.truncate(n);
+
+    let mut end = n;
+    while end > 0 && std::str::from_utf8(&buf[..end]).is_err() {
+        end -= 1;
+    }
+    let peek = std::str::from_utf8(&buf[..end]).unwrap_or("");
 
     let mut hits = 0usize;
     for pattern in PAPER_SIGNALS {
@@ -150,10 +133,6 @@ fn looks_like_paper(path: &Path) -> bool {
     }
     false
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -177,7 +156,6 @@ mod tests {
 
     #[test]
     fn classify_doc_extensions() {
-        // Non-existent files: looks_like_paper returns false -> Document
         for ext in &[".md", ".txt", ".rst"] {
             let p = PathBuf::from(format!("README{ext}"));
             assert_eq!(

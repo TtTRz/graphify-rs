@@ -49,25 +49,21 @@ pub async fn ingest_url(url: &str, output_dir: &Path) -> Result<PathBuf, IngestE
 
 /// Ingest an arXiv page: fetch the abstract page and extract metadata.
 async fn ingest_arxiv(client: &Client, url: &str, out: &Path) -> Result<PathBuf, IngestError> {
-    // Normalize: convert /pdf/ URLs to /abs/ for the abstract page
     let abs_url = url.replace("/pdf/", "/abs/");
 
     let response = client.get(&abs_url).send().await?;
     let html = response.text().await?;
 
-    // Extract arXiv ID from URL
     let arxiv_id = abs_url
         .split('/')
         .next_back()
         .unwrap_or("unknown")
         .trim_end_matches(".pdf");
 
-    // Extract title
     let title = extract_between(&html, "<title>", "</title>")
-        .unwrap_or_else(|| format!("arXiv:{}", arxiv_id));
+        .unwrap_or_else(|| format!("arXiv:{arxiv_id}"));
     let title = strip_html_tags(&title).trim().to_string();
 
-    // Extract abstract
     let abstract_text = extract_between(
         &html,
         "<blockquote class=\"abstract mathjax\">",
@@ -82,8 +78,7 @@ async fn ingest_arxiv(client: &Client, url: &str, out: &Path) -> Result<PathBuf,
     std::fs::create_dir_all(out)?;
 
     let content = format!(
-        "---\nsource: {}\ntype: arxiv\narxiv_id: {}\ntitle: \"{}\"\n---\n\n# {}\n\n## Abstract\n\n{}\n",
-        url, arxiv_id, title, title, abstract_text
+        "---\nsource: {url}\ntype: arxiv\narxiv_id: {arxiv_id}\ntitle: \"{title}\"\n---\n\n# {title}\n\n## Abstract\n\n{abstract_text}\n"
     );
     std::fs::write(&path, content)?;
 
@@ -115,10 +110,9 @@ async fn ingest_tweet(client: &Client, url: &str, out: &Path) -> Result<PathBuf,
         let text = strip_html_tags(&html_content);
         (author, text)
     } else {
-        ("unknown".to_string(), format!("Tweet from: {}", url))
+        ("unknown".to_string(), format!("Tweet from: {url}"))
     };
 
-    // Extract tweet ID from URL
     let tweet_id = url
         .split('/')
         .next_back()
@@ -153,7 +147,7 @@ async fn ingest_pdf(client: &Client, url: &str, out: &Path) -> Result<PathBuf, I
     let filename = if filename.ends_with(".pdf") {
         filename.to_string()
     } else {
-        format!("{}.pdf", filename)
+        format!("{filename}.pdf")
     };
 
     let path = out.join(&filename);
@@ -174,18 +168,16 @@ async fn ingest_webpage(client: &Client, url: &str, out: &Path) -> Result<PathBu
     let response = client.get(url).send().await?;
     let html = response.text().await?;
 
-    // Extract title
     let title = extract_between(&html, "<title>", "</title>")
         .map(|t| strip_html_tags(&t))
         .unwrap_or_default();
 
-    // Strip script and style tags first, then all HTML
     let text = strip_scripts_and_styles(&html);
     let text = strip_html_tags(&text);
     let text = collapse_whitespace(&text);
 
     let filename = sanitize_filename(url);
-    let path = out.join(format!("{}.md", filename));
+    let path = out.join(format!("{filename}.md"));
     std::fs::create_dir_all(out)?;
 
     let content = format!(
@@ -219,24 +211,19 @@ pub fn save_query_result(
         .unwrap_or_default()
         .as_secs();
 
-    let filename = format!("{}_{}.md", query_type, timestamp);
+    let filename = format!("{query_type}_{timestamp}.md");
     let path = memory_dir.join(&filename);
 
     let nodes_str = source_nodes.map(|n| n.join(", ")).unwrap_or_default();
 
     let content = format!(
-        "---\ntype: {}\ntimestamp: {}\nnodes: [{}]\n---\n\n## Question\n\n{}\n\n## Answer\n\n{}\n",
-        query_type, timestamp, nodes_str, question, answer
+        "---\ntype: {query_type}\ntimestamp: {timestamp}\nnodes: [{nodes_str}]\n---\n\n## Question\n\n{question}\n\n## Answer\n\n{answer}\n"
     );
     std::fs::write(&path, content)?;
 
     info!("Saved query result: {} -> {}", query_type, path.display());
     Ok(path)
 }
-
-// ---------------------------------------------------------------------------
-// HTML helpers
-// ---------------------------------------------------------------------------
 
 /// Extract text between two delimiters in a string.
 fn extract_between(haystack: &str, start: &str, end: &str) -> Option<String> {
@@ -247,24 +234,31 @@ fn extract_between(haystack: &str, start: &str, end: &str) -> Option<String> {
 
 /// Strip `<script>` and `<style>` blocks from HTML.
 fn strip_scripts_and_styles(html: &str) -> String {
-    let re_script = Regex::new(r"(?is)<script[^>]*>.*?</script>").unwrap();
-    let re_style = Regex::new(r"(?is)<style[^>]*>.*?</style>").unwrap();
-    let result = re_script.replace_all(html, "");
-    re_style.replace_all(&result, "").to_string()
+    static RE_SCRIPT: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        Regex::new(r"(?is)<script[^>]*>.*?</script>").expect("valid regex")
+    });
+    static RE_STYLE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        Regex::new(r"(?is)<style[^>]*>.*?</style>").expect("valid regex")
+    });
+    let result = RE_SCRIPT.replace_all(html, "");
+    RE_STYLE.replace_all(&result, "").to_string()
 }
 
 /// Strip all HTML tags from a string.
 fn strip_html_tags(html: &str) -> String {
-    let re = Regex::new(r"<[^>]+>").unwrap();
-    re.replace_all(html, "").to_string()
+    static RE: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"<[^>]+>").expect("valid regex"));
+    RE.replace_all(html, "").to_string()
 }
 
 /// Collapse multiple whitespace/newlines into single spaces or newlines.
 fn collapse_whitespace(text: &str) -> String {
-    let re = Regex::new(r"[ \t]+").unwrap();
-    let result = re.replace_all(text, " ");
-    let re_nl = Regex::new(r"\n{3,}").unwrap();
-    re_nl.replace_all(&result, "\n\n").to_string()
+    static RE_WS: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"[ \t]+").expect("valid regex"));
+    static RE_NL: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"\n{3,}").expect("valid regex"));
+    let result = RE_WS.replace_all(text, " ");
+    RE_NL.replace_all(&result, "\n\n").to_string()
 }
 
 /// Sanitize a URL or string into a safe filename.
@@ -278,10 +272,6 @@ fn sanitize_filename(input: &str) -> String {
         .take(80)
         .collect()
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

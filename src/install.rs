@@ -7,8 +7,6 @@ use crate::skill::SKILL_CONTENT;
 /// Current package version for staleness checks.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-// ── Platform configs ──
-
 struct PlatformConfig {
     skill_dst: &'static str,
     register_claude_md: bool,
@@ -18,79 +16,75 @@ const PLATFORMS: &[(&str, PlatformConfig)] = &[
     (
         "claude",
         PlatformConfig {
-            skill_dst: ".claude/skills/graphify/SKILL.md",
+            skill_dst: ".claude/skills/graphify-rs/SKILL.md",
             register_claude_md: true,
         },
     ),
     (
         "codex",
         PlatformConfig {
-            skill_dst: ".agents/skills/graphify/SKILL.md",
+            skill_dst: ".agents/skills/graphify-rs/SKILL.md",
             register_claude_md: false,
         },
     ),
     (
         "opencode",
         PlatformConfig {
-            skill_dst: ".config/opencode/skills/graphify/SKILL.md",
+            skill_dst: ".config/opencode/skills/graphify-rs/SKILL.md",
             register_claude_md: false,
         },
     ),
     (
         "claw",
         PlatformConfig {
-            skill_dst: ".claw/skills/graphify/SKILL.md",
+            skill_dst: ".claw/skills/graphify-rs/SKILL.md",
             register_claude_md: false,
         },
     ),
     (
         "droid",
         PlatformConfig {
-            skill_dst: ".factory/skills/graphify/SKILL.md",
+            skill_dst: ".factory/skills/graphify-rs/SKILL.md",
             register_claude_md: false,
         },
     ),
     (
         "trae",
         PlatformConfig {
-            skill_dst: ".trae/skills/graphify/SKILL.md",
+            skill_dst: ".trae/skills/graphify-rs/SKILL.md",
             register_claude_md: false,
         },
     ),
     (
         "trae-cn",
         PlatformConfig {
-            skill_dst: ".trae-cn/skills/graphify/SKILL.md",
+            skill_dst: ".trae-cn/skills/graphify-rs/SKILL.md",
             register_claude_md: false,
         },
     ),
     (
         "codebuddy",
         PlatformConfig {
-            skill_dst: ".codebuddy/skills/graphify/SKILL.md",
+            skill_dst: ".codebuddy/skills/graphify-rs/SKILL.md",
             register_claude_md: false,
         },
     ),
     (
         "windows",
         PlatformConfig {
-            skill_dst: ".claude/skills/graphify/SKILL.md",
+            skill_dst: ".claude/skills/graphify-rs/SKILL.md",
             register_claude_md: true,
         },
     ),
 ];
 
-// ── Registration text for ~/.claude/CLAUDE.md ──
-
 const SKILL_REGISTRATION: &str = r#"
 # graphify
-- **graphify** (`~/.claude/skills/graphify/SKILL.md`) - any input to knowledge graph. Trigger: `/graphify`
-When the user types `/graphify`, invoke the Skill tool with `skill: "graphify"` before doing anything else.
+- **graphify-rs** (`~/.claude/skills/graphify-rs/SKILL.md`) - any input to knowledge graph. Trigger: `/graphify-rs`
+When the user types `/graphify-rs`, invoke the Skill tool with `skill: "graphify-rs"` before doing anything else.
 "#;
 
-// ── Project-level CLAUDE.md section ──
-
-const CLAUDE_MD_SECTION: &str = r#"## graphify
+const CLAUDE_MD_SECTION: &str = r"## graphify
 
 This project has a graphify-rs knowledge graph at graphify-out/.
 
@@ -98,13 +92,11 @@ Rules:
 - Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
 - If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
 - After modifying code files in this session, run `graphify-rs build --path . --output graphify-out --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s)
-"#;
+";
 
 const CLAUDE_MD_MARKER: &str = "## graphify";
 
-// ── AGENTS.md section (for non-claude platforms) ──
-
-const AGENTS_MD_SECTION: &str = r#"## graphify
+const AGENTS_MD_SECTION: &str = r"## graphify
 
 This project has a graphify-rs knowledge graph at graphify-out/.
 
@@ -112,11 +104,9 @@ Rules:
 - Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
 - If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
 - After modifying code files in this session, run `graphify-rs build --path . --output graphify-out --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s)
-"#;
+";
 
 const AGENTS_MD_MARKER: &str = "## graphify";
-
-// ── Public API ──
 
 /// Check all known skill install locations for stale versions.
 /// Call this on startup (before executing any subcommand).
@@ -136,8 +126,7 @@ pub fn check_skill_versions() {
                 let installed = installed.trim();
                 if !installed.is_empty() && installed != VERSION {
                     eprintln!(
-                        "  warning: skill is from graphify-rs {}, package is {}. Run 'graphify-rs install' to update.",
-                        installed, VERSION
+                        "  warning: skill is from graphify-rs {installed}, package is {VERSION}. Run 'graphify-rs install' to update."
                     );
                     return; // Only warn once
                 }
@@ -164,44 +153,38 @@ pub fn install_skill(platform: &str) -> Result<()> {
     let home = home_dir()?;
     let skill_path = home.join(config.skill_dst);
 
-    // Create parent directories
     if let Some(parent) = skill_path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create directory {}", parent.display()))?;
     }
 
-    // Write skill file
     fs::write(&skill_path, SKILL_CONTENT)
         .with_context(|| format!("Failed to write skill file to {}", skill_path.display()))?;
     println!("  Wrote skill file to {}", skill_path.display());
 
-    // Write version stamp for staleness detection
     if let Some(parent) = skill_path.parent() {
         let version_file = parent.join(".graphify_version");
         let _ = fs::write(&version_file, VERSION);
     }
 
-    // Register in CLAUDE.md if needed
     if config.register_claude_md {
         let claude_md_path = home.join(".claude/CLAUDE.md");
         register_in_file(&claude_md_path, SKILL_REGISTRATION, "# graphify")?;
         println!("  Registered in {}", claude_md_path.display());
     }
 
-    println!("\n  Installed graphify skill for '{}'.", platform);
-    println!("  Use `/graphify` in your AI assistant to trigger the skill.");
+    println!("\n  Installed graphify skill for '{platform}'.");
+    println!("  Use `/graphify-rs` in your AI assistant to trigger the skill.");
 
     Ok(())
 }
 
 /// `graphify-rs claude install` — project-level Claude integration.
 pub fn claude_install(project_root: &Path) -> Result<()> {
-    // 1. Append section to ./CLAUDE.md
     let claude_md = project_root.join("CLAUDE.md");
     append_section(&claude_md, CLAUDE_MD_SECTION, CLAUDE_MD_MARKER)?;
     println!("  Updated {}", claude_md.display());
 
-    // 2. Write PreToolUse hook to .claude/settings.json
     let settings_path = project_root.join(".claude/settings.json");
     write_claude_settings_hook(&settings_path)?;
     println!("  Wrote hook to {}", settings_path.display());
@@ -212,12 +195,10 @@ pub fn claude_install(project_root: &Path) -> Result<()> {
 
 /// `graphify-rs claude uninstall` — remove project-level Claude integration.
 pub fn claude_uninstall(project_root: &Path) -> Result<()> {
-    // 1. Remove section from ./CLAUDE.md
     let claude_md = project_root.join("CLAUDE.md");
     remove_section(&claude_md, CLAUDE_MD_MARKER)?;
     println!("  Cleaned {}", claude_md.display());
 
-    // 2. Remove hook from .claude/settings.json
     let settings_path = project_root.join(".claude/settings.json");
     remove_claude_settings_hook(&settings_path)?;
     println!("  Cleaned {}", settings_path.display());
@@ -228,12 +209,10 @@ pub fn claude_uninstall(project_root: &Path) -> Result<()> {
 
 /// `graphify-rs codebuddy install` — project-level CodeBuddy integration.
 pub fn codebuddy_install(project_root: &Path) -> Result<()> {
-    // 1. Append section to ./AGENTS.md
     let agents_md = project_root.join("AGENTS.md");
     append_section(&agents_md, AGENTS_MD_SECTION, AGENTS_MD_MARKER)?;
     println!("  Updated {}", agents_md.display());
 
-    // 2. Write PreToolUse hook to .codebuddy/settings.json
     let settings_path = project_root.join(".codebuddy/settings.json");
     write_codebuddy_settings_hook(&settings_path)?;
     println!("  Wrote hook to {}", settings_path.display());
@@ -244,12 +223,10 @@ pub fn codebuddy_install(project_root: &Path) -> Result<()> {
 
 /// `graphify-rs codebuddy uninstall` — remove project-level CodeBuddy integration.
 pub fn codebuddy_uninstall(project_root: &Path) -> Result<()> {
-    // 1. Remove section from ./AGENTS.md
     let agents_md = project_root.join("AGENTS.md");
     remove_section(&agents_md, AGENTS_MD_MARKER)?;
     println!("  Cleaned {}", agents_md.display());
 
-    // 2. Remove hook from .codebuddy/settings.json
     let settings_path = project_root.join(".codebuddy/settings.json");
     remove_codebuddy_settings_hook(&settings_path)?;
     println!("  Cleaned {}", settings_path.display());
@@ -264,7 +241,6 @@ pub fn codex_install(project_root: &Path) -> Result<()> {
     append_section(&agents_md, AGENTS_MD_SECTION, AGENTS_MD_MARKER)?;
     println!("  Updated {}", agents_md.display());
 
-    // Write hook to .codex/hooks.json
     let hooks_path = project_root.join(".codex/hooks.json");
     write_codex_hooks(&hooks_path)?;
     println!("  Wrote hook to {}", hooks_path.display());
@@ -295,12 +271,10 @@ pub fn opencode_install(project_root: &Path) -> Result<()> {
     append_section(&agents_md, AGENTS_MD_SECTION, AGENTS_MD_MARKER)?;
     println!("  Updated {}", agents_md.display());
 
-    // Write plugin
     let plugin_path = project_root.join(".opencode/plugins/graphify.js");
     write_opencode_plugin(&plugin_path)?;
     println!("  Wrote plugin to {}", plugin_path.display());
 
-    // Register in opencode.json
     let config_path = project_root.join("opencode.json");
     register_opencode_config(&config_path)?;
     println!("  Updated {}", config_path.display());
@@ -321,7 +295,6 @@ pub fn opencode_uninstall(project_root: &Path) -> Result<()> {
         println!("  Removed {}", plugin_path.display());
     }
 
-    // Remove from opencode.json
     let config_path = project_root.join("opencode.json");
     unregister_opencode_config(&config_path)?;
     println!("  Cleaned {}", config_path.display());
@@ -335,7 +308,7 @@ pub fn generic_platform_install(project_root: &Path, platform: &str) -> Result<(
     let agents_md = project_root.join("AGENTS.md");
     append_section(&agents_md, AGENTS_MD_SECTION, AGENTS_MD_MARKER)?;
     println!("  Updated {}", agents_md.display());
-    println!("\n  {} integration installed.", platform);
+    println!("\n  {platform} integration installed.");
     Ok(())
 }
 
@@ -344,11 +317,9 @@ pub fn generic_platform_uninstall(project_root: &Path, platform: &str) -> Result
     let agents_md = project_root.join("AGENTS.md");
     remove_section(&agents_md, AGENTS_MD_MARKER)?;
     println!("  Cleaned {}", agents_md.display());
-    println!("\n  {} integration uninstalled.", platform);
+    println!("\n  {platform} integration uninstalled.");
     Ok(())
 }
-
-// ── Helpers ──
 
 fn home_dir() -> Result<std::path::PathBuf> {
     dirs::home_dir().context("Could not determine home directory")
@@ -403,20 +374,17 @@ fn remove_section(path: &Path, marker: &str) -> Result<()> {
             continue;
         }
         if skipping {
-            // Stop skipping at next ## heading or end
             if line.starts_with("## ") {
                 skipping = false;
                 result.push_str(line);
                 result.push('\n');
             }
-            // else: skip this line
             continue;
         }
         result.push_str(line);
         result.push('\n');
     }
 
-    // Trim trailing whitespace
     let trimmed = result.trim_end().to_string() + "\n";
     fs::write(path, trimmed)?;
     Ok(())
@@ -469,7 +437,6 @@ fn write_claude_settings_hook(path: &Path) -> Result<()> {
         }]
     });
 
-    // Ensure hooks.PreToolUse exists as an array
     let hooks = settings
         .as_object_mut()
         .context("settings is not an object")?
@@ -485,7 +452,6 @@ fn write_claude_settings_hook(path: &Path) -> Result<()> {
         .as_array_mut()
         .context("PreToolUse is not an array")?;
 
-    // Check if already present (by matcher)
     let already = arr
         .iter()
         .any(|v| v.get("matcher").and_then(|m| m.as_str()) == Some("Glob|Grep"));
@@ -542,7 +508,6 @@ fn write_codebuddy_settings_hook(path: &Path) -> Result<()> {
         }]
     });
 
-    // Ensure hooks.PreToolUse exists as an array
     let hooks = settings
         .as_object_mut()
         .context("settings is not an object")?
@@ -558,7 +523,6 @@ fn write_codebuddy_settings_hook(path: &Path) -> Result<()> {
         .as_array_mut()
         .context("PreToolUse is not an array")?;
 
-    // Check if already present (by matcher)
     let already = arr
         .iter()
         .any(|v| v.get("matcher").and_then(|m| m.as_str()) == Some("Glob|Grep"));

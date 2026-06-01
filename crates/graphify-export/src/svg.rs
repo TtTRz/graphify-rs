@@ -41,28 +41,21 @@ pub fn export_svg(
         let mut svg = String::new();
         write!(
             svg,
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\">",
-            SVG_WIDTH, SVG_HEIGHT
-        )
-        .unwrap();
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{SVG_WIDTH}\" height=\"{SVG_HEIGHT}\">"
+        )?;
         write!(
             svg,
-            "<rect width=\"100%\" height=\"100%\" fill=\"{}\"/>",
-            BG_COLOR
-        )
-        .unwrap();
+            "<rect width=\"100%\" height=\"100%\" fill=\"{BG_COLOR}\"/>"
+        )?;
         write!(
             svg,
-            "<text x=\"50%\" y=\"50%\" fill=\"{}\" text-anchor=\"middle\" font-family=\"sans-serif\">Empty graph</text>",
-            TEXT_COLOR
-        )
-        .unwrap();
+            "<text x=\"50%\" y=\"50%\" fill=\"{TEXT_COLOR}\" text-anchor=\"middle\" font-family=\"sans-serif\">Empty graph</text>"
+        )?;
         svg.push_str("</svg>");
         fs::write(&path, &svg)?;
         return Ok(path);
     }
 
-    // Reverse map: node_id → community_id
     let mut node_community: HashMap<&str, usize> = HashMap::new();
     for (&cid, members) in communities {
         for nid in members {
@@ -70,7 +63,6 @@ pub fn export_svg(
         }
     }
 
-    // Assign positions in a circle
     let n = nodes.len();
     let cx = SVG_WIDTH / 2.0;
     let cy = SVG_HEIGHT / 2.0;
@@ -87,18 +79,13 @@ pub fn export_svg(
     let mut svg = String::with_capacity(4096);
     writeln!(
         svg,
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" viewBox=\"0 0 {} {}\">",
-        SVG_WIDTH, SVG_HEIGHT, SVG_WIDTH, SVG_HEIGHT
-    )
-    .unwrap();
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{SVG_WIDTH}\" height=\"{SVG_HEIGHT}\" viewBox=\"0 0 {SVG_WIDTH} {SVG_HEIGHT}\">"
+    )?;
     writeln!(
         svg,
-        "<rect width=\"100%\" height=\"100%\" fill=\"{}\"/>",
-        BG_COLOR
-    )
-    .unwrap();
+        "<rect width=\"100%\" height=\"100%\" fill=\"{BG_COLOR}\"/>"
+    )?;
 
-    // Edges
     for edge in &edges {
         if let (Some(&(x1, y1)), Some(&(x2, y2))) = (
             positions.get(edge.source.as_str()),
@@ -106,32 +93,31 @@ pub fn export_svg(
         ) {
             writeln!(
                 svg,
-                "<line x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"{}\" stroke-width=\"0.5\" stroke-opacity=\"0.6\"/>",
-                x1, y1, x2, y2, EDGE_COLOR
-            )
-            .unwrap();
+                "<line x1=\"{x1:.1}\" y1=\"{y1:.1}\" x2=\"{x2:.1}\" y2=\"{y2:.1}\" stroke=\"{EDGE_COLOR}\" stroke-width=\"0.5\" stroke-opacity=\"0.6\"/>"
+            )?;
         }
     }
 
-    // Nodes
     for node in &nodes {
         if let Some(&(x, y)) = positions.get(node.id.as_str()) {
             let cid = node
                 .community
                 .or_else(|| node_community.get(node.id.as_str()).copied());
-            let color = cid
-                .map(|c| COMMUNITY_COLORS[c % COMMUNITY_COLORS.len()])
-                .unwrap_or(FALLBACK_COLOR);
+            let color = cid.map_or(FALLBACK_COLOR, |c| {
+                COMMUNITY_COLORS[c % COMMUNITY_COLORS.len()]
+            });
             writeln!(
                 svg,
                 "<circle cx=\"{:.1}\" cy=\"{:.1}\" r=\"{}\" fill=\"{}\" opacity=\"0.85\"><title>{}</title></circle>",
-                x, y, NODE_RADIUS, color, svg_escape(&node.label)
-            )
-            .unwrap();
+                x,
+                y,
+                NODE_RADIUS,
+                color,
+                svg_escape(&node.label)
+            )?;
         }
     }
 
-    // Labels for small graphs
     if n <= 50 {
         for node in &nodes {
             if let Some(&(x, y)) = positions.get(node.id.as_str()) {
@@ -142,8 +128,7 @@ pub fn export_svg(
                     y - NODE_RADIUS - 3.0,
                     LABEL_COLOR,
                     svg_escape(&node.label)
-                )
-                .unwrap();
+                )?;
             }
         }
     }

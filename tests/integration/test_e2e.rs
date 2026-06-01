@@ -723,32 +723,25 @@ fn test_all_export_formats() {
     let surprise_list = graphify_analyze::surprising_connections(&graph, &communities, 3);
     let questions = graphify_analyze::suggest_questions(&graph, &communities, &community_labels, 3);
     let detection_json = serde_json::json!({"total_files": 1, "total_words": 50, "warning": null});
-    let god_json: Vec<serde_json::Value> = god_list
-        .iter()
-        .map(|g| serde_json::json!({"label": g.label, "edges": g.degree}))
-        .collect();
-    let surprise_json: Vec<serde_json::Value> = surprise_list
-        .iter()
-        .map(|s| serde_json::to_value(s).unwrap_or_default())
-        .collect();
     let question_json: Vec<serde_json::Value> = questions
         .iter()
         .map(|q| serde_json::to_value(q).unwrap_or_default())
         .collect();
     let token_cost: HashMap<String, usize> =
         HashMap::from([("input".into(), 0), ("output".into(), 0)]);
-    let report = graphify_export::generate_report(
-        &graph,
-        &communities,
-        &cohesion,
-        &community_labels,
-        &god_json,
-        &surprise_json,
-        &detection_json,
-        &token_cost,
-        ".",
-        Some(&question_json),
-    );
+    let report = graphify_export::generate_report(&graphify_export::ReportInput {
+        graph: &graph,
+        communities: &communities,
+        cohesion_scores: &cohesion,
+        community_labels: &community_labels,
+        god_nodes: &god_list,
+        surprises: &surprise_list,
+        detection_result: &detection_json,
+        token_cost: &token_cost,
+        root: ".",
+        suggested_questions: Some(&question_json),
+    })
+    .unwrap();
     assert!(
         report.contains("Graph Analysis Report"),
         "report should have header"

@@ -11,10 +11,6 @@ use std::path::Path;
 
 use globset::{Glob, GlobMatcher};
 
-// ---------------------------------------------------------------------------
-// load_graphifyignore
-// ---------------------------------------------------------------------------
-
 /// Read `.graphifyignore` from `root` and return the raw pattern strings.
 ///
 /// Returns an empty vec if the file does not exist.
@@ -27,15 +23,11 @@ pub fn load_graphifyignore(root: &Path) -> Vec<String> {
 
     content
         .lines()
-        .map(|l| l.trim())
+        .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .map(|l| l.to_string())
+        .map(std::string::ToString::to_string)
         .collect()
 }
-
-// ---------------------------------------------------------------------------
-// IgnoreSet
-// ---------------------------------------------------------------------------
 
 /// Pre-compiled set of ignore matchers for efficient repeated checks.
 pub struct IgnoreSet {
@@ -66,11 +58,9 @@ impl IgnoreSet {
             .unwrap_or_default();
 
         for (pattern, matcher) in &self.matchers {
-            // Match against full relative path
             if matcher.is_match(rel) {
                 return true;
             }
-            // Match against the relative path as a string
             if matcher.is_match(rel_str.as_ref()) {
                 return true;
             }
@@ -91,10 +81,6 @@ impl IgnoreSet {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Convenience function
-// ---------------------------------------------------------------------------
-
 /// Check if a path is ignored given raw patterns (builds a fresh [`IgnoreSet`]).
 ///
 /// If you are checking many paths, prefer constructing an [`IgnoreSet`] once
@@ -103,10 +89,6 @@ pub fn is_ignored(path: &Path, root: &Path, patterns: &[String]) -> bool {
     let set = IgnoreSet::new(patterns);
     set.is_ignored(path, root)
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

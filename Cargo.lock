@@ -3,6 +3,18 @@
 version = 4
 
 [[package]]
+name = "ahash"
+version = "0.8.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
+dependencies = [
+ "cfg-if",
+ "once_cell",
+ "version_check",
+ "zerocopy",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -453,6 +465,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fallible-iterator"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
+
+[[package]]
+name = "fallible-streaming-iterator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
+
+[[package]]
 name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -603,7 +627,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-analyze"
-version = "0.4.5"
+version = "0.5.3"
 dependencies = [
  "graphify-core",
  "petgraph",
@@ -615,7 +639,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-benchmark"
-version = "0.4.5"
+version = "0.5.3"
 dependencies = [
  "graphify-core",
  "serde",
@@ -627,17 +651,19 @@ dependencies = [
 
 [[package]]
 name = "graphify-build"
-version = "0.4.5"
+version = "0.5.3"
 dependencies = [
  "graphify-core",
- "petgraph",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tracing",
 ]
 
 [[package]]
 name = "graphify-cache"
-version = "0.4.5"
+version = "0.5.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -649,18 +675,17 @@ dependencies = [
 
 [[package]]
 name = "graphify-cluster"
-version = "0.4.5"
+version = "0.5.3"
 dependencies = [
  "graphify-core",
  "petgraph",
- "rand",
  "thiserror 2.0.18",
  "tracing",
 ]
 
 [[package]]
 name = "graphify-core"
-version = "0.4.5"
+version = "0.5.3"
 dependencies = [
  "petgraph",
  "serde",
@@ -671,9 +696,10 @@ dependencies = [
 
 [[package]]
 name = "graphify-detect"
-version = "0.4.5"
+version = "0.5.3"
 dependencies = [
  "globset",
+ "graphify-cache",
  "graphify-core",
  "regex",
  "serde",
@@ -686,11 +712,10 @@ dependencies = [
 
 [[package]]
 name = "graphify-export"
-version = "0.4.5"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "graphify-core",
- "minijinja",
  "serde",
  "serde_json",
  "tempfile",
@@ -700,9 +725,10 @@ dependencies = [
 
 [[package]]
 name = "graphify-extract"
-version = "0.4.5"
+version = "0.5.3"
 dependencies = [
  "anyhow",
+ "dirs",
  "graphify-cache",
  "graphify-core",
  "graphify-security",
@@ -711,8 +737,8 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
- "tokio",
  "tracing",
  "tree-sitter",
  "tree-sitter-c",
@@ -730,9 +756,8 @@ dependencies = [
 
 [[package]]
 name = "graphify-hooks"
-version = "0.4.5"
+version = "0.5.3"
 dependencies = [
- "anyhow",
  "graphify-core",
  "tempfile",
  "thiserror 2.0.18",
@@ -741,7 +766,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-ingest"
-version = "0.4.5"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "graphify-core",
@@ -759,7 +784,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-rs"
-version = "0.4.5"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -788,15 +813,14 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+ "tracing",
  "tracing-subscriber",
 ]
 
 [[package]]
 name = "graphify-security"
-version = "0.4.5"
+version = "0.5.3"
 dependencies = [
- "regex",
- "reqwest",
  "thiserror 2.0.18",
  "tracing",
  "url",
@@ -804,11 +828,11 @@ dependencies = [
 
 [[package]]
 name = "graphify-serve"
-version = "0.4.5"
+version = "0.5.3"
 dependencies = [
- "anyhow",
  "graphify-analyze",
  "graphify-core",
+ "graphify-security",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -818,7 +842,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-watch"
-version = "0.4.5"
+version = "0.5.3"
 dependencies = [
  "graphify-analyze",
  "graphify-build",
@@ -869,6 +893,15 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
+version = "0.14.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
+dependencies = [
+ "ahash",
+]
+
+[[package]]
+name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
@@ -881,6 +914,15 @@ name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
+
+[[package]]
+name = "hashlink"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ba4ff7128dee98c7dc9794b6a411377e1404dba1c97deb8d1a55297bd25d8af"
+dependencies = [
+ "hashbrown 0.14.5",
+]
 
 [[package]]
 name = "heck"
@@ -1273,6 +1315,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "libsqlite3-sys"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c10584274047cb335c23d3e61bcef8e323adae7c5c8c760540f73610177fc3f"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1306,26 +1359,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
-name = "memo-map"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38d1115007560874e373613744c6fba374c17688327a71c1476d1a5954cc857b"
-
-[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
-
-[[package]]
-name = "minijinja"
-version = "2.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "805bfd7352166bae857ee569628b52bcd85a1cecf7810861ebceb1686b72b75d"
-dependencies = [
- "memo-map",
- "serde",
-]
 
 [[package]]
 name = "mio"
@@ -1561,15 +1598,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ppv-lite86"
-version = "0.2.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
-dependencies = [
- "zerocopy",
-]
-
-[[package]]
 name = "prettyplease"
 version = "0.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1602,36 +1630,6 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
-
-[[package]]
-name = "rand"
-version = "0.8.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
-dependencies = [
- "libc",
- "rand_chacha",
- "rand_core",
-]
-
-[[package]]
-name = "rand_chacha"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
-dependencies = [
- "ppv-lite86",
- "rand_core",
-]
-
-[[package]]
-name = "rand_core"
-version = "0.6.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
-dependencies = [
- "getrandom 0.2.17",
-]
 
 [[package]]
 name = "rayon"
@@ -1745,6 +1743,20 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rusqlite"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b838eba278d213a8beaf485bd313fd580ca4505a00d5871caeb1457c55322cae"
+dependencies = [
+ "bitflags 2.11.0",
+ "fallible-iterator",
+ "fallible-streaming-iterator",
+ "hashlink",
+ "libsqlite3-sys",
+ "smallvec",
 ]
 
 [[package]]

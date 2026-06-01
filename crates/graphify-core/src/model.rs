@@ -4,10 +4,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::confidence::Confidence;
 
-// ---------------------------------------------------------------------------
-// NodeType
-// ---------------------------------------------------------------------------
-
 /// The kind of entity a graph node represents.
 ///
 /// Serialized as lowercase strings (e.g. `"class"`, `"function"`).
@@ -32,11 +28,30 @@ pub enum NodeType {
     Namespace,
 }
 
-// ---------------------------------------------------------------------------
-// GraphNode
-// ---------------------------------------------------------------------------
+impl std::fmt::Display for NodeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NodeType::Class => write!(f, "Class"),
+            NodeType::Function => write!(f, "Function"),
+            NodeType::Module => write!(f, "Module"),
+            NodeType::Concept => write!(f, "Concept"),
+            NodeType::Paper => write!(f, "Paper"),
+            NodeType::Image => write!(f, "Image"),
+            NodeType::File => write!(f, "File"),
+            NodeType::Method => write!(f, "Method"),
+            NodeType::Interface => write!(f, "Interface"),
+            NodeType::Enum => write!(f, "Enum"),
+            NodeType::Struct => write!(f, "Struct"),
+            NodeType::Trait => write!(f, "Trait"),
+            NodeType::Constant => write!(f, "Constant"),
+            NodeType::Variable => write!(f, "Variable"),
+            NodeType::Package => write!(f, "Package"),
+            NodeType::Namespace => write!(f, "Namespace"),
+        }
+    }
+}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GraphNode {
     pub id: String,
     pub label: String,
@@ -50,10 +65,6 @@ pub struct GraphNode {
     pub extra: HashMap<String, serde_json::Value>,
 }
 
-// ---------------------------------------------------------------------------
-// GraphEdge
-// ---------------------------------------------------------------------------
-
 fn default_confidence_score() -> f64 {
     1.0
 }
@@ -62,7 +73,7 @@ fn default_weight() -> f64 {
     1.0
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GraphEdge {
     pub source: String,
     pub target: String,
@@ -79,20 +90,12 @@ pub struct GraphEdge {
     pub extra: HashMap<String, serde_json::Value>,
 }
 
-// ---------------------------------------------------------------------------
-// Hyperedge
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Hyperedge {
     pub nodes: Vec<String>,
     pub relation: String,
     pub label: String,
 }
-
-// ---------------------------------------------------------------------------
-// ExtractionResult
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExtractionResult {
@@ -102,10 +105,6 @@ pub struct ExtractionResult {
     pub hyperedges: Vec<Hyperedge>,
 }
 
-// ---------------------------------------------------------------------------
-// CommunityInfo
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommunityInfo {
     pub id: usize,
@@ -114,10 +113,6 @@ pub struct CommunityInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 }
-
-// ---------------------------------------------------------------------------
-// AnalysisResult & helpers
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GodNode {
@@ -195,10 +190,6 @@ pub struct SimilarPair {
     pub label_a: String,
     pub label_b: String,
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

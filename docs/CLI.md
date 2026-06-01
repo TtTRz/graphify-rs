@@ -44,7 +44,7 @@ graphify-rs -q -j 2 serve               # quiet mode, 2 threads
 
 ### `graphify-rs build`
 
-Build the knowledge graph from files in a directory. This is the main pipeline: detect files -> extract AST (pass 1) -> semantic extraction via Claude API (pass 2) -> build graph -> cluster communities -> analyze -> export.
+Build the knowledge graph from files in a directory. This is the main pipeline: detect files -> extract AST (pass 1) -> semantic extraction via LLM API (pass 2) -> build graph -> cluster communities -> analyze -> export.
 
 #### Parameters
 
@@ -52,7 +52,7 @@ Build the knowledge graph from files in a directory. This is the main pipeline: 
 |------|-------|------|---------|-------------|
 | `--path <PATH>` | `-p` | `String` | `"."` | Root directory to scan for source files. |
 | `--output <DIR>` | `-o` | `String` | `"graphify-out"` | Output directory for all generated files. |
-| `--no-llm` | | `bool` | `false` | Skip Claude API semantic extraction (pass 2). Only AST extraction runs. |
+| `--no-llm` | | `bool` | `false` | Skip LLM semantic extraction (pass 2). Only AST extraction runs. |
 | `--code-only` | | `bool` | `false` | Only process code files, skip docs and papers. |
 | `--update` | | `bool` | `false` | Incremental rebuild: only re-extract new/modified files since last build. |
 | `--format <FMT,...>` | | `String` (comma-separated) | all formats | Export formats to generate. Available: `json`, `html`, `graphml`, `cypher`, `svg`, `wiki`, `obsidian`, `report`. |
@@ -90,7 +90,7 @@ graphify-rs build --update --code-only --no-llm --format json,report
 
 1. **Detect** — Scans `--path` for code, doc, paper, and image files (respects `.graphifyignore`, skips sensitive files).
 2. **Extract AST (Pass 1)** — Deterministic tree-sitter + regex extraction for code files. Per-file SHA256 cache in `<output>/cache/`.
-3. **Semantic Extraction (Pass 2)** — Concurrent Claude API extraction for docs/papers (skipped with `--no-llm` or `--code-only`). Requires `ANTHROPIC_API_KEY` env var. Concurrency = `min(--jobs, 8)`, default 4.
+3. **Semantic Extraction (Pass 2)** — Concurrent LLM extraction for docs/papers (skipped with `--no-llm` or `--code-only`). Supports Anthropic, OpenAI, Ollama, and OpenAI-compatible providers. Configure via `[llm]` in `graphify.toml`, or set `ANTHROPIC_API_KEY` env var for backward compat. Concurrency = `min(--jobs, 8)`, default 4.
 4. **Build Graph** — Assemble nodes and edges, deduplicate.
 5. **Cluster** — Leiden community detection + cohesion scoring.
 6. **Analyze** — God nodes, surprising connections, suggested questions.
@@ -198,6 +198,8 @@ graphify-rs watch --path src --output my-graph
 ### `graphify-rs serve`
 
 Start the MCP (Model Context Protocol) server over JSON-RPC 2.0 (stdio). Provides 15 tools that AI agents can call directly.
+
+If the specified graph file does not exist, `serve` automatically runs a fast AST-only build (`--no-llm --code-only --format json`) on the current directory before starting the server. This means `graphify-rs serve` works as a zero-config entry point — no manual `build` step required.
 
 #### Parameters
 
@@ -463,6 +465,18 @@ Generated file:
 # Export formats (comma-separated). Available: json,html,graphml,cypher,svg,wiki,obsidian,report
 # Leave empty or omit for all formats.
 # formats = ["json", "html", "report"]
+
+# LLM provider for semantic extraction
+# [llm]
+# provider = "anthropic"          # anthropic | openai | ollama | openai_compatible
+# model = "claude-sonnet-4.6"  # required, no default
+# anthropic_api_key = "sk-..."    # optional, falls back to ANTHROPIC_API_KEY env or Claude Code OAuth
+# anthropic_base_url = "https://api.anthropic.com"  # optional override
+# openai_api_key = "sk-..."       # optional, falls back to OPENAI_API_KEY env
+# openai_base_url = "https://api.openai.com/v1"     # optional override
+# ollama_base_url = "http://localhost:11434"          # optional override
+# openai_compatible_api_key = "..."                   # optional
+# openai_compatible_base_url = "http://localhost:8000/v1"  # required for openai_compatible
 ```
 
 ---
@@ -563,6 +577,47 @@ Create a `graphify.toml` file in your project root (or run `graphify-rs init`) t
 | `code_only` | `bool` | `false` | `--code-only` | Only process code files (skip docs/papers). |
 | `formats` | `String[]` | `[]` (all formats) | `--format` | Export formats to generate. |
 
+### LLM Configuration (`[llm]`)
+
+Configure the LLM provider for semantic extraction (Pass 2). When this section is absent, falls back to `ANTHROPIC_API_KEY` env var for backward compat.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `provider` | `String` | *required* | LLM provider: `anthropic`, `openai`, `ollama`, or `openai_compatible`. |
+| `model` | `String` | *required* | Model name (e.g., `claude-sonnet-4.6`, `gpt-4o`, `llama3`). No default. |
+| `anthropic_api_key` | `String` | env: `ANTHROPIC_API_KEY` | Anthropic API key. Falls back to env var, then Claude Code OAuth token. |
+| `anthropic_base_url` | `String` | `https://api.anthropic.com` | Override Anthropic API endpoint. |
+| `openai_api_key` | `String` | env: `OPENAI_API_KEY` | OpenAI API key. Falls back to env var. |
+| `openai_base_url` | `String` | `https://api.openai.com/v1` | Override OpenAI API endpoint. |
+| `ollama_base_url` | `String` | `http://localhost:11434` | Override Ollama API endpoint. |
+| `openai_compatible_api_key` | `String` | — | Optional API key for OpenAI-compatible endpoint. |
+| `openai_compatible_base_url` | `String` | *required* | Base URL for OpenAI-compatible endpoint (e.g., vLLM, LM Studio). |
+
+### LLM Examples
+
+```toml
+# Use Anthropic Claude with OAuth (no API key needed if logged in via Claude Code)
+[llm]
+provider = "anthropic"
+model = "claude-sonnet-4.6"
+
+# Use OpenAI GPT-4o
+[llm]
+provider = "openai"
+model = "gpt-4o"
+
+# Use local Ollama
+[llm]
+provider = "ollama"
+model = "llama3"
+
+# Use a custom OpenAI-compatible endpoint (vLLM, LM Studio, etc.)
+[llm]
+provider = "openai_compatible"
+model = "my-fine-tuned-model"
+openai_compatible_base_url = "http://localhost:8000/v1"
+```
+
 ### Precedence Rules
 
 1. **CLI flags** always take the highest priority.
@@ -581,7 +636,7 @@ Specific merging rules:
 # Always output to a custom directory
 output = "knowledge-graph"
 
-# Skip Claude API calls by default
+# Skip LLM calls by default
 no_llm = true
 
 # Only generate JSON and HTML
@@ -592,7 +647,8 @@ formats = ["json", "html"]
 
 | Variable | Description |
 |----------|-------------|
-| `ANTHROPIC_API_KEY` | Required for semantic extraction (pass 2). Without it, only AST extraction runs for doc/paper files. |
+| `ANTHROPIC_API_KEY` | API key for Anthropic Claude (Pass 2). Also used as fallback when `[llm]` config is absent. |
+| `OPENAI_API_KEY` | API key for OpenAI (Pass 2). Falls back from `openai_api_key` in `[llm]` config. |
 | `RUST_LOG` | Log level filter (default: `warn`). Overridden by `-v` (`debug`) or `-q` (`error`). |
 
 ---

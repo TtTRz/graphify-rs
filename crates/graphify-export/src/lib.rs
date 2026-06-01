@@ -18,6 +18,6 @@ pub use html::export_html;
 pub use html::export_html_split;
 pub use json::export_json;
 pub use obsidian::export_obsidian;
-pub use report::generate_report;
+pub use report::{ReportInput, generate_report};
 pub use svg::export_svg;
 pub use wiki::export_wiki;

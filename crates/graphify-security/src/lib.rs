@@ -8,7 +8,7 @@ pub mod path_validator;
 pub mod url_validator;
 
 pub use label_validator::sanitize_label;
-pub use path_validator::safe_path;
+pub use path_validator::{safe_path, validate_graph_path};
 pub use url_validator::validate_url;
 
 use thiserror::Error;
@@ -27,6 +27,9 @@ pub enum SecurityError {
 
     #[error("Invalid path: {0}")]
     InvalidPath(String),
+
+    #[error("Path not found: {0}")]
+    PathNotFound(String),
 
     #[error("URL parse error: {0}")]
     UrlParse(#[from] url::ParseError),

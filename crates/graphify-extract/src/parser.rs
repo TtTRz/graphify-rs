@@ -57,7 +57,6 @@ mod tests {
         let parser = RegexParser;
         let source = b"def hello():\n    pass\n";
         let result = parser.parse(Path::new("test.py"), source);
-        // Should have at least the file node + function node
         assert!(!result.nodes.is_empty());
     }
 }

@@ -35,7 +35,6 @@ pub fn compute_embeddings(
         .map(|(i, s)| (s.as_str(), i))
         .collect();
 
-    // Build adjacency list with indices
     let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
     for (src, tgt, _) in graph.edges_with_endpoints() {
         if let (Some(&si), Some(&ti)) = (id_to_idx.get(src), id_to_idx.get(tgt)) {
@@ -44,7 +43,6 @@ pub fn compute_embeddings(
         }
     }
 
-    // Initialize embeddings randomly (deterministic seed via simple hash)
     let mut embeddings: Vec<Vec<f64>> = (0..n)
         .map(|i| {
             (0..dim)
@@ -74,13 +72,10 @@ pub fn compute_embeddings(
     let window = 5usize;
     let learning_rate = 0.025;
 
-    // Generate walks and train
     for walk_num in 0..walks_per_node {
         for start in 0..n {
-            // Random walk
             let walk = random_walk(&adj, start, walk_length, walk_num);
 
-            // Skip-gram: for each position, update with context window
             for (pos, &center) in walk.iter().enumerate() {
                 let ctx_start = pos.saturating_sub(window);
                 let ctx_end = (pos + window + 1).min(walk.len());
@@ -89,7 +84,6 @@ pub fn compute_embeddings(
                     if actual_pos == pos {
                         continue;
                     }
-                    // Simplified SGD update (no negative sampling for speed)
                     let dot: f64 = embeddings[center]
                         .iter()
                         .zip(context_vecs[context].iter())
@@ -110,7 +104,6 @@ pub fn compute_embeddings(
         }
     }
 
-    // Build result map
     ids.into_iter()
         .enumerate()
         .map(|(i, id)| (id, embeddings[i].clone()))
@@ -129,7 +122,6 @@ pub fn find_similar(
         return Vec::new();
     }
 
-    // Pre-compute norms
     let norms: HashMap<&String, f64> = ids
         .iter()
         .map(|&id| {
@@ -145,7 +137,6 @@ pub fn find_similar(
 
     let mut pairs: Vec<SimilarPair> = Vec::new();
 
-    // Compare all pairs (for large graphs, could use LSH)
     let limit = n.min(500); // Cap to avoid O(n²) explosion on large graphs
     for i in 0..limit {
         for j in (i + 1)..limit {
@@ -198,7 +189,6 @@ fn random_walk(adj: &[Vec<usize>], start: usize, length: usize, seed: usize) -> 
         if neighbors.is_empty() {
             break;
         }
-        // Deterministic pseudo-random neighbor selection
         rng_state = rng_state
             .wrapping_mul(6364136223846793005)
             .wrapping_add(1442695040888963407);
@@ -261,7 +251,6 @@ mod tests {
         let kg = make_graph();
         let embs = compute_embeddings(&kg, 16, 10, 20);
         let pairs = find_similar(&kg, &embs, 5);
-        // Connected nodes should have some similarity
         assert!(!pairs.is_empty() || embs.len() < 2);
     }
 

@@ -1,12 +1,11 @@
 //! Integration tests for tree-sitter based extraction.
 
+use graphify_core::id::make_id;
 use graphify_core::model::NodeType;
 use graphify_extract::treesitter::try_extract;
 use std::path::Path;
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Python
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn ts_python_extracts_class_and_methods() {
@@ -63,10 +62,6 @@ def bar():
     assert!(result.edges.iter().any(|e| e.relation == "calls"));
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Rust
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn ts_rust_extracts_structs_and_functions() {
     let source = br#"
@@ -97,9 +92,7 @@ pub fn main() {
     assert!(result.edges.iter().any(|e| e.relation == "implements"));
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // JavaScript
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn ts_js_extracts_functions_and_classes() {
@@ -126,10 +119,6 @@ export function fetchData(url) { return axios.get(url); }
             >= 2
     );
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Go
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn ts_go_extracts_types_and_functions() {
@@ -162,9 +151,7 @@ func main() { s := Server{host: "localhost", port: 8080}; s.Start() }
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Unsupported & comparison
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn ts_unsupported_returns_none() {
@@ -189,10 +176,6 @@ def standalone():
     let ts_result = try_extract(Path::new("test.py"), source_str.as_bytes(), "python").unwrap();
     assert!(ts_result.nodes.len() >= regex_result.nodes.len());
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Java
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn ts_java_extracts_class_and_methods() {
@@ -222,9 +205,7 @@ public interface Runnable { void run(); }
     assert!(labels.iter().any(|l| l.contains("Runnable")));
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // C / C++ / Ruby / C# / Dart
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn ts_c_extracts_functions() {
@@ -327,9 +308,7 @@ void main() { print('hello'); }
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Cross-cutting
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn all_edges_have_source_file() {
@@ -351,9 +330,7 @@ fn node_ids_are_deterministic() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Tree-sitter config completeness tests
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn ts_ruby_extracts_module_and_require() {
@@ -533,9 +510,7 @@ void main() {
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Bug fix regression tests
-// ═══════════════════════════════════════════════════════════════════════════
 
 /// Bug 1: Ruby require/require_relative should produce clean module names, not raw text
 #[test]
@@ -798,4 +773,131 @@ struct Vector { double x; double y; };
             .map(|n| (&n.label, &n.node_type))
             .collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn ts_call_graph_precise_no_false_positive() {
+    let source = br#"
+fn target() {}
+fn caller() {
+    let v = vec![];
+    v.get(0);
+    target();
+}
+"#;
+    let result = try_extract(Path::new("test.rs"), source, "rust").unwrap();
+    let call_edges: Vec<_> = result
+        .edges
+        .iter()
+        .filter(|e| e.relation == "calls")
+        .collect();
+    assert_eq!(
+        call_edges.len(),
+        1,
+        "should have exactly 1 call edge (caller->target), got {:?}",
+        call_edges
+    );
+    assert_eq!(call_edges[0].target, make_id(&["test.rs", "target"]));
+}
+
+#[test]
+fn ts_call_graph_method_call() {
+    let source = br#"
+struct Foo;
+impl Foo {
+    fn helper(&self) {}
+    fn do_thing(&self) {
+        self.helper();
+    }
+}
+"#;
+    let result = try_extract(Path::new("test.rs"), source, "rust").unwrap();
+    let call_edges: Vec<_> = result
+        .edges
+        .iter()
+        .filter(|e| e.relation == "calls")
+        .collect();
+    assert_eq!(call_edges.len(), 1, "should detect self.helper() call");
+}
+
+#[test]
+fn ts_call_graph_python_method() {
+    let source = br#"
+class Service:
+    def process(self):
+        pass
+    def run(self):
+        self.process()
+"#;
+    let result = try_extract(Path::new("svc.py"), source, "python").unwrap();
+    let call_edges: Vec<_> = result
+        .edges
+        .iter()
+        .filter(|e| e.relation == "calls")
+        .collect();
+    assert_eq!(
+        call_edges.len(),
+        1,
+        "should detect exactly 1 call: .process() calls process"
+    );
+    assert_eq!(
+        call_edges[0].target,
+        make_id(&["svc.py", "Service", "process"])
+    );
+}
+
+#[test]
+fn ts_call_graph_java_method() {
+    let source = br#"
+public class App {
+    public void init() {}
+    public void start() {
+        init();
+    }
+}
+"#;
+    let result = try_extract(Path::new("App.java"), source, "java").unwrap();
+    let call_edges: Vec<_> = result
+        .edges
+        .iter()
+        .filter(|e| e.relation == "calls")
+        .collect();
+    assert_eq!(call_edges.len(), 1, "should detect exactly 1 call: .init()");
+    assert_eq!(call_edges[0].target, make_id(&["App.java", "App", "init"]));
+}
+
+#[test]
+fn ts_call_graph_no_self_call() {
+    let source = br#"
+fn recursive(x: i32) {
+    if x > 0 {
+        recursive(x - 1);
+    }
+}
+"#;
+    let result = try_extract(Path::new("test.rs"), source, "rust").unwrap();
+    let call_edges: Vec<_> = result
+        .edges
+        .iter()
+        .filter(|e| e.relation == "calls")
+        .collect();
+    assert!(call_edges.is_empty(), "self-calls should be filtered out");
+}
+
+#[test]
+fn ts_call_graph_go_selector() {
+    let source = br#"
+package main
+func helper() {}
+func main() {
+    helper()
+}
+"#;
+    let result = try_extract(Path::new("main.go"), source, "go").unwrap();
+    let call_edges: Vec<_> = result
+        .edges
+        .iter()
+        .filter(|e| e.relation == "calls")
+        .collect();
+    assert_eq!(call_edges.len(), 1, "should detect helper() call");
 }

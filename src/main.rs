@@ -2,13 +2,11 @@ use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
 use colored::Colorize;
-use indicatif::{ProgressBar, ProgressStyle};
-use rayon::prelude::*;
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod cmd_build;
 mod config;
 mod install;
 mod skill;
@@ -199,14 +197,14 @@ enum PlatformAction {
 
 /// Verbosity level derived from --quiet / --verbose flags.
 #[derive(Clone, Copy)]
-enum Verbosity {
+pub(crate) enum Verbosity {
     Quiet,
     Normal,
     Verbose,
 }
 
 impl Verbosity {
-    fn from_flags(quiet: bool, verbose: bool) -> Self {
+    pub(crate) fn from_flags(quiet: bool, verbose: bool) -> Self {
         if quiet {
             Self::Quiet
         } else if verbose {
@@ -216,16 +214,17 @@ impl Verbosity {
         }
     }
 
-    fn is_quiet(self) -> bool {
+    pub(crate) fn is_quiet(self) -> bool {
         matches!(self, Self::Quiet)
     }
 
-    fn is_verbose(self) -> bool {
+    pub(crate) fn is_verbose(self) -> bool {
         matches!(self, Self::Verbose)
     }
 }
 
 /// Print helper that respects verbosity.
+#[macro_export]
 macro_rules! info_print {
     ($verb:expr, $($arg:tt)*) => {
         if !$verb.is_quiet() {
@@ -234,6 +233,7 @@ macro_rules! info_print {
     };
 }
 
+#[macro_export]
 macro_rules! verbose_print {
     ($verb:expr, $($arg:tt)*) => {
         if $verb.is_verbose() {
@@ -246,12 +246,10 @@ macro_rules! verbose_print {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Check skill version staleness on every invocation
     install::check_skill_versions();
 
     let verb = Verbosity::from_flags(cli.quiet, cli.verbose);
 
-    // Configure tracing based on verbosity
     let filter = if cli.verbose {
         "debug"
     } else if cli.quiet {
@@ -263,7 +261,6 @@ async fn main() -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
         .init();
 
-    // Configure rayon thread pool if --jobs is set
     if let Some(jobs) = cli.jobs {
         rayon::ThreadPoolBuilder::new()
             .num_threads(jobs)
@@ -281,23 +278,22 @@ async fn main() -> Result<()> {
             format,
             max_viz_nodes,
         } => {
-            // Merge config file defaults with CLI args
-            let cfg = config::load_config(Path::new(&path));
+            let app_cfg = config::load_config(Path::new(&path));
             let effective_path = path;
             let effective_output = if output == "graphify-out" {
-                cfg.output.unwrap_or(output)
+                app_cfg.output.unwrap_or(output)
             } else {
                 output
             };
-            let effective_no_llm = no_llm || cfg.no_llm.unwrap_or(false);
-            let effective_code_only = code_only || cfg.code_only.unwrap_or(false);
+            let effective_no_llm = no_llm || app_cfg.no_llm.unwrap_or(false);
+            let effective_code_only = code_only || app_cfg.code_only.unwrap_or(false);
             let effective_formats = if format.is_empty() {
-                cfg.formats.unwrap_or_default()
+                app_cfg.formats.unwrap_or_default()
             } else {
                 format
             };
 
-            cmd_build(
+            cmd_build::cmd_build(
                 &effective_path,
                 &effective_output,
                 effective_no_llm,
@@ -307,6 +303,7 @@ async fn main() -> Result<()> {
                 verb,
                 cli.jobs,
                 max_viz_nodes,
+                app_cfg.llm,
             )
             .await?;
         }
@@ -407,7 +404,30 @@ async fn main() -> Result<()> {
             println!("Saved to {}", out.display());
         }
         Commands::Serve { graph } => {
-            graphify_serve::start_server(Path::new(&graph)).await?;
+            let graph_path = Path::new(&graph);
+            if !graph_path.exists() {
+                tracing::info!("{} not found, running auto-build...", graph_path.display());
+                let output_dir = graph_path
+                    .parent()
+                    .unwrap_or(Path::new("graphify-out"))
+                    .to_string_lossy()
+                    .to_string();
+                cmd_build::cmd_build(
+                    ".",
+                    &output_dir,
+                    true,
+                    true,
+                    false,
+                    &["json".to_string()],
+                    Verbosity::Quiet,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .context("Auto-build failed")?;
+            }
+            graphify_serve::start_server(graph_path).await?;
         }
         Commands::Watch { path, output } => {
             graphify_watch::watch_directory(Path::new(&path), Path::new(&output)).await?;
@@ -433,542 +453,6 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Full build pipeline: detect -> extract (with cache) -> build -> cluster -> analyze -> export
-#[allow(clippy::too_many_arguments)]
-async fn cmd_build(
-    path: &str,
-    output: &str,
-    no_llm: bool,
-    code_only: bool,
-    update: bool,
-    formats: &[String],
-    verb: Verbosity,
-    jobs: Option<usize>,
-    max_viz_nodes: Option<usize>,
-) -> Result<()> {
-    let root = PathBuf::from(path);
-    let output_dir = PathBuf::from(output);
-    let cache_dir = output_dir.join("cache");
-
-    // Determine which formats to export (empty = all)
-    let all_formats = [
-        "json", "html", "graphml", "cypher", "svg", "wiki", "obsidian", "report",
-    ];
-    let selected: Vec<&str> = if formats.is_empty() {
-        all_formats.to_vec()
-    } else {
-        formats.iter().map(|s| s.as_str()).collect()
-    };
-    let should_export = |name: &str| selected.iter().any(|s| s.eq_ignore_ascii_case(name));
-
-    // ── Step 1: Detect files ──
-    info_print!(verb, "  {} files...", "Detecting".cyan());
-    let detection = if update {
-        let manifest_path = output_dir.join(".graphify_manifest.json");
-        graphify_detect::detect_incremental(&root, Some(manifest_path.to_str().unwrap_or("")))
-    } else {
-        graphify_detect::detect(&root)
-    };
-    let n_code = detection
-        .files
-        .get(&graphify_detect::FileType::Code)
-        .map_or(0, |v| v.len());
-    let n_doc = detection
-        .files
-        .get(&graphify_detect::FileType::Document)
-        .map_or(0, |v| v.len());
-    let n_paper = detection
-        .files
-        .get(&graphify_detect::FileType::Paper)
-        .map_or(0, |v| v.len());
-    let n_image = detection
-        .files
-        .get(&graphify_detect::FileType::Image)
-        .map_or(0, |v| v.len());
-    info_print!(
-        verb,
-        "  Found {} files ({} code, {} doc, {} paper, {} image) · ~{} words",
-        detection.total_files.to_string().bold(),
-        n_code.to_string().green(),
-        n_doc.to_string().blue(),
-        n_paper.to_string().magenta(),
-        n_image.to_string().yellow(),
-        detection.total_words
-    );
-    if let Some(ref warning) = detection.warning {
-        info_print!(verb, "  {} {}", "⚠".yellow(), warning.yellow());
-    }
-    if !detection.skipped_sensitive.is_empty() {
-        info_print!(
-            verb,
-            "  {} Skipped {} sensitive file(s)",
-            "⚠".yellow(),
-            detection.skipped_sensitive.len()
-        );
-    }
-
-    // ── Step 2: Extract AST (Pass 1 — deterministic, with per-file cache) ──
-    let code_files: Vec<PathBuf> = detection
-        .files
-        .get(&graphify_detect::FileType::Code)
-        .map(|v| v.iter().map(|f| root.join(f)).collect())
-        .unwrap_or_default();
-
-    if code_files.is_empty() && code_only {
-        info_print!(verb, "  No code files found. Nothing to extract.");
-        return Ok(());
-    }
-
-    info_print!(
-        verb,
-        "  {} AST from {} code files...",
-        "Extracting".cyan(),
-        code_files.len()
-    );
-    let mut ast_result = graphify_core::model::ExtractionResult::default();
-    let cache_hits = AtomicUsize::new(0);
-    let extract_errors = AtomicUsize::new(0);
-
-    let pb = if !verb.is_quiet() {
-        let pb = ProgressBar::new(code_files.len() as u64);
-        pb.set_style(
-            ProgressStyle::with_template("  {bar:40.cyan/dim} {pos}/{len} files ({eta} remaining)")
-                .unwrap()
-                .progress_chars("██░"),
-        );
-        Some(pb)
-    } else {
-        None
-    };
-
-    // Parallel extraction: each file is processed independently, results collected
-    let file_results: Vec<graphify_core::model::ExtractionResult> = code_files
-        .par_iter()
-        .map(|file_path| {
-            if let Some(ref pb) = pb {
-                pb.set_message(
-                    file_path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string(),
-                );
-            }
-            // Try loading from cache
-            if let Some(cached) = graphify_cache::load_cached_from::<
-                graphify_core::model::ExtractionResult,
-            >(file_path, &root, &cache_dir)
-            {
-                cache_hits.fetch_add(1, Ordering::Relaxed);
-                if let Some(ref pb) = pb {
-                    pb.inc(1);
-                }
-                return cached;
-            }
-            // Extract fresh — catch panics to not abort the entire pipeline
-            let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                graphify_extract::extract(std::slice::from_ref(file_path))
-            })) {
-                Ok(fresh) => {
-                    let _ = graphify_cache::save_cached_to(file_path, &fresh, &root, &cache_dir);
-                    fresh
-                }
-                Err(_) => {
-                    extract_errors.fetch_add(1, Ordering::Relaxed);
-                    graphify_core::model::ExtractionResult::default()
-                }
-            };
-            if let Some(ref pb) = pb {
-                pb.inc(1);
-            }
-            result
-        })
-        .collect();
-
-    // Merge all results
-    for partial in file_results {
-        ast_result.nodes.extend(partial.nodes);
-        ast_result.edges.extend(partial.edges);
-        ast_result.hyperedges.extend(partial.hyperedges);
-    }
-
-    if let Some(pb) = pb {
-        pb.finish_and_clear();
-    }
-    let cache_hits = cache_hits.load(Ordering::Relaxed);
-    let extract_errors = extract_errors.load(Ordering::Relaxed);
-    if cache_hits > 0 {
-        info_print!(
-            verb,
-            "  Cache: {} hits, {} extracted fresh",
-            cache_hits.to_string().green(),
-            (code_files.len() - cache_hits).to_string().cyan()
-        );
-    }
-    if extract_errors > 0 {
-        info_print!(
-            verb,
-            "  {} {} file(s) had extraction errors (skipped)",
-            "⚠".yellow(),
-            extract_errors
-        );
-    }
-    info_print!(
-        verb,
-        "  Pass 1 (AST): {} nodes, {} edges",
-        ast_result.nodes.len().to_string().bold(),
-        ast_result.edges.len().to_string().bold()
-    );
-
-    let mut extractions = vec![ast_result];
-
-    // ── Step 2b: Semantic extraction (Pass 2 — Claude API, concurrent) ──
-    if !no_llm && !code_only {
-        let api_key = std::env::var("ANTHROPIC_API_KEY").ok();
-        if let Some(key) = api_key {
-            let doc_files: Vec<PathBuf> = detection
-                .files
-                .get(&graphify_detect::FileType::Document)
-                .into_iter()
-                .chain(detection.files.get(&graphify_detect::FileType::Paper))
-                .flat_map(|v| v.iter().map(|f| root.join(f)))
-                .collect();
-
-            if !doc_files.is_empty() {
-                info_print!(
-                    verb,
-                    "  {} on {} doc/paper files...",
-                    "Semantic extraction".cyan(),
-                    doc_files.len()
-                );
-                let concurrency = jobs.unwrap_or(4).min(8);
-                let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
-                let rt = tokio::runtime::Handle::current();
-
-                let pb_sem = if !verb.is_quiet() {
-                    let pb = ProgressBar::new(doc_files.len() as u64);
-                    pb.set_style(
-                        ProgressStyle::with_template(
-                            "  {bar:40.green/dim} {pos}/{len} docs ({eta} remaining)",
-                        )
-                        .unwrap()
-                        .progress_chars("██░"),
-                    );
-                    Some(pb)
-                } else {
-                    None
-                };
-
-                // Collect tasks for concurrent execution
-                let mut handles = Vec::new();
-                for doc_path in &doc_files {
-                    // Check cache first (synchronous, on main thread)
-                    if let Some(cached) = graphify_cache::load_cached_from::<
-                        graphify_core::model::ExtractionResult,
-                    >(doc_path, &root, &cache_dir)
-                    {
-                        extractions.push(cached);
-                        if let Some(ref pb) = pb_sem {
-                            pb.inc(1);
-                        }
-                        continue;
-                    }
-                    let content = match std::fs::read_to_string(doc_path) {
-                        Ok(c) => c,
-                        Err(_) => {
-                            if let Some(ref pb) = pb_sem {
-                                pb.inc(1);
-                            }
-                            continue;
-                        }
-                    };
-                    let file_type = if doc_path.extension().and_then(|e| e.to_str()) == Some("pdf")
-                    {
-                        "paper"
-                    } else {
-                        "document"
-                    };
-                    let doc_p = doc_path.clone();
-                    let key_clone = key.clone();
-                    let sem_clone = sem.clone();
-                    let handle = rt.spawn(async move {
-                        let _permit = sem_clone
-                            .acquire()
-                            .await
-                            .map_err(|e| anyhow::anyhow!("semaphore closed: {e}"))?;
-                        graphify_extract::semantic::extract_semantic(
-                            &doc_p, &content, file_type, &key_clone,
-                        )
-                        .await
-                        .map(|r| (doc_p, r))
-                    });
-                    handles.push(handle);
-                }
-
-                // Collect results
-                for handle in handles {
-                    match handle.await {
-                        Ok(Ok((doc_p, sem_result))) => {
-                            verbose_print!(
-                                verb,
-                                "    {} → {} nodes, {} edges",
-                                doc_p.file_name().unwrap_or_default().to_string_lossy(),
-                                sem_result.nodes.len(),
-                                sem_result.edges.len()
-                            );
-                            let _ = graphify_cache::save_cached_to(
-                                &doc_p,
-                                &sem_result,
-                                &root,
-                                &cache_dir,
-                            );
-                            extractions.push(sem_result);
-                        }
-                        Ok(Err(e)) => {
-                            verbose_print!(verb, "    {} semantic extraction: {}", "⚠".yellow(), e);
-                        }
-                        Err(e) => {
-                            verbose_print!(verb, "    {} task join error: {}", "⚠".yellow(), e);
-                        }
-                    }
-                    if let Some(ref pb) = pb_sem {
-                        pb.inc(1);
-                    }
-                }
-                if let Some(pb) = pb_sem {
-                    pb.finish_and_clear();
-                }
-            }
-        } else if n_doc + n_paper > 0 {
-            info_print!(
-                verb,
-                "  {} Set ANTHROPIC_API_KEY to enable semantic extraction for {} doc/paper files",
-                "ℹ".blue(),
-                n_doc + n_paper
-            );
-        }
-    }
-
-    // ── Step 3: Build graph ──
-    info_print!(verb, "  {} graph...", "Building".cyan());
-    let mut graph = graphify_build::build(&extractions).context("Failed to build graph")?;
-    info_print!(
-        verb,
-        "  Graph: {} nodes, {} edges",
-        graph.node_count().to_string().bold(),
-        graph.edge_count().to_string().bold()
-    );
-
-    // ── Step 4: Cluster ──
-    info_print!(verb, "  {} communities...", "Detecting".cyan());
-    let communities = graphify_cluster::cluster(&graph);
-    let cohesion = graphify_cluster::score_all(&graph, &communities);
-
-    // Write community assignments back into graph nodes
-    for (&cid, members) in &communities {
-        for nid in members {
-            if let Some(node) = graph.get_node_mut(nid) {
-                node.community = Some(cid);
-            }
-        }
-    }
-
-    let community_labels: HashMap<usize, String> = {
-        let mut used_labels: std::collections::HashSet<String> = std::collections::HashSet::new();
-        communities
-            .iter()
-            .map(|(cid, nodes)| {
-                // Pick the most descriptive label: prefer non-generic names,
-                // skip "lib", "super::*", import-like labels, etc.
-                let generic = ["lib", "super::*", "main", "mod", "tests"];
-                let best = nodes
-                    .iter()
-                    .filter_map(|id| graph.get_node(id))
-                    .filter(|n| {
-                        !generic.contains(&n.label.as_str())
-                            && !n.label.starts_with("std::")
-                            && !n.label.starts_with("serde::")
-                            && !n.label.contains("::")
-                    })
-                    // Prefer functions/structs over file nodes
-                    .max_by_key(|n| match n.node_type {
-                        graphify_core::model::NodeType::Function => 3,
-                        graphify_core::model::NodeType::Class
-                        | graphify_core::model::NodeType::Struct => 3,
-                        graphify_core::model::NodeType::Module => 1,
-                        graphify_core::model::NodeType::File => 0,
-                        _ => 2,
-                    })
-                    .map(|n| n.label.clone())
-                    .unwrap_or_else(|| {
-                        // Fallback: use first node's label
-                        nodes
-                            .first()
-                            .and_then(|id| graph.get_node(id))
-                            .map(|n| n.label.clone())
-                            .unwrap_or_else(|| format!("Community {}", cid))
-                    });
-                // Deduplicate: if label already used, append community id
-                let label = if used_labels.contains(&best) {
-                    format!("{} ({})", best, cid)
-                } else {
-                    used_labels.insert(best.clone());
-                    best
-                };
-                (*cid, label)
-            })
-            .collect()
-    };
-
-    info_print!(
-        verb,
-        "  {} communities detected",
-        communities.len().to_string().bold()
-    );
-
-    // ── Step 5: Analyze ──
-    info_print!(verb, "  {} graph...", "Analyzing".cyan());
-    let god_list = graphify_analyze::god_nodes(&graph, 10);
-    let surprise_list = graphify_analyze::surprising_connections(&graph, &communities, 5);
-    let questions = graphify_analyze::suggest_questions(&graph, &communities, &community_labels, 7);
-
-    // ── Step 6: Export selected formats ──
-    std::fs::create_dir_all(&output_dir)?;
-
-    if should_export("json") {
-        let json_path = graphify_export::export_json(&graph, &output_dir)?;
-        info_print!(verb, "  Wrote {}", json_path.display().to_string().dimmed());
-    }
-
-    if should_export("html") {
-        let html_path = graphify_export::export_html(
-            &graph,
-            &communities,
-            &community_labels,
-            &output_dir,
-            max_viz_nodes,
-        )?;
-        info_print!(verb, "  Wrote {}", html_path.display().to_string().dimmed());
-
-        // Also generate split HTML (per-community pages)
-        let split_path = graphify_export::export_html_split(
-            &graph,
-            &communities,
-            &community_labels,
-            &output_dir,
-        )?;
-        info_print!(
-            verb,
-            "  Wrote {}/",
-            split_path.display().to_string().dimmed()
-        );
-    }
-
-    // Prepare analysis data
-    let detection_json = serde_json::json!({
-        "total_files": detection.total_files,
-        "total_words": detection.total_words,
-        "warning": detection.warning,
-    });
-    let god_json: Vec<serde_json::Value> = god_list
-        .iter()
-        .map(
-            |g| serde_json::json!({"label": g.label, "degree": g.degree, "community": g.community}),
-        )
-        .collect();
-    let surprise_json: Vec<serde_json::Value> = surprise_list
-        .iter()
-        .map(|s| serde_json::to_value(s).unwrap_or_default())
-        .collect();
-    let question_json: Vec<serde_json::Value> = questions
-        .iter()
-        .map(|q| serde_json::to_value(q).unwrap_or_default())
-        .collect();
-    let token_cost: HashMap<String, usize> =
-        HashMap::from([("input".to_string(), 0), ("output".to_string(), 0)]);
-
-    if should_export("report") {
-        let report = graphify_export::generate_report(
-            &graph,
-            &communities,
-            &cohesion,
-            &community_labels,
-            &god_json,
-            &surprise_json,
-            &detection_json,
-            &token_cost,
-            path,
-            Some(&question_json),
-        );
-        let report_path = output_dir.join("GRAPH_REPORT.md");
-        std::fs::write(&report_path, &report)?;
-        info_print!(
-            verb,
-            "  Wrote {}",
-            report_path.display().to_string().dimmed()
-        );
-    }
-
-    if should_export("graphml") {
-        let graphml_path = graphify_export::export_graphml(&graph, &output_dir)?;
-        info_print!(
-            verb,
-            "  Wrote {}",
-            graphml_path.display().to_string().dimmed()
-        );
-    }
-
-    if should_export("cypher") {
-        let cypher_path = graphify_export::export_cypher(&graph, &output_dir)?;
-        info_print!(
-            verb,
-            "  Wrote {}",
-            cypher_path.display().to_string().dimmed()
-        );
-    }
-
-    if should_export("svg") {
-        let svg_path = graphify_export::export_svg(&graph, &communities, &output_dir)?;
-        info_print!(verb, "  Wrote {}", svg_path.display().to_string().dimmed());
-    }
-
-    if should_export("wiki") {
-        let wiki_path =
-            graphify_export::export_wiki(&graph, &communities, &community_labels, &output_dir)?;
-        info_print!(verb, "  Wrote {}", wiki_path.display().to_string().dimmed());
-    }
-
-    if should_export("obsidian") {
-        let obsidian_path =
-            graphify_export::export_obsidian(&graph, &communities, &community_labels, &output_dir)?;
-        info_print!(
-            verb,
-            "  Wrote {}",
-            obsidian_path.display().to_string().dimmed()
-        );
-    }
-
-    // Save manifest for future --update runs
-    let manifest_path = output_dir.join(".graphify_manifest.json");
-    let manifest = graphify_detect::Manifest {
-        files: detection
-            .files
-            .iter()
-            .flat_map(|(ft, paths)| paths.iter().map(move |p| (p.clone(), *ft)))
-            .collect(),
-    };
-    graphify_detect::save_manifest(&manifest_path, &manifest)?;
-
-    info_print!(
-        verb,
-        "\n{} Output in {}",
-        "✓ Done!".green().bold(),
-        output_dir.display()
-    );
-
-    Ok(())
-}
-
 /// Query the knowledge graph
 fn cmd_query(question: &str, use_dfs: bool, budget: usize, graph_path: &str) -> Result<()> {
     let gp = PathBuf::from(graph_path);
@@ -985,7 +469,7 @@ fn cmd_query(question: &str, use_dfs: bool, budget: usize, graph_path: &str) -> 
     let terms: Vec<String> = question
         .split_whitespace()
         .filter(|w| w.len() > 2)
-        .map(|w| w.to_lowercase())
+        .map(str::to_lowercase)
         .collect();
 
     let scored = graphify_serve::score_nodes(&graph, &terms);
@@ -1001,7 +485,7 @@ fn cmd_query(question: &str, use_dfs: bool, budget: usize, graph_path: &str) -> 
         graphify_serve::bfs(&graph, &start, 2)
     };
     let text = graphify_serve::subgraph_to_text(&graph, &nodes, &edges, budget);
-    println!("{}", text);
+    println!("{text}");
 
     Ok(())
 }
@@ -1108,14 +592,15 @@ fn cmd_diff(old_path: &str, new_path: &str, output_format: &str) -> Result<()> {
             }
         }
 
-        let summary_added = added_nodes.map_or(0, |v| v.len()) + added_edges.map_or(0, |v| v.len());
-        let summary_removed =
-            removed_nodes.map_or(0, |v| v.len()) + removed_edges.map_or(0, |v| v.len());
+        let summary_added =
+            added_nodes.map_or(0, std::vec::Vec::len) + added_edges.map_or(0, std::vec::Vec::len);
+        let summary_removed = removed_nodes.map_or(0, std::vec::Vec::len)
+            + removed_edges.map_or(0, std::vec::Vec::len);
         println!(
             "\n{}: {} additions, {} removals",
             "Summary".bold(),
-            format!("+{}", summary_added).green(),
-            format!("-{}", summary_removed).red()
+            format!("+{summary_added}").green(),
+            format!("-{summary_removed}").red()
         );
     }
 
@@ -1138,7 +623,6 @@ fn cmd_stats(graph_path: &str) -> Result<()> {
     let node_count = graph.node_count();
     let edge_count = graph.edge_count();
 
-    // Count node types
     let mut type_counts: HashMap<String, usize> = HashMap::new();
     for id in graph.node_ids() {
         if let Some(node) = graph.get_node(&id) {
@@ -1147,19 +631,15 @@ fn cmd_stats(graph_path: &str) -> Result<()> {
         }
     }
 
-    // Count edge relations
     let mut rel_counts: HashMap<String, usize> = HashMap::new();
     for edge in graph.edges() {
         *rel_counts.entry(edge.relation.clone()).or_insert(0) += 1;
     }
 
-    // Communities
     let communities = graphify_cluster::cluster(&graph);
 
-    // God nodes
     let god_list = graphify_analyze::god_nodes(&graph, 5);
 
-    // Degree stats
     let degrees: Vec<usize> = graph.node_ids().iter().map(|id| graph.degree(id)).collect();
     let avg_degree = if degrees.is_empty() {
         0.0
@@ -1172,8 +652,8 @@ fn cmd_stats(graph_path: &str) -> Result<()> {
     println!("  Nodes:       {}", node_count.to_string().bold());
     println!("  Edges:       {}", edge_count.to_string().bold());
     println!("  Communities: {}", communities.len().to_string().bold());
-    println!("  Avg degree:  {:.1}", avg_degree);
-    println!("  Max degree:  {}", max_degree);
+    println!("  Avg degree:  {avg_degree:.1}");
+    println!("  Max degree:  {max_degree}");
 
     println!("\n{}", "Node Types".bold());
     let mut types: Vec<_> = type_counts.iter().collect();
@@ -1232,6 +712,18 @@ fn cmd_init() -> Result<()> {
 # Export formats (comma-separated). Available: json,html,graphml,cypher,svg,wiki,obsidian,report
 # Leave empty or omit for all formats.
 # formats = ["json", "html", "report"]
+
+# LLM provider for semantic extraction
+# [llm]
+# provider = "anthropic"          # anthropic | openai | ollama | openai_compatible
+# model = "claude-sonnet-4.6"  # required, no default
+# anthropic_api_key = "sk-..."    # optional, falls back to ANTHROPIC_API_KEY env or Claude Code OAuth
+# anthropic_base_url = "https://api.anthropic.com"  # optional override
+# openai_api_key = "sk-..."       # optional, falls back to OPENAI_API_KEY env
+# openai_base_url = "https://api.openai.com/v1"     # optional override
+# ollama_base_url = "http://localhost:11434"          # optional override
+# openai_compatible_api_key = "..."                   # optional
+# openai_compatible_base_url = "http://localhost:8000/v1"  # required for openai_compatible
 "#,
     )?;
     println!("{} Created graphify.toml", "✓".green());

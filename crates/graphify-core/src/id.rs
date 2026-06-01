@@ -8,7 +8,6 @@
 ///     return cleaned.strip("_").lower()
 /// ```
 pub fn make_id(parts: &[&str]) -> String {
-    // Filter out empty strings, strip leading/trailing '_' and '.' from each part
     let combined = parts
         .iter()
         .filter(|p| !p.is_empty())
@@ -16,11 +15,10 @@ pub fn make_id(parts: &[&str]) -> String {
         .collect::<Vec<_>>()
         .join("_");
 
-    // Replace runs of non-alphanumeric chars with a single '_'
     let mut cleaned = String::with_capacity(combined.len());
     let mut prev_was_sep = false;
     for ch in combined.chars() {
-        if ch.is_ascii_alphanumeric() {
+        if ch.is_alphanumeric() {
             cleaned.push(ch);
             prev_was_sep = false;
         } else if !prev_was_sep {
@@ -29,8 +27,7 @@ pub fn make_id(parts: &[&str]) -> String {
         }
     }
 
-    // Strip leading/trailing '_' and lowercase
-    cleaned.trim_matches('_').to_ascii_lowercase()
+    cleaned.trim_matches('_').to_lowercase()
 }
 
 #[cfg(test)]
@@ -84,7 +81,19 @@ mod tests {
 
     #[test]
     fn python_compat_complex() {
-        // Python: _make_id("__init__", "MyClass") -> "init_myclass"
         assert_eq!(make_id(&["__init__", "MyClass"]), "init_myclass");
+    }
+
+    #[test]
+    fn cjk_identifiers_preserved() {
+        assert_eq!(make_id(&["类名"]), "类名");
+        assert_eq!(make_id(&["関数", "Helper"]), "関数_helper");
+        assert_eq!(make_id(&["모듈", "클래스"]), "모듈_클래스");
+    }
+
+    #[test]
+    fn mixed_cjk_and_special_chars() {
+        assert_eq!(make_id(&["类名::方法"]), "类名_方法");
+        assert_eq!(make_id(&["my-类"]), "my_类");
     }
 }

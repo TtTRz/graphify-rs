@@ -13,14 +13,14 @@ const HOOK_MARKER_START: &str = "# graphify-hook-start";
 const HOOK_MARKER_END: &str = "# graphify-hook-end";
 
 /// The hook script block injected into git hooks.
-const HOOK_SCRIPT: &str = r#"
+const HOOK_SCRIPT: &str = r"
 # graphify-hook-start
 # Auto-run graphify-rs AST extraction on commit (code-only, no LLM)
 if command -v graphify-rs >/dev/null 2>&1; then
   graphify-rs build --code-only --output graphify-out &
 fi
 # graphify-hook-end
-"#;
+";
 
 /// Hook names that graphify manages.
 const MANAGED_HOOKS: &[&str] = &["post-commit", "post-checkout"];
@@ -62,15 +62,12 @@ fn install_single_hook(hooks_dir: &Path, name: &str) -> Result<(), HookError> {
         "#!/bin/sh\n".to_string()
     };
 
-    // Remove old marker block if present
     content = strip_marker_block(&content);
 
-    // Append the new hook script
     content.push_str(HOOK_SCRIPT);
 
     fs::write(&hook_path, &content)?;
 
-    // Make executable on Unix
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -109,7 +106,6 @@ fn uninstall_single_hook(hooks_dir: &Path, name: &str) -> Result<(), HookError> 
     let cleaned = strip_marker_block(&content);
     let trimmed = cleaned.trim();
 
-    // If only shebang remains (or empty), remove the file
     if trimmed.is_empty() || trimmed == "#!/bin/sh" || trimmed == "#!/bin/bash" {
         fs::remove_file(&hook_path)?;
     } else {
@@ -166,13 +162,11 @@ fn strip_marker_block(content: &str) -> String {
     if let Some(start_idx) = content.find(HOOK_MARKER_START) {
         if let Some(end_marker_start) = content[start_idx..].find(HOOK_MARKER_END) {
             let end_idx = start_idx + end_marker_start + HOOK_MARKER_END.len();
-            // Also consume the trailing newline if present
             let end_idx = if content[end_idx..].starts_with('\n') {
                 end_idx + 1
             } else {
                 end_idx
             };
-            // Strip leading newline before marker if present
             let start_idx = if start_idx > 0 && content.as_bytes()[start_idx - 1] == b'\n' {
                 start_idx - 1
             } else {
@@ -183,17 +177,12 @@ fn strip_marker_block(content: &str) -> String {
             result.push_str(&content[end_idx..]);
             result
         } else {
-            // Malformed: start without end, remove from start to end of file
             content[..start_idx].to_string()
         }
     } else {
         content.to_string()
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -216,7 +205,6 @@ mod tests {
         let result = strip_marker_block(input);
         assert_eq!(result, "#!/bin/shother");
 
-        // With trailing newline after end marker
         let input2 = "#!/bin/sh\n\n# graphify-hook-start\nsome stuff\n# graphify-hook-end\nother";
         let result2 = strip_marker_block(input2);
         assert_eq!(result2, "#!/bin/sh\nother");
@@ -244,7 +232,6 @@ mod tests {
         let msg = install_hooks(tmp.path()).unwrap();
         assert!(msg.contains("installed"));
 
-        // Verify files exist
         let post_commit = tmp.path().join(".git/hooks/post-commit");
         assert!(post_commit.exists());
         let content = fs::read_to_string(&post_commit).unwrap();
@@ -252,7 +239,6 @@ mod tests {
         assert!(content.contains(HOOK_MARKER_END));
         assert!(content.starts_with("#!/bin/sh"));
 
-        // Status should report all installed
         let status = hook_status(tmp.path()).unwrap();
         assert!(status.contains("All hooks installed"));
     }
@@ -266,7 +252,6 @@ mod tests {
         install_hooks(tmp.path()).unwrap();
 
         let content = fs::read_to_string(tmp.path().join(".git/hooks/post-commit")).unwrap();
-        // Should only contain one copy of the marker
         let count = content.matches(HOOK_MARKER_START).count();
         assert_eq!(count, 1, "Hook block should not be duplicated");
     }
@@ -276,7 +261,6 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         setup_fake_repo(tmp.path());
 
-        // Write an existing hook
         let hook_path = tmp.path().join(".git/hooks/post-commit");
         fs::write(&hook_path, "#!/bin/sh\necho 'existing'\n").unwrap();
 
@@ -296,11 +280,9 @@ mod tests {
         let msg = uninstall_hooks(tmp.path()).unwrap();
         assert!(msg.contains("removed"));
 
-        // Hook files with only shebang should be deleted
         let post_commit = tmp.path().join(".git/hooks/post-commit");
         assert!(!post_commit.exists());
 
-        // Status should report none installed
         let status = hook_status(tmp.path()).unwrap();
         assert!(status.contains("No graphify hooks installed"));
     }
@@ -316,7 +298,6 @@ mod tests {
         install_hooks(tmp.path()).unwrap();
         uninstall_hooks(tmp.path()).unwrap();
 
-        // File should still exist with the original content
         assert!(hook_path.exists());
         let content = fs::read_to_string(&hook_path).unwrap();
         assert!(content.contains("echo 'keep me'"));

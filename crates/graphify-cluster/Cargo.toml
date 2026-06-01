@@ -11,4 +11,3 @@ graphify-core.workspace = true
 petgraph.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
-rand = "0.8"

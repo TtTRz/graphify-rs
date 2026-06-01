@@ -42,21 +42,18 @@ pub fn score_nodes(graph: &KnowledgeGraph, terms: &[String]) -> Vec<(f64, String
             let mut score: f64 = 0.0;
 
             for term in &lower_terms {
-                // Exact match in label
                 if label_lower == *term {
                     score += 2.0;
                 } else if label_lower.contains(term.as_str()) {
                     score += 1.0;
                 }
 
-                // Match in node ID
                 if id_lower.contains(term.as_str()) {
                     score += 0.5;
                 }
             }
 
             if score > 0.0 {
-                // Boost by degree (well-connected nodes are more relevant)
                 let degree_boost = (graph.degree(&node_id) as f64).ln_1p() * 0.1;
                 score += degree_boost;
                 scored.push((score, node_id.clone()));
@@ -157,14 +154,12 @@ pub fn subgraph_to_text(
     let char_budget = token_budget * 4;
     let mut output = String::with_capacity(char_budget.min(64 * 1024));
 
-    // Header
     output.push_str(&format!(
         "=== Knowledge Graph Context ({} nodes, {} edges) ===\n\n",
         nodes.len(),
         edges.len()
     ));
 
-    // Nodes section
     output.push_str("## Nodes\n\n");
     for node_id in nodes {
         if output.len() >= char_budget {
@@ -184,11 +179,9 @@ pub fn subgraph_to_text(
         }
     }
 
-    // Edges section
     if output.len() < char_budget {
         output.push_str("\n## Relationships\n\n");
 
-        // Deduplicate edges for display
         let mut seen: HashSet<(&str, &str)> = HashSet::new();
         for (src, tgt) in edges {
             if output.len() >= char_budget {
@@ -206,10 +199,6 @@ pub fn subgraph_to_text(
 
     output
 }
-
-// ---------------------------------------------------------------------------
-// Smart graph summarization
-// ---------------------------------------------------------------------------
 
 /// Abstraction level for graph summaries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -257,7 +246,6 @@ fn community_level_summary(
     let char_budget = token_budget * 4;
     let mut output = String::with_capacity(char_budget.min(64 * 1024));
 
-    // Pick representative (highest degree) for each community
     let mut representatives: HashMap<usize, (&str, usize)> = HashMap::new();
     for (&cid, members) in communities {
         let best = members
@@ -274,7 +262,6 @@ fn community_level_summary(
         graph.node_count()
     ));
 
-    // Node→community reverse map
     let mut node_cid: HashMap<&str, usize> = HashMap::new();
     for (&cid, members) in communities {
         for m in members {
@@ -282,7 +269,6 @@ fn community_level_summary(
         }
     }
 
-    // Communities
     output.push_str("## Communities\n\n");
     let mut sorted_cids: Vec<usize> = communities.keys().copied().collect();
     sorted_cids.sort();
@@ -306,7 +292,6 @@ fn community_level_summary(
         ));
     }
 
-    // Cross-community edges
     output.push_str("\n## Cross-Community Dependencies\n\n");
     let mut cross_edges: HashMap<(usize, usize), usize> = HashMap::new();
     for (src, tgt, _) in graph.edges_with_endpoints() {
@@ -337,7 +322,6 @@ fn architecture_level_summary(graph: &KnowledgeGraph, token_budget: usize) -> St
     let char_budget = token_budget * 4;
     let mut output = String::with_capacity(char_budget.min(64 * 1024));
 
-    // Group nodes by directory
     let mut dir_nodes: HashMap<String, Vec<&str>> = HashMap::new();
     for node in graph.nodes() {
         let dir = std::path::Path::new(&node.source_file)
@@ -348,7 +332,6 @@ fn architecture_level_summary(graph: &KnowledgeGraph, token_budget: usize) -> St
         dir_nodes.entry(dir).or_default().push(&node.id);
     }
 
-    // Node→dir mapping
     let mut node_dir: HashMap<&str, &str> = HashMap::new();
     for (dir, nodes) in &dir_nodes {
         for &nid in nodes {
@@ -361,7 +344,6 @@ fn architecture_level_summary(graph: &KnowledgeGraph, token_budget: usize) -> St
         dir_nodes.len()
     ));
 
-    // Directory summaries
     output.push_str("## Packages\n\n");
     let mut sorted_dirs: Vec<_> = dir_nodes.iter().collect();
     sorted_dirs.sort_by_key(|(_, nodes)| std::cmp::Reverse(nodes.len()));
@@ -373,7 +355,6 @@ fn architecture_level_summary(graph: &KnowledgeGraph, token_budget: usize) -> St
         output.push_str(&format!("- **{}** ({} entities)\n", dir, nodes.len()));
     }
 
-    // Inter-directory dependencies
     output.push_str("\n## Dependencies\n\n");
     let mut dir_edges: HashMap<(&str, &str), usize> = HashMap::new();
     for (src, tgt, _) in graph.edges_with_endpoints() {
@@ -413,7 +394,6 @@ pub fn graph_stats(graph: &KnowledgeGraph) -> HashMap<String, Value> {
         Value::from(graph.communities.len()),
     );
 
-    // Degree statistics
     let node_ids = graph.node_ids();
     if !node_ids.is_empty() {
         let degrees: Vec<usize> = node_ids.iter().map(|id| graph.degree(id)).collect();
@@ -434,18 +414,12 @@ pub fn graph_stats(graph: &KnowledgeGraph) -> HashMap<String, Value> {
 /// Reads requests from stdin, writes responses to stdout.
 /// This is the entry point called by the CLI `serve` command.
 pub async fn start_server(graph_path: &Path) -> Result<(), ServeError> {
-    // Run the synchronous stdio loop; use spawn_blocking so we don't
-    // block the tokio runtime (though for stdio this is fine).
     let path = graph_path.to_path_buf();
     tokio::task::spawn_blocking(move || mcp::run_mcp_server(&path))
         .await
         .map_err(|e| ServeError::Io(std::io::Error::other(e)))??;
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Advanced graph algorithms
-// ---------------------------------------------------------------------------
 
 /// Find all simple paths between `source` and `target` up to `max_length` edges.
 ///
@@ -516,7 +490,6 @@ pub fn dijkstra_path(
         return Some((vec![source.to_string()], 0.0, Vec::new()));
     }
 
-    // Build adjacency with weights from edges
     let mut adj: HashMap<String, Vec<(String, f64, String)>> = HashMap::new();
     for (src, tgt, edge) in graph.edges_with_endpoints() {
         if edge.confidence_score < min_confidence {
@@ -591,7 +564,6 @@ pub fn dijkstra_path(
         }
     }
 
-    // Reconstruct path
     if !prev.contains_key(target) {
         return None;
     }
@@ -610,10 +582,6 @@ pub fn dijkstra_path(
     let total_cost = *dist.get(target).unwrap_or(&f64::MAX);
     Some((path, total_cost, edge_details))
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -665,7 +633,6 @@ mod tests {
         let g = make_test_graph();
         let results = score_nodes(&g, &["auth".to_string()]);
         assert!(!results.is_empty());
-        // "auth" node should score highest
         let top_id = &results[0].1;
         assert_eq!(top_id, "auth");
     }
@@ -697,7 +664,6 @@ mod tests {
     fn test_bfs_depth_1() {
         let g = make_test_graph();
         let (nodes, edges) = bfs(&g, &["auth".to_string()], 1);
-        // auth -> user, auth -> db
         assert!(nodes.len() >= 3); // auth, user, db
         assert!(!edges.is_empty());
     }
@@ -706,7 +672,6 @@ mod tests {
     fn test_bfs_depth_2() {
         let g = make_test_graph();
         let (nodes, _edges) = bfs(&g, &["auth".to_string()], 2);
-        // Should reach all 4 nodes
         assert_eq!(nodes.len(), 4);
     }
 
@@ -747,7 +712,6 @@ mod tests {
             ("auth".to_string(), "user".to_string()),
             ("auth".to_string(), "db".to_string()),
         ];
-        // Very small budget
         let text = subgraph_to_text(&g, &nodes, &edges, 10);
         assert!(text.contains("truncated") || text.len() < 200);
     }
@@ -767,21 +731,17 @@ mod tests {
         assert!(nodes.len() >= 4);
     }
 
-    // -- all_simple_paths tests --
-
     #[test]
     fn test_all_simple_paths_direct() {
         let g = make_test_graph();
         let paths = all_simple_paths(&g, "auth", "user", 4);
         assert!(!paths.is_empty());
-        // Direct edge exists: auth → user
         assert!(paths.iter().any(|p| p.len() == 2));
     }
 
     #[test]
     fn test_all_simple_paths_indirect() {
         let g = make_test_graph();
-        // auth → db has direct path (len 2) and indirect auth → user → db (len 3)
         let paths = all_simple_paths(&g, "auth", "db", 4);
         assert!(
             paths.len() >= 2,
@@ -795,7 +755,6 @@ mod tests {
         let mut g = KnowledgeGraph::new();
         g.add_node(make_node("a", "A")).unwrap();
         g.add_node(make_node("b", "B")).unwrap();
-        // No edge between a and b
         let paths = all_simple_paths(&g, "a", "b", 4);
         assert!(paths.is_empty());
     }
@@ -815,8 +774,6 @@ mod tests {
             assert!(w[0].len() <= w[1].len(), "paths should be sorted by length");
         }
     }
-
-    // -- dijkstra_path tests --
 
     #[test]
     fn test_dijkstra_direct_path() {
@@ -857,13 +814,11 @@ mod tests {
 
     #[test]
     fn test_dijkstra_min_confidence_filter() {
-        // Create graph with mixed confidence edges
         let mut g = KnowledgeGraph::new();
         g.add_node(make_node("a", "A")).unwrap();
         g.add_node(make_node("b", "B")).unwrap();
         g.add_node(make_node("c", "C")).unwrap();
 
-        // a→b: low confidence (0.3), a→c→b: high confidence (1.0)
         let mut low_edge = make_edge("a", "b");
         low_edge.confidence_score = 0.3;
         g.add_edge(low_edge).unwrap();
@@ -876,7 +831,6 @@ mod tests {
         high2.confidence_score = 1.0;
         g.add_edge(high2).unwrap();
 
-        // With min_confidence 0.5, should skip a→b and go a→c→b
         let result = dijkstra_path(&g, "a", "b", 0.5);
         assert!(result.is_some());
         let (path, _, _) = result.unwrap();

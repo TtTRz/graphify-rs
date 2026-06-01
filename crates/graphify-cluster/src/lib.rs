@@ -27,10 +27,6 @@ const MIN_COMMUNITY_SIZE: usize = 5;
 /// Default Leiden uses 1.0; we use a lower value to avoid over-fragmentation.
 const RESOLUTION: f64 = 0.3;
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
 /// Run community detection on the graph. Returns `{community_id: [node_ids]}`.
 ///
 /// Uses the Leiden algorithm: greedy modularity optimization (Louvain phase)
@@ -42,7 +38,6 @@ pub fn cluster(graph: &KnowledgeGraph) -> HashMap<usize, Vec<String>> {
         return HashMap::new();
     }
 
-    // If no edges, each node is its own community
     if graph.edge_count() == 0 {
         return graph
             .node_ids()
@@ -54,17 +49,14 @@ pub fn cluster(graph: &KnowledgeGraph) -> HashMap<usize, Vec<String>> {
 
     let partition = leiden_partition(graph);
 
-    // Group by community
     let mut communities: HashMap<usize, Vec<String>> = HashMap::new();
     for (node_id, cid) in &partition {
         communities.entry(*cid).or_default().push(node_id.clone());
     }
 
-    // Merge tiny communities into their most-connected neighbor
     let adj = build_adjacency(graph);
     merge_small_communities(&mut communities, &adj);
 
-    // Split oversized communities
     let max_size = std::cmp::max(
         MIN_SPLIT_SIZE,
         (node_count as f64 * MAX_COMMUNITY_FRACTION) as usize,
@@ -78,7 +70,6 @@ pub fn cluster(graph: &KnowledgeGraph) -> HashMap<usize, Vec<String>> {
         }
     }
 
-    // Re-index by size descending
     final_communities.sort_by_key(|b| std::cmp::Reverse(b.len()));
     final_communities
         .into_iter()
@@ -94,7 +85,6 @@ pub fn cluster(graph: &KnowledgeGraph) -> HashMap<usize, Vec<String>> {
 pub fn cluster_graph(graph: &mut KnowledgeGraph) -> HashMap<usize, Vec<String>> {
     let communities = cluster(graph);
 
-    // Build CommunityInfo entries
     let scores = score_all(graph, &communities);
     let mut infos: Vec<CommunityInfo> = communities
         .iter()
@@ -120,10 +110,12 @@ pub fn cohesion_score(graph: &KnowledgeGraph, community_nodes: &[String]) -> f64
         return 1.0;
     }
 
-    let node_set: HashSet<&str> = community_nodes.iter().map(|s| s.as_str()).collect();
+    let node_set: HashSet<&str> = community_nodes
+        .iter()
+        .map(std::string::String::as_str)
+        .collect();
     let mut actual_edges = 0usize;
 
-    // Count edges where both endpoints are in the community
     for node_id in community_nodes {
         let neighbors = graph.get_neighbors(node_id);
         for neighbor in &neighbors {
@@ -132,7 +124,6 @@ pub fn cohesion_score(graph: &KnowledgeGraph, community_nodes: &[String]) -> f64
             }
         }
     }
-    // Each edge is counted twice (once from each endpoint)
     actual_edges /= 2;
 
     let possible = n * (n - 1) / 2;
@@ -152,10 +143,6 @@ pub fn score_all(
         .map(|(&cid, nodes)| (cid, cohesion_score(graph, nodes)))
         .collect()
 }
-
-// ---------------------------------------------------------------------------
-// Adjacency helpers
-// ---------------------------------------------------------------------------
 
 /// Build an adjacency list from the KnowledgeGraph for efficient lookups.
 fn build_adjacency(graph: &KnowledgeGraph) -> HashMap<String, Vec<(String, f64)>> {
@@ -188,8 +175,7 @@ fn total_weight(adj: &HashMap<String, Vec<(String, f64)>>) -> f64 {
 /// Sum of weights of edges incident to a node.
 fn node_strength(adj: &HashMap<String, Vec<(String, f64)>>, node: &str) -> f64 {
     adj.get(node)
-        .map(|neighbors| neighbors.iter().map(|(_, w)| w).sum())
-        .unwrap_or(0.0)
+        .map_or(0.0, |neighbors| neighbors.iter().map(|(_, w)| w).sum())
 }
 
 /// Sum of weights of edges from `node` to nodes in `community`.
@@ -198,25 +184,19 @@ fn edges_to_community(
     node: &str,
     community: &HashSet<&str>,
 ) -> f64 {
-    adj.get(node)
-        .map(|neighbors| {
-            neighbors
-                .iter()
-                .filter(|(n, _)| community.contains(n.as_str()))
-                .map(|(_, w)| w)
-                .sum()
-        })
-        .unwrap_or(0.0)
+    adj.get(node).map_or(0.0, |neighbors| {
+        neighbors
+            .iter()
+            .filter(|(n, _)| community.contains(n.as_str()))
+            .map(|(_, w)| w)
+            .sum()
+    })
 }
 
 /// Sum of strengths of all nodes in a community.
 fn community_strength(adj: &HashMap<String, Vec<(String, f64)>>, members: &HashSet<&str>) -> f64 {
     members.iter().map(|n| node_strength(adj, n)).sum()
 }
-
-// ---------------------------------------------------------------------------
-// Leiden algorithm
-// ---------------------------------------------------------------------------
 
 /// Leiden algorithm: Louvain phase + refinement phase, iterated until stable.
 ///
@@ -236,7 +216,6 @@ fn leiden_partition(graph: &KnowledgeGraph) -> HashMap<String, usize> {
 
     let node_ids = graph.node_ids();
 
-    // Initialize: each node in its own community
     let mut community_of: HashMap<String, usize> = node_ids
         .iter()
         .enumerate()
@@ -245,10 +224,8 @@ fn leiden_partition(graph: &KnowledgeGraph) -> HashMap<String, usize> {
 
     let max_outer_iterations = 10;
     for _outer in 0..max_outer_iterations {
-        // ── Phase 1: Louvain (greedy modularity move) ──
         let changed = louvain_phase(&adj, &node_ids, &mut community_of, m);
 
-        // ── Phase 2: Refinement (ensure well-connected communities) ──
         let refined = refinement_phase(&adj, &mut community_of, m);
 
         if !changed && !refined {
@@ -256,7 +233,6 @@ fn leiden_partition(graph: &KnowledgeGraph) -> HashMap<String, usize> {
         }
     }
 
-    // Compact community IDs
     compact_ids(&mut community_of);
     community_of
 }
@@ -279,13 +255,11 @@ fn louvain_phase(
             .insert(node.clone());
     }
 
-    // Pre-compute node strengths (ki) — avoids repeated O(deg) recalculation
     let ki_cache: HashMap<&str, f64> = adj
         .keys()
         .map(|n| (n.as_str(), node_strength(adj, n)))
         .collect();
 
-    // Pre-compute community strength sums (sigma_c) — maintained incrementally
     let mut sigma_c: HashMap<usize, f64> = HashMap::new();
     for (&cid, members) in &community_members {
         let sum: f64 = members
@@ -305,7 +279,6 @@ fn louvain_phase(
             let current_community = community_of[node];
             let ki = ki_cache.get(node.as_str()).copied().unwrap_or(0.0);
 
-            // Aggregate edges to each neighboring community in one pass
             let mut ki_to: HashMap<usize, f64> = HashMap::new();
             if let Some(neighbors) = adj.get(node.as_str()) {
                 for (nbr, w) in neighbors {
@@ -317,7 +290,6 @@ fn louvain_phase(
             let mut best_community = current_community;
             let mut best_gain = 0.0f64;
 
-            // ki to current community (excluding self-loop edges already handled)
             let ki_in_current = ki_to.get(&current_community).copied().unwrap_or(0.0);
             let sigma_current = sigma_c.get(&current_community).copied().unwrap_or(0.0) - ki;
 
@@ -338,7 +310,6 @@ fn louvain_phase(
             }
 
             if best_community != current_community {
-                // Update community_members
                 community_members
                     .get_mut(&current_community)
                     .unwrap()
@@ -348,7 +319,6 @@ fn louvain_phase(
                     .or_default()
                     .insert(node.clone());
 
-                // Update sigma_c incrementally
                 *sigma_c.entry(current_community).or_default() -= ki;
                 *sigma_c.entry(best_community).or_default() += ki;
 
@@ -378,7 +348,6 @@ fn refinement_phase(
     community_of: &mut HashMap<String, usize>,
     m: f64,
 ) -> bool {
-    // Group nodes by community
     let mut community_members: HashMap<usize, Vec<String>> = HashMap::new();
     for (node, &cid) in community_of.iter() {
         community_members.entry(cid).or_default().push(node.clone());
@@ -394,7 +363,6 @@ fn refinement_phase(
             _ => continue,
         };
 
-        // Find connected components within this community
         let components = connected_components_within(adj, &members);
         if components.len() <= 1 {
             continue; // Already well-connected
@@ -406,15 +374,12 @@ fn refinement_phase(
             components.len()
         );
 
-        // Keep the largest component in the original community,
         // assign each smaller component to the best neighboring community
         // or a new community.
         let mut sorted_components = components;
         sorted_components.sort_by_key(|c| std::cmp::Reverse(c.len()));
 
-        // Largest component stays
         for component in sorted_components.iter().skip(1) {
-            // For this sub-component, find the best neighboring community
             let mut neighbor_cid_edges: HashMap<usize, f64> = HashMap::new();
             for node in component {
                 if let Some(neighbors) = adj.get(node.as_str()) {
@@ -427,17 +392,16 @@ fn refinement_phase(
                 }
             }
 
-            // Pick the neighbor community with the strongest connection,
             // or create a new community if no neighbor exists
             let target_cid = if let Some((&best_cid, _)) = neighbor_cid_edges
                 .iter()
                 .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             {
-                // Only merge if modularity gain is positive
-                let _component_set: HashSet<&str> = component.iter().map(|s| s.as_str()).collect();
+                let _component_set: HashSet<&str> =
+                    component.iter().map(std::string::String::as_str).collect();
                 let target_members: HashSet<&str> = community_members
                     .get(&best_cid)
-                    .map(|s| s.iter().map(|x| x.as_str()).collect())
+                    .map(|s| s.iter().map(std::string::String::as_str).collect())
                     .unwrap_or_default();
 
                 let ki_sum: f64 = component.iter().map(|n| node_strength(adj, n)).sum();
@@ -461,7 +425,6 @@ fn refinement_phase(
                 new_cid
             };
 
-            // Move all nodes in this component
             for node in component {
                 community_of.insert(node.clone(), target_cid);
                 community_members
@@ -472,7 +435,6 @@ fn refinement_phase(
             any_refined = true;
         }
 
-        // Update original community to only keep largest component
         if any_refined {
             community_members.insert(cid, sorted_components.into_iter().next().unwrap());
         }
@@ -486,7 +448,7 @@ fn connected_components_within(
     adj: &HashMap<String, Vec<(String, f64)>>,
     members: &[String],
 ) -> Vec<Vec<String>> {
-    let member_set: HashSet<&str> = members.iter().map(|s| s.as_str()).collect();
+    let member_set: HashSet<&str> = members.iter().map(std::string::String::as_str).collect();
     let mut visited: HashSet<&str> = HashSet::new();
     let mut components: Vec<Vec<String>> = Vec::new();
 
@@ -526,7 +488,7 @@ fn compact_ids(community_of: &mut HashMap<String, usize>) {
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
-    used.sort();
+    used.sort_unstable();
     let remap: HashMap<usize, usize> = used
         .iter()
         .enumerate()
@@ -543,19 +505,16 @@ fn merge_small_communities(
     communities: &mut HashMap<usize, Vec<String>>,
     adj: &HashMap<String, Vec<(String, f64)>>,
 ) {
-    // Build node → community reverse map once, maintain incrementally
     let mut node_to_cid: HashMap<String, usize> = communities
         .iter()
         .flat_map(|(&cid, nodes)| nodes.iter().map(move |n| (n.clone(), cid)))
         .collect();
 
     loop {
-        // Find one small community to merge
         let merge = communities
             .iter()
             .filter(|(_, nodes)| nodes.len() < MIN_COMMUNITY_SIZE)
             .find_map(|(&small_cid, nodes)| {
-                // Count edges to each neighboring community
                 let mut neighbor_edges: HashMap<usize, f64> = HashMap::new();
                 for node in nodes {
                     if let Some(neighbors) = adj.get(node.as_str()) {
@@ -568,7 +527,6 @@ fn merge_small_communities(
                         }
                     }
                 }
-                // Best target
                 neighbor_edges
                     .iter()
                     .max_by(|a, b| a.1.total_cmp(b.1))
@@ -578,7 +536,6 @@ fn merge_small_communities(
         match merge {
             Some((small_cid, best_cid)) => {
                 let nodes = communities.remove(&small_cid).unwrap_or_default();
-                // Update node_to_cid incrementally
                 for node in &nodes {
                     node_to_cid.insert(node.clone(), best_cid);
                 }
@@ -595,9 +552,8 @@ fn split_community(graph: &KnowledgeGraph, nodes: &[String]) -> Vec<Vec<String>>
         return vec![nodes.to_vec()];
     }
 
-    let node_set: HashSet<&str> = nodes.iter().map(|s| s.as_str()).collect();
+    let node_set: HashSet<&str> = nodes.iter().map(std::string::String::as_str).collect();
 
-    // Build sub-adjacency list
     let mut sub_adj: HashMap<String, Vec<(String, f64)>> = HashMap::new();
     for node in nodes {
         sub_adj.entry(node.clone()).or_default();
@@ -620,7 +576,6 @@ fn split_community(graph: &KnowledgeGraph, nodes: &[String]) -> Vec<Vec<String>>
         return nodes.iter().map(|n| vec![n.clone()]).collect();
     }
 
-    // Run Louvain + refinement on the subgraph
     let mut community_of: HashMap<String, usize> = nodes
         .iter()
         .enumerate()
@@ -636,7 +591,6 @@ fn split_community(graph: &KnowledgeGraph, nodes: &[String]) -> Vec<Vec<String>>
         }
     }
 
-    // Group results
     let mut groups: HashMap<usize, Vec<String>> = HashMap::new();
     for (node, cid) in &community_of {
         groups.entry(*cid).or_default().push(node.clone());
@@ -651,10 +605,6 @@ fn split_community(graph: &KnowledgeGraph, nodes: &[String]) -> Vec<Vec<String>>
 
     result
 }
-
-// ---------------------------------------------------------------------------
-// Incremental community detection
-// ---------------------------------------------------------------------------
 
 /// Incrementally re-cluster only the communities affected by changed files.
 ///
@@ -674,9 +624,11 @@ pub fn cluster_incremental(
         return cluster(graph);
     }
 
-    let changed_set: HashSet<&str> = changed_files.iter().map(|s| s.as_str()).collect();
+    let changed_set: HashSet<&str> = changed_files
+        .iter()
+        .map(std::string::String::as_str)
+        .collect();
 
-    // Find affected node IDs (nodes whose source_file is in changed_files)
     let affected_nodes: HashSet<String> = graph
         .nodes()
         .iter()
@@ -688,19 +640,16 @@ pub fn cluster_incremental(
         return prev_communities.clone();
     }
 
-    // Build node→community reverse map
     let node_to_cid: HashMap<&str, usize> = prev_communities
         .iter()
         .flat_map(|(&cid, nodes)| nodes.iter().map(move |n| (n.as_str(), cid)))
         .collect();
 
-    // Find affected communities: those containing affected nodes or their neighbors
     let mut affected_cids: HashSet<usize> = HashSet::new();
     for node_id in &affected_nodes {
         if let Some(&cid) = node_to_cid.get(node_id.as_str()) {
             affected_cids.insert(cid);
         }
-        // Also include neighbor communities
         for neighbor in graph.get_neighbors(node_id) {
             if let Some(&cid) = node_to_cid.get(neighbor.id.as_str()) {
                 affected_cids.insert(cid);
@@ -708,7 +657,6 @@ pub fn cluster_incremental(
         }
     }
 
-    // If too many communities affected, just re-cluster everything
     if affected_cids.len() * 2 > prev_communities.len() {
         debug!(
             "incremental: {}% communities affected, falling back to full cluster",
@@ -724,16 +672,14 @@ pub fn cluster_incremental(
         affected_nodes.len()
     );
 
-    // Collect all nodes in affected communities
     let affected_community_nodes: Vec<String> = affected_cids
         .iter()
         .flat_map(|cid| prev_communities.get(cid).cloned().unwrap_or_default())
         .collect();
 
-    // Also include new nodes not in any previous community
     let all_prev_nodes: HashSet<&str> = prev_communities
         .values()
-        .flat_map(|v| v.iter().map(|s| s.as_str()))
+        .flat_map(|v| v.iter().map(std::string::String::as_str))
         .collect();
     let new_nodes: Vec<String> = graph
         .node_ids()
@@ -744,14 +690,11 @@ pub fn cluster_incremental(
     let mut recluster_nodes: Vec<String> = affected_community_nodes;
     recluster_nodes.extend(new_nodes);
 
-    // Re-cluster the affected subgraph
     let sub_communities = split_community(graph, &recluster_nodes);
 
-    // Merge: unchanged communities + re-clustered ones
     let mut result: HashMap<usize, Vec<String>> = HashMap::new();
     let mut next_cid = 0usize;
 
-    // Keep unchanged communities
     for (&cid, nodes) in prev_communities {
         if !affected_cids.contains(&cid) {
             result.insert(next_cid, nodes.clone());
@@ -759,7 +702,6 @@ pub fn cluster_incremental(
         }
     }
 
-    // Add re-clustered communities
     for nodes in sub_communities {
         if !nodes.is_empty() {
             result.insert(next_cid, nodes);
@@ -767,7 +709,6 @@ pub fn cluster_incremental(
         }
     }
 
-    // Re-index by size descending
     let mut final_vec: Vec<Vec<String>> = result.into_values().collect();
     final_vec.sort_by_key(|b| std::cmp::Reverse(b.len()));
     final_vec
@@ -779,10 +720,6 @@ pub fn cluster_incremental(
         })
         .collect()
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -921,12 +858,8 @@ mod tests {
         assert!(!g.communities.is_empty());
     }
 
-    // ── Leiden-specific tests ──
-
     #[test]
     fn leiden_splits_disconnected_community() {
-        // Two disconnected cliques — Leiden should guarantee they end up
-        // in separate communities (Louvain might not).
         let g = build_graph(
             &["a1", "a2", "a3", "b1", "b2", "b3"],
             &[
@@ -936,17 +869,14 @@ mod tests {
                 ("b1", "b2"),
                 ("b2", "b3"),
                 ("b1", "b3"),
-                // No bridge between the two cliques
             ],
         );
         let result = cluster(&g);
-        // Must have exactly 2 communities
         assert_eq!(
             result.len(),
             2,
             "disconnected cliques should form 2 communities"
         );
-        // Each community should have 3 nodes
         for nodes in result.values() {
             assert_eq!(nodes.len(), 3);
         }
@@ -958,7 +888,6 @@ mod tests {
         for id in &["a", "b", "c", "d"] {
             adj.insert(id.to_string(), Vec::new());
         }
-        // a-b connected, c-d connected, no bridge
         adj.get_mut("a").unwrap().push(("b".into(), 1.0));
         adj.get_mut("b").unwrap().push(("a".into(), 1.0));
         adj.get_mut("c").unwrap().push(("d".into(), 1.0));

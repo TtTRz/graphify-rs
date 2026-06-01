@@ -69,16 +69,13 @@ mod tests {
     fn test_truncation() {
         let long = "a".repeat(300);
         let result = sanitize_label(&long);
-        // After sanitization no escaping needed, so length == 256
         assert_eq!(result.len(), 256);
     }
 
     #[test]
     fn test_truncation_with_entities() {
-        // 256 '<' characters → each becomes "&lt;" (4 bytes)
         let input = "<".repeat(300);
         let result = sanitize_label(&input);
-        // Only 256 '<' taken, each → "&lt;" = 4 chars
         assert_eq!(result.len(), 256 * 4);
     }
 
@@ -102,7 +99,6 @@ mod tests {
 
     #[test]
     fn test_backtick_and_braces() {
-        // Backticks and braces pass through (not HTML-special)
         assert_eq!(sanitize_label("`{code}`"), "`{code}`");
     }
 }

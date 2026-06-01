@@ -80,7 +80,6 @@ fn simulate_query(graph: &KnowledgeGraph, question: &str) -> usize {
         .map(String::from)
         .collect();
 
-    // Score nodes by term overlap
     let mut matched_nodes: Vec<(f64, String)> = Vec::new();
     for node_id in graph.node_ids() {
         if let Some(node) = graph.get_node(&node_id) {
@@ -103,7 +102,6 @@ fn simulate_query(graph: &KnowledgeGraph, question: &str) -> usize {
 
     matched_nodes.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Take top-5 matches and their 1-hop neighbors
     let top_nodes: Vec<String> = matched_nodes
         .into_iter()
         .take(5)
@@ -123,7 +121,6 @@ fn simulate_query(graph: &KnowledgeGraph, question: &str) -> usize {
             ));
         }
 
-        // Add 1-hop neighbors
         for neighbor in graph.neighbor_ids(node_id) {
             if seen.insert(neighbor.clone())
                 && let Some(node) = graph.get_node(&neighbor)
@@ -136,7 +133,6 @@ fn simulate_query(graph: &KnowledgeGraph, question: &str) -> usize {
         }
     }
 
-    // If no matches, estimate a minimum context
     if context_parts.is_empty() {
         let json = graph.to_node_link_json();
         let total = estimate_tokens(&json.to_string());
@@ -156,7 +152,6 @@ pub fn run_benchmark(
     graph_path: &Path,
     corpus_words: Option<usize>,
 ) -> Result<BenchmarkResult, BenchmarkError> {
-    // Load graph JSON
     let content = std::fs::read_to_string(graph_path)?;
     let value: serde_json::Value = serde_json::from_str(&content)?;
     let graph = KnowledgeGraph::from_node_link_json(&value)
@@ -173,7 +168,6 @@ pub fn run_benchmark(
         }
     });
 
-    // Run sample queries
     let full_corpus_tokens = corpus_tokens.unwrap_or(graph_tokens);
     let sample_queries: Vec<QuerySample> = SAMPLE_QUESTIONS
         .iter()
@@ -223,13 +217,13 @@ pub fn print_benchmark(result: &BenchmarkResult) {
     println!("Graph tokens: {}", result.graph_tokens);
 
     if let Some(words) = result.corpus_words {
-        println!("Corpus words: {}", words);
+        println!("Corpus words: {words}");
     }
     if let Some(tokens) = result.corpus_tokens {
-        println!("Corpus tokens (est.): {}", tokens);
+        println!("Corpus tokens (est.): {tokens}");
     }
     if let Some(ratio) = result.compression_ratio {
-        println!("Compression: {:.1}x", ratio);
+        println!("Compression: {ratio:.1}x");
     }
 
     println!();
@@ -242,10 +236,6 @@ pub fn print_benchmark(result: &BenchmarkResult) {
         );
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -372,7 +362,6 @@ mod tests {
                 reduction: 130.0,
             }],
         };
-        // Should not panic
         print_benchmark(&result);
     }
 }

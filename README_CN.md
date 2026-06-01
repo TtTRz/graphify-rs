@@ -74,9 +74,9 @@ open graphify-out/graph.html       # macOS
 # 3. 查询图谱
 graphify-rs query "认证是如何工作的？"
 
-# 4.（可选）启用 Claude API 语义提取
-export ANTHROPIC_API_KEY=sk-...
-graphify-rs build                  # 添加 Claude 推断的 INFERRED 边
+# 4.（可选）启用 LLM 语义提取
+export ANTHROPIC_API_KEY=sk-...   # 或在 graphify.toml 中配置 [llm] 段
+graphify-rs build                  # 添加 LLM 推断的 INFERRED 边
 ```
 
 完整 CLI 参考请见 **[docs/CLI_CN.md](docs/CLI_CN.md)**。
@@ -108,9 +108,9 @@ graphify-rs build                  # 添加 Claude 推断的 INFERRED 边
 
 使用 [tree-sitter](https://tree-sitter.github.io/) 将源代码解析为 AST，然后提取函数、类、导入和调用关系。支持 21 种语言，其中 11 种有原生 tree-sitter 语法，其余走正则回退。此轮的每条边标记为 `EXTRACTED`，置信度 1.0。
 
-**第 2 轮 — Claude API 语义提取**（可选，`--no-llm` 跳过）：
+**第 2 轮 — LLM 语义提取**（可选，`--no-llm` 跳过）：
 
-将文档/论文/图片内容发送给 Claude API，发现语法本身无法揭示的高层关系 — 概念关联、共享假设、设计意图。此轮的边标记为 `INFERRED`，置信度 0.4–0.9。
+将文档/论文/图片内容发送给 LLM API（支持 Anthropic、OpenAI、Ollama、OpenAI 兼容端点），发现语法本身无法揭示的高层关系 — 概念关联、共享假设、设计意图。此轮的边标记为 `INFERRED`，置信度 0.4–0.9。通过 `graphify.toml` 的 `[llm]` 段配置。
 
 ### 置信度体系
 
@@ -142,7 +142,7 @@ graphify-rs build                  # 添加 Claude 推断的 INFERRED 边
 |-------|------|
 | `graphify-core` | 数据模型（`GraphNode`, `GraphEdge`, `KnowledgeGraph`）、ID 生成、置信度体系 |
 | `graphify-detect` | 文件发现、分类（code/doc/paper/image）、`.graphifyignore`、敏感文件过滤 |
-| `graphify-extract` | AST 提取（tree-sitter，21 种语言）、Claude API 语义提取、去重 |
+| `graphify-extract` | AST 提取（tree-sitter，21 种语言）、多 Provider LLM 语义提取、去重 |
 | `graphify-build` | 从提取结果组装图谱、节点/边去重 |
 | `graphify-cluster` | Leiden 社区检测、凝聚力评分、社区拆分/合并 |
 | `graphify-analyze` | 高连接节点、跨社区惊奇连接、建议问题、图谱 diff |

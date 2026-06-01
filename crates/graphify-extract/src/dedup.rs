@@ -12,11 +12,9 @@ use graphify_core::model::ExtractionResult;
 /// Retains the **first** occurrence of each node ID and each
 /// `(source, target, relation)` edge triple.
 pub fn dedup_file(result: &mut ExtractionResult) {
-    // Dedup nodes by ID
     let mut seen_nodes = HashSet::new();
     result.nodes.retain(|n| seen_nodes.insert(n.id.clone()));
 
-    // Dedup edges by (source, target, relation) triple
     let mut seen_edges: HashSet<(String, String, String)> = HashSet::new();
     result
         .edges
@@ -34,10 +32,6 @@ pub fn dedup_results(results: Vec<ExtractionResult>) -> ExtractionResult {
     dedup_file(&mut combined);
     combined
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

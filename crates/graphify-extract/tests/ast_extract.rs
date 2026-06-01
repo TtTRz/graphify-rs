@@ -5,9 +5,7 @@ use graphify_core::model::NodeType;
 use graphify_extract::ast_extract::extract_file;
 use std::path::Path;
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Python
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn python_extracts_class_and_methods() {
@@ -68,10 +66,6 @@ fn python_infers_calls() {
     assert_eq!(call_edges[0].confidence, Confidence::Inferred);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Rust
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn rust_extracts_structs_and_functions() {
     let source = r#"
@@ -115,10 +109,6 @@ pub fn main() {
     assert!(result.nodes.iter().any(|n| n.label.contains("std")));
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// JavaScript / TypeScript
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn js_extracts_functions_and_classes() {
     let source = r#"
@@ -153,10 +143,6 @@ fn ts_extracts_same_as_js() {
     let result = extract_file(Path::new("hello.ts"), source, "typescript");
     assert!(result.nodes.iter().any(|n| n.label == "hello"));
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Go
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn go_extracts_types_and_functions() {
@@ -201,10 +187,6 @@ func main() {
     assert!(result.nodes.iter().any(|n| n.node_type == NodeType::Struct));
     assert!(result.nodes.iter().any(|n| n.label == "fmt"));
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Java
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn java_extracts_class_and_methods() {
@@ -274,10 +256,6 @@ public class Handler {
     assert!(result.nodes.iter().any(|n| n.node_type == NodeType::Enum));
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// C / C++
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn c_extracts_includes_and_functions() {
     let source = r#"
@@ -335,10 +313,6 @@ struct Config { std::string host; int port; };
     assert!(labels.contains(&"Config"));
     assert!(result.edges.iter().any(|e| e.relation == "includes"));
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// C#
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn csharp_extracts_class_and_methods() {
@@ -400,9 +374,7 @@ public class Service
     assert!(result.edges.iter().any(|e| e.relation == "calls"));
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Ruby
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn ruby_extracts_class_and_methods() {
@@ -436,10 +408,6 @@ end
             >= 2
     );
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Kotlin
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn kotlin_extracts_class_and_functions() {
@@ -481,10 +449,7 @@ fun processData(input: String): String { return input.uppercase() }
     assert!(result.edges.iter().any(|e| e.relation == "calls"));
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Generic fallback languages (Scala, PHP, Swift, Lua, Zig, PowerShell,
 // Elixir, Objective-C, Julia)
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn scala_extracts_class_and_functions() {
@@ -713,9 +678,49 @@ end
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+#[test]
+fn kotlin_skips_dot_prefixed_calls() {
+    let source = r#"
+fun target(): String { return "ok" }
+
+fun caller(): String {
+    val v = listOf("a", "b")
+    v.get(0)
+    return target()
+}
+"#;
+    let result = extract_file(Path::new("dotcall.kt"), source, "kotlin");
+    let call_edges: Vec<_> = result
+        .edges
+        .iter()
+        .filter(|e| e.relation == "calls")
+        .collect();
+    let caller_id = result
+        .nodes
+        .iter()
+        .find(|n| n.label == "caller")
+        .expect("missing caller node")
+        .id
+        .clone();
+    let target_id = result
+        .nodes
+        .iter()
+        .find(|n| n.label == "target")
+        .expect("missing target node")
+        .id
+        .clone();
+    assert_eq!(
+        call_edges.len(),
+        1,
+        "expected exactly 1 call edge, got {}: {:?}",
+        call_edges.len(),
+        call_edges
+    );
+    assert_eq!(call_edges[0].source, caller_id);
+    assert_eq!(call_edges[0].target, target_id);
+}
+
 // Cross-cutting concerns
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn generic_extracts_basic_patterns() {

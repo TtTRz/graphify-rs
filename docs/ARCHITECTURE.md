@@ -19,7 +19,7 @@ Source Files → detect → extract → build → cluster → analyze → export
 |-------|---------|---------------|
 | `graphify-core` | Data models, graph structure, ID generation, confidence system | `KnowledgeGraph`, `GraphNode`, `GraphEdge` |
 | `graphify-detect` | File discovery, classification, `.graphifyignore`, sensitive file filtering | `classify_file()`, `is_sensitive()` |
-| `graphify-extract` | AST extraction (21 languages via tree-sitter + regex), Claude API semantic extraction | `extract()`, `extract_file()`, `resolve_cross_file_imports()` |
+| `graphify-extract` | AST extraction (21 languages via tree-sitter + regex), multi-provider LLM semantic extraction | `extract()`, `extract_file()`, `resolve_cross_file_imports()` |
 | `graphify-build` | Graph assembly from extraction results, node/edge deduplication | `build_from_extraction()` |
 | `graphify-cluster` | Leiden community detection, cohesion scoring, incremental re-clustering | `cluster()`, `cluster_incremental()`, `cohesion_score()` |
 | `graphify-analyze` | PageRank, dependency cycles, god nodes, surprising connections, graph embeddings, temporal risk | `pagerank()`, `detect_cycles()`, `god_nodes()` |
@@ -72,8 +72,8 @@ Every edge carries a confidence tag:
 | Tag | Meaning | Score | Source |
 |-----|---------|-------|--------|
 | `EXTRACTED` | Found directly in source (import, call, citation) | 1.0 | tree-sitter / regex |
-| `INFERRED` | Reasonable inference from context | 0.4–0.9 | Claude API / cross-file resolution |
-| `AMBIGUOUS` | Uncertain — flagged for human review | 0.1–0.3 | Claude API |
+| `INFERRED` | Reasonable inference from context | 0.4–0.9 | LLM-file resolution |
+| `AMBIGUOUS` | Uncertain — flagged for human review | 0.1–0.3 | LLM |
 
 ## Supported Languages (21)
 

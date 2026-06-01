@@ -23,22 +23,20 @@ pub fn export_wiki(
     let wiki_dir = output_dir.join("wiki");
     fs::create_dir_all(&wiki_dir)?;
 
-    // --- index.md ---
     let mut index = String::with_capacity(2048);
-    writeln!(index, "# Knowledge Graph Wiki").unwrap();
-    writeln!(index).unwrap();
-    writeln!(index, "## Communities").unwrap();
-    writeln!(index).unwrap();
+    writeln!(index, "# Knowledge Graph Wiki")?;
+    writeln!(index)?;
+    writeln!(index, "## Communities")?;
+    writeln!(index)?;
 
     let mut sorted_cids: Vec<usize> = communities.keys().copied().collect();
-    sorted_cids.sort();
+    sorted_cids.sort_unstable();
 
     for &cid in &sorted_cids {
         let members = &communities[&cid];
         let label = community_labels
             .get(&cid)
-            .map(|s| s.as_str())
-            .unwrap_or("Unnamed");
+            .map_or("Unnamed", std::string::String::as_str);
         let filename = community_filename(cid);
         writeln!(
             index,
@@ -46,12 +44,10 @@ pub fn export_wiki(
             filename.trim_end_matches(".md"),
             label,
             members.len()
-        )
-        .unwrap();
+        )?;
     }
-    writeln!(index).unwrap();
+    writeln!(index)?;
 
-    // Find god nodes: degree > average * 2
     let degrees: Vec<(String, usize)> = graph
         .nodes()
         .iter()
@@ -67,11 +63,11 @@ pub fn export_wiki(
         degrees.iter().filter(|(_, d)| *d >= threshold).collect();
 
     if !god_nodes.is_empty() {
-        writeln!(index, "## Key Entities").unwrap();
-        writeln!(index).unwrap();
+        writeln!(index, "## Key Entities")?;
+        writeln!(index)?;
         for (nid, degree) in &god_nodes {
             let node = graph.get_node(nid);
-            let label = node.map(|n| n.label.as_str()).unwrap_or(nid.as_str());
+            let label = node.map_or(nid.as_str(), |n| n.label.as_str());
             let filename = node_filename(nid);
             writeln!(
                 index,
@@ -79,48 +75,40 @@ pub fn export_wiki(
                 filename.trim_end_matches(".md"),
                 label,
                 degree
-            )
-            .unwrap();
+            )?;
         }
-        writeln!(index).unwrap();
+        writeln!(index)?;
     }
 
     fs::write(wiki_dir.join("index.md"), &index)?;
 
-    // --- Community pages ---
     for &cid in &sorted_cids {
         let members = &communities[&cid];
         let label = community_labels
             .get(&cid)
-            .map(|s| s.as_str())
-            .unwrap_or("Unnamed");
+            .map_or("Unnamed", std::string::String::as_str);
         let mut page = String::with_capacity(1024);
-        writeln!(page, "# Community {}: {}", cid, label).unwrap();
-        writeln!(page).unwrap();
-        writeln!(page, "**Members:** {}", members.len()).unwrap();
-        writeln!(page).unwrap();
+        writeln!(page, "# Community {cid}: {label}")?;
+        writeln!(page)?;
+        writeln!(page, "**Members:** {}", members.len())?;
+        writeln!(page)?;
 
-        writeln!(page, "## Nodes").unwrap();
-        writeln!(page).unwrap();
+        writeln!(page, "## Nodes")?;
+        writeln!(page)?;
         for nid in members {
             let node = graph.get_node(nid);
-            let node_label = node.map(|n| n.label.as_str()).unwrap_or(nid.as_str());
-            let node_type = node
-                .map(|n| format!("{:?}", n.node_type))
-                .unwrap_or_default();
+            let node_label = node.map_or(nid.as_str(), |n| n.label.as_str());
+            let node_type = node.map(|n| format!("{}", n.node_type)).unwrap_or_default();
             let degree = graph.degree(nid);
             writeln!(
                 page,
-                "- **{}** (`{}`, {}, degree: {})",
-                node_label, nid, node_type, degree
-            )
-            .unwrap();
+                "- **{node_label}** (`{nid}`, {node_type}, degree: {degree})"
+            )?;
         }
-        writeln!(page).unwrap();
+        writeln!(page)?;
 
-        // Internal edges
         let member_set: std::collections::HashSet<&str> =
-            members.iter().map(|s| s.as_str()).collect();
+            members.iter().map(std::string::String::as_str).collect();
         let all_edges = graph.edges();
         let internal_edges: Vec<_> = all_edges
             .iter()
@@ -130,61 +118,59 @@ pub fn export_wiki(
             .collect();
 
         if !internal_edges.is_empty() {
-            writeln!(page, "## Relationships").unwrap();
-            writeln!(page).unwrap();
+            writeln!(page, "## Relationships")?;
+            writeln!(page)?;
             for edge in &internal_edges {
                 writeln!(
                     page,
                     "- {} → {} ({})",
                     edge.source, edge.target, edge.relation
-                )
-                .unwrap();
+                )?;
             }
-            writeln!(page).unwrap();
+            writeln!(page)?;
         }
 
         fs::write(wiki_dir.join(community_filename(cid)), &page)?;
     }
 
-    // --- God node pages ---
     for (nid, _) in &god_nodes {
         let node = match graph.get_node(nid) {
             Some(n) => n,
             None => continue,
         };
         let mut page = String::with_capacity(512);
-        writeln!(page, "# {}", node.label).unwrap();
-        writeln!(page).unwrap();
-        writeln!(page, "- **ID:** `{}`", node.id).unwrap();
-        writeln!(page, "- **Type:** {:?}", node.node_type).unwrap();
-        writeln!(page, "- **File:** `{}`", node.source_file).unwrap();
+        writeln!(page, "# {}", node.label)?;
+        writeln!(page)?;
+        writeln!(page, "- **ID:** `{}`", node.id)?;
+        writeln!(page, "- **Type:** {:?}", node.node_type)?;
+        writeln!(page, "- **File:** `{}`", node.source_file)?;
         if let Some(loc) = &node.source_location {
-            writeln!(page, "- **Location:** {}", loc).unwrap();
+            writeln!(page, "- **Location:** {loc}")?;
         }
         if let Some(c) = node.community {
-            let clabel = community_labels.get(&c).map(|s| s.as_str()).unwrap_or("?");
-            writeln!(page, "- **Community:** {} ({})", c, clabel).unwrap();
+            let clabel = community_labels
+                .get(&c)
+                .map_or("?", std::string::String::as_str);
+            writeln!(page, "- **Community:** {c} ({clabel})")?;
         }
-        writeln!(page).unwrap();
+        writeln!(page)?;
 
-        // Related edges
         let all_edges = graph.edges();
         let related: Vec<_> = all_edges
             .iter()
             .filter(|e| e.source.as_str() == nid.as_str() || e.target.as_str() == nid.as_str())
             .collect();
         if !related.is_empty() {
-            writeln!(page, "## Relationships").unwrap();
-            writeln!(page).unwrap();
+            writeln!(page, "## Relationships")?;
+            writeln!(page)?;
             for edge in &related {
                 writeln!(
                     page,
                     "- {} → {} ({}, {:?})",
                     edge.source, edge.target, edge.relation, edge.confidence
-                )
-                .unwrap();
+                )?;
             }
-            writeln!(page).unwrap();
+            writeln!(page)?;
         }
 
         fs::write(wiki_dir.join(node_filename(nid)), &page)?;
@@ -195,7 +181,7 @@ pub fn export_wiki(
 }
 
 fn community_filename(cid: usize) -> String {
-    format!("community_{}.md", cid)
+    format!("community_{cid}.md")
 }
 
 fn node_filename(id: &str) -> String {
@@ -210,7 +196,7 @@ fn node_filename(id: &str) -> String {
         })
         .collect();
     let truncated = graphify_core::truncate_to_bytes(&safe, graphify_core::MAX_FILENAME_BYTES);
-    format!("{}.md", truncated)
+    format!("{truncated}.md")
 }
 
 #[cfg(test)]
@@ -234,7 +220,6 @@ mod tests {
             })
             .unwrap();
         }
-        // Make n0 a hub
         for i in 1..5 {
             kg.add_edge(GraphEdge {
                 source: "n0".into(),

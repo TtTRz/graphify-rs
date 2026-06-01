@@ -21,13 +21,13 @@ pub fn export_obsidian(
     let vault_dir = output_dir.join("obsidian");
     fs::create_dir_all(&vault_dir)?;
 
-    // Pre-compute node → community mapping for frontmatter
+    let file_names = build_unique_filenames(graph);
+
     let node_community: HashMap<&str, usize> = communities
         .iter()
         .flat_map(|(&cid, members)| members.iter().map(move |nid| (nid.as_str(), cid)))
         .collect();
 
-    // Collect all edges grouped by source/target for fast lookup
     let all_edges = graph.edges();
     let mut edges_for: HashMap<&str, Vec<(&str, &str)>> = HashMap::new();
     for edge in &all_edges {
@@ -42,37 +42,39 @@ pub fn export_obsidian(
     }
 
     for node in graph.nodes() {
-        let filename = sanitize_filename(&node.label);
-        let filepath = vault_dir.join(format!("{}.md", filename));
+        let filename = file_names
+            .get(&node.id)
+            .map(|s| s.as_str())
+            .unwrap_or_else(|| "unnamed");
+        let filepath = vault_dir.join(format!("{filename}.md"));
 
         let mut content = String::with_capacity(512);
 
-        // --- YAML frontmatter ---
         content.push_str("---\n");
-        writeln!(content, "id: {}", node.id).unwrap();
-        writeln!(content, "type: {:?}", node.node_type).unwrap();
+        writeln!(content, "id: {}", node.id)?;
+        writeln!(content, "type: {}", node.node_type)?;
         if !node.source_file.is_empty() {
-            writeln!(content, "source: {}", node.source_file).unwrap();
+            writeln!(content, "source: {}", node.source_file)?;
         }
         if let Some(&cid) = node_community.get(node.id.as_str()) {
-            writeln!(content, "community: {}", cid).unwrap();
+            writeln!(content, "community: {cid}")?;
             if let Some(clabel) = community_labels.get(&cid) {
-                writeln!(content, "community_label: {}", clabel).unwrap();
+                writeln!(content, "community_label: {clabel}")?;
             }
         }
         content.push_str("---\n\n");
 
-        // --- Connections ---
         if let Some(neighbours) = edges_for.get(node.id.as_str())
             && !neighbours.is_empty()
         {
             content.push_str("## Connections\n\n");
             for &(neighbor_id, relation) in neighbours {
-                let link_label = graph
-                    .get_node(neighbor_id)
-                    .map(|n| sanitize_filename(&n.label))
-                    .unwrap_or_else(|| sanitize_filename(neighbor_id));
-                writeln!(content, "- [[{}]] ({})", link_label, relation).unwrap();
+                let fallback = sanitize_filename(neighbor_id);
+                let link_label = file_names
+                    .get(neighbor_id)
+                    .map(|s| s.as_str())
+                    .unwrap_or_else(|| fallback.as_str());
+                writeln!(content, "- [[{link_label}]] ({relation})")?;
             }
         }
 
@@ -81,6 +83,29 @@ pub fn export_obsidian(
 
     info!(path = %vault_dir.display(), "exported Obsidian vault");
     Ok(vault_dir)
+}
+
+fn build_unique_filenames(graph: &KnowledgeGraph) -> HashMap<String, String> {
+    let mut name_to_ids: HashMap<String, Vec<String>> = HashMap::new();
+    for node in graph.nodes() {
+        let sanitized = sanitize_filename(&node.label);
+        name_to_ids
+            .entry(sanitized)
+            .or_default()
+            .push(node.id.clone());
+    }
+
+    let mut result = HashMap::new();
+    for (sanitized, mut ids) in name_to_ids {
+        if ids.len() == 1 {
+            result.insert(ids.pop().unwrap(), sanitized);
+        } else {
+            for (i, id) in ids.into_iter().enumerate() {
+                result.insert(id, format!("{sanitized}_{i}"));
+            }
+        }
+    }
+    result
 }
 
 /// Sanitize a label for use as both a filename and a `[[wikilink]]` target.

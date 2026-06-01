@@ -1,33 +1,33 @@
 ---
-name: graphify
+name: graphify-rs
 description: any input (code, docs, papers, images) → knowledge graph → clustered communities → HTML + JSON + audit report
-trigger: /graphify
+trigger: /graphify-rs
 ---
 
-# /graphify
+# /graphify-rs
 
 Turn any folder of files into a navigable knowledge graph with community detection, an honest audit trail, and multiple outputs: interactive HTML, GraphRAG-ready JSON, and a plain-language GRAPH_REPORT.md.
 
 ## Usage
 
 ```
-/graphify                                             # full pipeline on current directory
-/graphify <path>                                      # full pipeline on specific path
-/graphify <path> --code-only                          # code files only, no LLM needed
-/graphify <path> --no-llm                             # skip semantic extraction (AST only)
-/graphify <path> --update                             # incremental - re-extract only new/changed files
-/graphify <path> --format json,html,report            # select specific export formats
-/graphify <path> --format graphml                     # export graph.graphml (Gephi, yEd)
-/graphify <path> --format cypher                      # generate graphify-out/cypher.txt for Neo4j
-/graphify <path> --format svg                         # export graph.svg
-/graphify <path> --format wiki                        # build agent-crawlable wiki
-/graphify <path> --format obsidian                    # write Obsidian vault
-/graphify query "<question>"                          # BFS traversal - broad context
-/graphify query "<question>" --dfs                    # DFS - trace a specific path
-/graphify query "<question>" --budget 1500            # cap answer at N tokens
-/graphify add <url>                                   # fetch URL, save to ./raw, update graph
-/graphify watch <path>                                # watch folder, auto-rebuild on code changes
-/graphify serve                                       # start MCP stdio server for agent access
+/graphify-rs                                             # full pipeline on current directory
+/graphify-rs <path>                                      # full pipeline on specific path
+/graphify-rs <path> --code-only                          # code files only, no LLM needed
+/graphify-rs <path> --no-llm                             # skip semantic extraction (AST only)
+/graphify-rs <path> --update                             # incremental - re-extract only new/changed files
+/graphify-rs <path> --format json,html,report            # select specific export formats
+/graphify-rs <path> --format graphml                     # export graph.graphml (Gephi, yEd)
+/graphify-rs <path> --format cypher                      # generate graphify-out/cypher.txt for Neo4j
+/graphify-rs <path> --format svg                         # export graph.svg
+/graphify-rs <path> --format wiki                        # build agent-crawlable wiki
+/graphify-rs <path> --format obsidian                    # write Obsidian vault
+/graphify-rs query "<question>"                          # BFS traversal - broad context
+/graphify-rs query "<question>" --dfs                    # DFS - trace a specific path
+/graphify-rs query "<question>" --budget 1500            # cap answer at N tokens
+/graphify-rs add <url>                                   # fetch URL, save to ./raw, update graph
+/graphify-rs watch <path>                                # watch folder, auto-rebuild on code changes
+/graphify-rs serve                                       # start MCP stdio server for agent access
 ```
 
 ## What graphify is for
@@ -163,7 +163,7 @@ Instead of manual rebuilds, the user can set up always-on monitoring:
 
 ---
 
-## For /graphify query
+## For /graphify-rs query
 
 ```bash
 graphify-rs query "QUESTION" --graph graphify-out/graph.json
@@ -179,7 +179,7 @@ graphify-rs save-result --question "QUESTION" --answer "ANSWER" --nodes NODE1 NO
 
 ---
 
-## For /graphify add
+## For /graphify-rs add
 
 Fetch a URL and add it to the corpus:
 
@@ -209,7 +209,7 @@ Code changes trigger AST re-extraction + rebuild automatically (no LLM needed). 
 
 ## For MCP server
 
-Start a stdio MCP server exposing 15 query tools:
+Start a stdio MCP server exposing 15 query tools. If the graph file does not exist, it is auto-built from the current directory (AST-only, no LLM):
 
 ```bash
 graphify-rs serve --graph graphify-out/graph.json

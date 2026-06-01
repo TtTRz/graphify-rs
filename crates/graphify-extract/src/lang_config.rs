@@ -34,17 +34,11 @@ pub struct LanguageConfig {
     pub function_label_parens: bool,
 }
 
-// ---------------------------------------------------------------------------
-// Helper
-// ---------------------------------------------------------------------------
-
 fn hs(items: &[&'static str]) -> HashSet<&'static str> {
     items.iter().copied().collect()
 }
 
-// ---------------------------------------------------------------------------
 // Language configs (matching the Python extract.py)
-// ---------------------------------------------------------------------------
 
 pub fn python_config() -> LanguageConfig {
     LanguageConfig {
@@ -437,10 +431,6 @@ pub fn dart_config() -> LanguageConfig {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Lookup
-// ---------------------------------------------------------------------------
-
 /// Return the [`LanguageConfig`] for the given language name.
 pub fn config_for_language(lang: &str) -> Option<LanguageConfig> {
     match lang {
@@ -468,10 +458,6 @@ pub fn config_for_language(lang: &str) -> Option<LanguageConfig> {
         _ => None,
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -524,7 +510,6 @@ mod tests {
     fn typescript_extends_javascript() {
         let ts = typescript_config();
         assert!(ts.class_types.contains("abstract_class_declaration"));
-        // Inherited from JS
         assert!(ts.class_types.contains("class_declaration"));
     }
 
