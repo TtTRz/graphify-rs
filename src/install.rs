@@ -165,7 +165,6 @@ pub fn install_skill(platform: &str) -> Result<()> {
     if let Some(parent) = skill_path.parent() {
         let version_file = parent.join(".graphify_rs_version");
         let _ = fs::write(&version_file, VERSION);
-        println!("\n  Version file written at {}", version_file.display());
     }
 
     if config.register_claude_md {
