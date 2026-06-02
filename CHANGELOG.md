@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`serve` auto-build** — `graphify-rs serve` now automatically runs a fast AST-only build if the specified `--graph` file does not exist, making it a zero-config entry point for MCP server setup
 
+## [0.5.4] - 2026-06-02
+
+### Fixed
+- **config renamed** — directory-level configuration file renamed from `graphify.toml` to `graphify-rs.toml` (breaking change)
+- **Version staleness check** — warns on startup if installed skill is from an older version
+  - `.graphify_version` stamp name — changed to `.graphify_rs_version` (breaking change)
+
 ## [0.5.1] - 2026-05-18
 
 ### Added
