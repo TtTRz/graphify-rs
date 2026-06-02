@@ -48,7 +48,7 @@ open graphify-out/graph.html         # macOS
 graphify-rs query "how does auth work?"
 
 # (Optional) Add semantic extraction via LLM
-export ANTHROPIC_API_KEY=sk-...   # or configure [llm] in graphify.toml
+export ANTHROPIC_API_KEY=sk-...   # or configure [llm] in graphify-rs.toml
 graphify-rs build
 ```
 
@@ -86,7 +86,7 @@ Rust rewrite of [graphify](https://github.com/safishamsi/graphify) (Python) — 
 
 **Pass 1 — AST extraction** (free, always runs): tree-sitter parses 21 languages into functions, classes, imports, calls. All edges tagged `EXTRACTED` (confidence 1.0).
 
-**Pass 2 — Semantic extraction** (optional, `--no-llm` to skip): LLM API (Anthropic, OpenAI, Ollama, or OpenAI-compatible) discovers conceptual links, shared assumptions, design rationale. Edges tagged `INFERRED` (confidence 0.4–0.9). Configure via `[llm]` in `graphify.toml`.
+**Pass 2 — Semantic extraction** (optional, `--no-llm` to skip): LLM API (Anthropic, OpenAI, Ollama, or OpenAI-compatible) discovers conceptual links, shared assumptions, design rationale. Edges tagged `INFERRED` (confidence 0.4–0.9). Configure via `[llm]` in `graphify-rs.toml`.
 
 ## Graph Algorithms
 

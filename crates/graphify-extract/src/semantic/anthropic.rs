@@ -64,7 +64,7 @@ pub async fn extract_anthropic(
             } else {
                 anyhow::bail!(
                     "No API key configured for Anthropic. \
-                     Set ANTHROPIC_API_KEY or configure [llm] in graphify.toml"
+                     Set ANTHROPIC_API_KEY or configure [llm] in graphify-rs.toml"
                 );
             }
         }
@@ -74,7 +74,7 @@ pub async fn extract_anthropic(
             } else {
                 anyhow::bail!(
                     "No OAuth token configured for Anthropic. \
-                     Run `claude login` or configure [llm] in graphify.toml"
+                     Run `claude login` or configure [llm] in graphify-rs.toml"
                 );
             }
         }

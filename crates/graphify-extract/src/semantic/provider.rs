@@ -14,7 +14,7 @@ pub enum AuthType {
     Bearer,
 }
 
-/// Raw LLM configuration from `graphify.toml`'s `[llm]` section.
+/// Raw LLM configuration from `graphify-rs.toml`'s `[llm]` section.
 /// Used to avoid a 9-parameter resolve() signature.
 #[derive(Debug, Default)]
 pub struct LLMConfigRaw {

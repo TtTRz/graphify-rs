@@ -75,7 +75,7 @@ open graphify-out/graph.html       # macOS
 graphify-rs query "认证是如何工作的？"
 
 # 4.（可选）启用 LLM 语义提取
-export ANTHROPIC_API_KEY=sk-...   # 或在 graphify.toml 中配置 [llm] 段
+export ANTHROPIC_API_KEY=sk-...   # 或在 graphify-rs.toml 中配置 [llm] 段
 graphify-rs build                  # 添加 LLM 推断的 INFERRED 边
 ```
 
@@ -110,7 +110,7 @@ graphify-rs build                  # 添加 LLM 推断的 INFERRED 边
 
 **第 2 轮 — LLM 语义提取**（可选，`--no-llm` 跳过）：
 
-将文档/论文/图片内容发送给 LLM API（支持 Anthropic、OpenAI、Ollama、OpenAI 兼容端点），发现语法本身无法揭示的高层关系 — 概念关联、共享假设、设计意图。此轮的边标记为 `INFERRED`，置信度 0.4–0.9。通过 `graphify.toml` 的 `[llm]` 段配置。
+将文档/论文/图片内容发送给 LLM API（支持 Anthropic、OpenAI、Ollama、OpenAI 兼容端点），发现语法本身无法揭示的高层关系 — 概念关联、共享假设、设计意图。此轮的边标记为 `INFERRED`，置信度 0.4–0.9。通过 `graphify-rs.toml` 的 `[llm]` 段配置。
 
 ### 置信度体系
 

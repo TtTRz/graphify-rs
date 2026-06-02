@@ -173,7 +173,7 @@ enum Commands {
         /// Shell to generate completions for
         shell: Shell,
     },
-    /// Initialize a graphify.toml config file
+    /// Initialize a graphify-rs.toml config file
     Init,
 }
 
@@ -689,11 +689,11 @@ fn cmd_stats(graph_path: &str) -> Result<()> {
     Ok(())
 }
 
-/// Initialize a graphify.toml configuration file
+/// Initialize a graphify-rs.toml configuration file
 fn cmd_init() -> Result<()> {
-    let path = Path::new("graphify.toml");
+    let path = Path::new("graphify-rs.toml");
     if path.exists() {
-        anyhow::bail!("graphify.toml already exists");
+        anyhow::bail!("graphify-rs.toml already exists");
     }
     std::fs::write(
         path,
@@ -726,6 +726,6 @@ fn cmd_init() -> Result<()> {
 # openai_compatible_base_url = "http://localhost:8000/v1"  # required for openai_compatible
 "#,
     )?;
-    println!("{} Created graphify.toml", "✓".green());
+    println!("{} Created graphify-rs.toml", "✓".green());
     Ok(())
 }

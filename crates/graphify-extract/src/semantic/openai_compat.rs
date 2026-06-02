@@ -80,12 +80,12 @@ pub async fn extract_openai_compatible(
         match provider {
             LLMProvider::OpenAI => {
                 anyhow::bail!(
-                    "OpenAI API key invalid. Set OPENAI_API_KEY or configure in graphify.toml."
+                    "OpenAI API key invalid. Set OPENAI_API_KEY or configure in graphify-rs.toml."
                 );
             }
             _ => {
                 anyhow::bail!(
-                    "Authentication failed for {base_url}. Check your API key in graphify.toml."
+                    "Authentication failed for {base_url}. Check your API key in graphify-rs.toml."
                 );
             }
         }

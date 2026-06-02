@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use std::path::Path;
 
-/// Configuration loaded from `graphify.toml`.
+/// Configuration loaded from `graphify-rs.toml`.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -27,10 +27,10 @@ pub struct LLMConfig {
     pub openai_compatible_base_url: Option<String>,
 }
 
-/// Load configuration from `graphify.toml` in the given directory.
+/// Load configuration from `graphify-rs.toml` in the given directory.
 /// Returns default config if file doesn't exist or can't be parsed.
 pub fn load_config(root: &Path) -> Config {
-    let config_path = root.join("graphify.toml");
+    let config_path = root.join("graphify-rs.toml");
     if !config_path.exists() {
         return Config::default();
     }

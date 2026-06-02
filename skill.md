@@ -30,9 +30,9 @@ Turn any folder of files into a navigable knowledge graph with community detecti
 /graphify-rs serve                                       # start MCP stdio server for agent access
 ```
 
-## What graphify is for
+## What graphify-rs is for
 
-graphify is built around Andrej Karpathy's /raw folder workflow: drop anything into a folder - papers, tweets, screenshots, code, notes - and get a structured knowledge graph that shows you what you didn't know was connected.
+graphify-rs is built around Andrej Karpathy's /raw folder workflow: drop anything into a folder - papers, tweets, screenshots, code, notes - and get a structured knowledge graph that shows you what you didn't know was connected.
 
 Three things it does that Claude alone cannot:
 1. **Persistent graph** - relationships are stored in `graphify-out/graph.json` and survive across sessions. Ask questions weeks later without re-reading everything.
@@ -221,7 +221,7 @@ To configure in Claude Desktop, add to `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "graphify": {
+    "graphify-rs": {
       "command": "graphify-rs",
       "args": ["serve", "--graph", "/absolute/path/to/graphify-out/graph.json"]
     }
@@ -248,7 +248,7 @@ After every `git commit`, the hook auto-rebuilds the graph (code-only, no LLM).
 Run once per project to make graphify always-on:
 
 ```bash
-graphify-rs claude install     # write ## graphify section to CLAUDE.md + PreToolUse hook
+graphify-rs claude install     # write ## graphify-rs section to CLAUDE.md + PreToolUse hook
 graphify-rs claude uninstall   # remove the section
 ```
 
@@ -260,7 +260,7 @@ graphify-rs claude uninstall   # remove the section
 graphify-rs stats graphify-out/graph.json              # show graph statistics
 graphify-rs diff old-graph.json new-graph.json         # compare two graph snapshots
 graphify-rs benchmark graphify-out/graph.json          # token efficiency benchmark
-graphify-rs init                                       # create graphify.toml config file
+graphify-rs init                                       # create graphify-rs.toml config file
 graphify-rs completions bash                           # generate shell completions (bash/zsh/fish)
 ```
 

@@ -9,17 +9,17 @@ use std::path::Path;
 use thiserror::Error;
 
 /// Marker delimiters used to identify the graphify hook block.
-const HOOK_MARKER_START: &str = "# graphify-hook-start";
-const HOOK_MARKER_END: &str = "# graphify-hook-end";
+const HOOK_MARKER_START: &str = "# graphify-rs-hook-start";
+const HOOK_MARKER_END: &str = "# graphify-rs-hook-end";
 
 /// The hook script block injected into git hooks.
 const HOOK_SCRIPT: &str = r"
-# graphify-hook-start
+# graphify-rs-hook-start
 # Auto-run graphify-rs AST extraction on commit (code-only, no LLM)
 if command -v graphify-rs >/dev/null 2>&1; then
   graphify-rs build --code-only --output graphify-out &
 fi
-# graphify-hook-end
+# graphify-rs-hook-end
 ";
 
 /// Hook names that graphify manages.

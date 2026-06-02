@@ -414,7 +414,7 @@ async fn step_extract_semantic(
     } else if n_doc + n_paper > 0 {
         info_print!(
             verb,
-            "  {} Configure [llm] in graphify.toml to enable semantic extraction for {} doc/paper files",
+            "  {} Configure [llm] in graphify-rs.toml to enable semantic extraction for {} doc/paper files",
             "ℹ".blue(),
             n_doc + n_paper
         );
