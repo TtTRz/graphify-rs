@@ -218,6 +218,7 @@ pub(crate) fn make_edge(
         source_file: path_str(path),
         source_location: None,
         weight: 1.0,
+        provenance: Some(format!("regex:{relation}")),
         extra: HashMap::new(),
     }
 }

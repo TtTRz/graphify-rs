@@ -61,6 +61,7 @@ fn dispatch_tools_call(graph: &KnowledgeGraph, request: &Value) -> Value {
         "detect_cycles" => handlers::handle_detect_cycles(graph, args),
         "smart_summary" => handlers::handle_smart_summary(graph, args),
         "find_similar" => handlers::handle_find_similar(graph, args),
+        "explore" => handlers::handle_explore(graph, args),
         _ => handlers::tool_result_error(&format!("Unknown tool: {tool_name}")),
     };
 

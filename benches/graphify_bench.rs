@@ -31,6 +31,7 @@ fn make_edge(src: &str, tgt: &str) -> GraphEdge {
         source_location: None,
         weight: 1.0,
         extra: HashMap::new(),
+        provenance: None,
     }
 }
 

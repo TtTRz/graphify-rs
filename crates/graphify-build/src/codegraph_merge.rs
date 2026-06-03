@@ -259,6 +259,7 @@ pub fn merge_codegraph_edges(kg: &mut KnowledgeGraph, project_root: &Path) -> Re
                                 source_file: src_key.0.clone(),
                                 source_location: None,
                                 weight: 1.0,
+                                provenance: Some("codegraph-merge".to_string()),
                                 extra,
                             };
 

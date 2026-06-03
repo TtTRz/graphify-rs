@@ -86,6 +86,8 @@ pub struct GraphEdge {
     pub source_location: Option<String>,
     #[serde(default = "default_weight")]
     pub weight: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<String>,
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
 }
@@ -217,6 +219,7 @@ mod tests {
             source_file: "src/main.rs".into(),
             source_location: None,
             weight: 1.0,
+            provenance: None,
             extra: HashMap::new(),
         }
     }

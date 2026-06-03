@@ -105,6 +105,7 @@ fn extract_with_treesitter(
                     source_file: str_path.to_string(),
                     source_location: None,
                     weight: 1.0,
+                    provenance: Some("ast:call-resolve".to_string()),
                     extra: HashMap::new(),
                 });
             }
@@ -141,6 +142,7 @@ fn extract_with_treesitter(
                             source_file: str_path.to_string(),
                             source_location: None,
                             weight: 1.0,
+                            provenance: Some("ast:ruby-call-heuristic".to_string()),
                             extra: HashMap::new(),
                         });
                     }
@@ -376,6 +378,7 @@ pub(crate) fn make_edge(
         source_file: source_file.to_string(),
         source_location: Some(format!("L{line}")),
         weight: 1.0,
+        provenance: Some(format!("ast:{relation}")),
         extra: HashMap::new(),
     }
 }

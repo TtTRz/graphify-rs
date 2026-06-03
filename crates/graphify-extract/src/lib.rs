@@ -235,6 +235,7 @@ fn resolve_python_imports(result: &mut ExtractionResult) {
                             source_file: edge.source_file.clone(),
                             source_location: None,
                             weight: 0.7,
+                            provenance: Some("cross-file:python-star-import".to_string()),
                             extra: Default::default(),
                         });
                     }
@@ -433,6 +434,7 @@ fn resolve_cross_file_imports(result: &mut ExtractionResult) {
                     source_file: source_file.clone(),
                     source_location: None,
                     weight: 0.8,
+                    provenance: Some("cross-file:import-resolve".to_string()),
                     extra: Default::default(),
                 });
                 continue;
@@ -458,6 +460,7 @@ fn resolve_cross_file_imports(result: &mut ExtractionResult) {
                     source_file: source_file.clone(),
                     source_location: None,
                     weight: 0.8,
+                    provenance: Some("cross-file:import-resolve:fallback".to_string()),
                     extra: Default::default(),
                 });
                 fallback_count += 1;
@@ -521,6 +524,7 @@ fn resolve_cross_file_calls(result: &mut ExtractionResult) {
             source_file,
             source_location: None,
             weight: 0.5,
+            provenance: Some("cross-file:call-resolve".to_string()),
             extra: HashMap::new(),
         });
     }

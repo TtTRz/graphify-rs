@@ -164,6 +164,7 @@ fn parse_semantic_response(text: &str, file_str: &str) -> Result<ExtractionResul
             source_file: file_str.to_string(),
             source_location: None,
             weight: 1.0,
+            provenance: Some("llm:semantic".to_string()),
             extra: HashMap::new(),
         });
     }

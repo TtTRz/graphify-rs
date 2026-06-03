@@ -100,6 +100,7 @@ fn main() -> anyhow::Result<()> {
             source_file: "architecture.md".into(),
             source_location: None,
             weight: 1.0,
+            provenance: None,
             extra: HashMap::new(),
         })?;
     }

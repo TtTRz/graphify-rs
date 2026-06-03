@@ -38,7 +38,7 @@ pub async fn cmd_build(
     };
     let should_export = |name: &str| selected.iter().any(|s| s.eq_ignore_ascii_case(name));
 
-    let detection = step_detect(&root, update, verb)?;
+    let detection = step_detect(&root, &output_dir, update, verb)?;
 
     let mut extractions = step_extract_ast(&root, &cache_dir, &detection, code_only, verb)?;
 
@@ -113,12 +113,13 @@ pub async fn cmd_build(
 
 fn step_detect(
     root: &Path,
+    output_dir: &Path,
     update: bool,
     verb: Verbosity,
 ) -> Result<graphify_detect::DetectResult> {
     info_print!(verb, "  {} files...", "Detecting".cyan());
     let detection = if update {
-        let manifest_path = root.join("graphify-out").join(".graphify_manifest.json");
+        let manifest_path = output_dir.join(".graphify_manifest.json");
         graphify_detect::detect_incremental(root, Some(manifest_path.to_str().unwrap_or("")))
     } else {
         graphify_detect::detect(root)

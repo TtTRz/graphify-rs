@@ -491,6 +491,7 @@ pub(crate) fn add_import_node(
         source_file: str_path.to_string(),
         source_location: Some(format!("L{line}")),
         weight: 1.0,
+        provenance: Some("ast:import".to_string()),
         extra: HashMap::new(),
     });
 }

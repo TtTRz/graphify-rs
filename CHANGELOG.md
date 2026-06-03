@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-06-03
+
+### Added
+
+- **Edge provenance tracking** — every `GraphEdge` now carries an optional `provenance` field recording where the edge came from (`ast:calls`, `ast:import`, `cross-file:import-resolve`, `cross-file:call-resolve`, `cross-file:python-star-import`, `codegraph-merge`, `llm:semantic`, `regex:*`). Backward-compatible: existing JSON without this field loads as `null`.
+- **`explore` MCP tool** — 16th MCP tool. Takes a natural language task, searches for seed nodes, BFS-traverses the subgraph, and returns symbols grouped by file with a relationship map. One call replaces multiple `query_graph` + `get_neighbors` combinations.
+- **`affected` test impact analysis** — new `graphify-rs affected` subcommand. Traces reverse dependency edges (`imports`/`uses`/`calls`) from changed files to find affected test files. Supports `--stdin` for piping `git diff --name-only`. Detects 16+ test file naming patterns across 8 languages.
+
+## [0.6.0] - 2026-06-02
+
+### Changed
+
+- **Default output moved to `~/.graphify-rs/<name>-<hash>/`** — no longer writes `graphify-out/` into the project directory. Path is computed from project root's directory name + 8-char hash. Explicit `--output` still works as before.
+- **Install hooks use dynamic paths** — CLAUDE.md, AGENTS.md, and hook commands now reference the computed output directory instead of hardcoded `graphify-out/`. Shell paths are properly quoted for spaces.
+- **Deduplicated install templates** — merged `claude_md_section`/`agents_md_section` into single `graph_md_section()` function.
+
+## [0.5.3] - 2026-05-28
+
+### Added
+
+- **CodeGraph SQLite edge merge** — `graphify-rs build` now auto-detects `.codegraph/codegraph.db` in the project root and merges its edges (calls, imports, contains, etc.) into the knowledge graph. Node kinds are mapped to `NodeType`, file paths normalized, and duplicate edges skipped. Zero-config: works automatically when the DB is present, silently ignored otherwise.
+
+### Changed
+
+- **Skill trigger renamed** — `/graphify` → `/graphify-rs` to match the binary name
+- **Unified edge dispatch** — `map_edge_kind()` in `graphify-build` now handles contains/unknown edge kinds through a single match arm instead of ad-hoc fallbacks
+
 ## [0.5.2] - 2026-05-24
 
 ### Added
@@ -228,8 +255,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Git hook integration (post-commit, post-checkout)
 - CLI with 21 subcommands via clap derive
 
-[0.5.0]: https://github.com/TtTRz/graphify-rs/compare/v0.4.5...v0.5.0
+[0.7.0]: https://github.com/TtTRz/graphify-rs/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/TtTRz/graphify-rs/compare/v0.5.3...v0.6.0
+[0.5.3]: https://github.com/TtTRz/graphify-rs/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/TtTRz/graphify-rs/compare/v0.5.1...v0.5.2
+[0.5.1]: https://github.com/TtTRz/graphify-rs/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/TtTRz/graphify-rs/compare/v0.4.5...v0.5.0
 [0.4.5]: https://github.com/TtTRz/graphify-rs/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/TtTRz/graphify-rs/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/TtTRz/graphify-rs/compare/v0.4.2...v0.4.3

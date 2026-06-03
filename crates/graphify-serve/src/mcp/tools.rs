@@ -260,6 +260,35 @@ pub(crate) fn tool_definitions() -> Value {
                     }
                 }
             }
+        },
+        {
+            "name": "explore",
+            "description": "Explore the codebase around a task or question. Combines search, graph traversal, and context building into one call — returns relevant source code grouped by file with a relationship map. Use this instead of multiple query_graph + get_neighbors calls.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "type": "string",
+                        "description": "Natural language description of what you want to explore (e.g. 'how does authentication work', 'request routing flow')"
+                    },
+                    "depth": {
+                        "type": "number",
+                        "description": "Graph traversal depth from seed nodes (default: 2)",
+                        "default": 2
+                    },
+                    "budget": {
+                        "type": "number",
+                        "description": "Token budget for response (default: 4000)",
+                        "default": 4000
+                    },
+                    "max_files": {
+                        "type": "number",
+                        "description": "Maximum number of files to include (default: 15)",
+                        "default": 15
+                    }
+                },
+                "required": ["task"]
+            }
         }
     ])
 }

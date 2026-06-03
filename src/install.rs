@@ -84,27 +84,21 @@ const SKILL_REGISTRATION: &str = r#"
 When the user types `/graphify-rs`, invoke the Skill tool with `skill: "graphify-rs"` before doing anything else.
 "#;
 
-const CLAUDE_MD_SECTION: &str = r"## graphify-rs
+fn graph_md_section(output_dir: &str) -> String {
+    format!(
+        r"## graphify-rs
 
-This project has a graphify-rs knowledge graph at graphify-out/.
+This project has a graphify-rs knowledge graph at {output_dir}/.
 
 Rules:
-- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
-- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
-- After modifying code files in this session, run `graphify-rs build --path . --output graphify-out --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s)
-";
+- Before answering architecture or codebase questions, read {output_dir}/GRAPH_REPORT.md for god nodes and community structure
+- If {output_dir}/wiki/index.md exists, navigate it instead of reading raw files
+- After modifying code files in this session, run `graphify-rs build --path . --output {output_dir} --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s)
+"
+    )
+}
 
 const CLAUDE_MD_MARKER: &str = "## graphify-rs";
-
-const AGENTS_MD_SECTION: &str = r"## graphify-rs
-
-This project has a graphify-rs knowledge graph at graphify-out/.
-
-Rules:
-- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
-- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
-- After modifying code files in this session, run `graphify-rs build --path . --output graphify-out --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s)
-";
 
 const AGENTS_MD_MARKER: &str = "## graphify-rs";
 
@@ -181,12 +175,15 @@ pub fn install_skill(platform: &str) -> Result<()> {
 
 /// `graphify-rs claude install` — project-level Claude integration.
 pub fn claude_install(project_root: &Path) -> Result<()> {
+    let output_dir = crate::paths::resolve_default_output(project_root)
+        .to_string_lossy()
+        .to_string();
     let claude_md = project_root.join("CLAUDE.md");
-    append_section(&claude_md, CLAUDE_MD_SECTION, CLAUDE_MD_MARKER)?;
+    append_section(&claude_md, &graph_md_section(&output_dir), CLAUDE_MD_MARKER)?;
     println!("  Updated {}", claude_md.display());
 
     let settings_path = project_root.join(".claude/settings.json");
-    write_claude_settings_hook(&settings_path)?;
+    write_claude_settings_hook(&settings_path, &output_dir)?;
     println!("  Wrote hook to {}", settings_path.display());
 
     println!("\n  Claude integration installed.");
@@ -209,12 +206,15 @@ pub fn claude_uninstall(project_root: &Path) -> Result<()> {
 
 /// `graphify-rs codebuddy install` — project-level CodeBuddy integration.
 pub fn codebuddy_install(project_root: &Path) -> Result<()> {
+    let output_dir = crate::paths::resolve_default_output(project_root)
+        .to_string_lossy()
+        .to_string();
     let agents_md = project_root.join("AGENTS.md");
-    append_section(&agents_md, AGENTS_MD_SECTION, AGENTS_MD_MARKER)?;
+    append_section(&agents_md, &graph_md_section(&output_dir), AGENTS_MD_MARKER)?;
     println!("  Updated {}", agents_md.display());
 
     let settings_path = project_root.join(".codebuddy/settings.json");
-    write_codebuddy_settings_hook(&settings_path)?;
+    write_codebuddy_settings_hook(&settings_path, &output_dir)?;
     println!("  Wrote hook to {}", settings_path.display());
 
     println!("\n  CodeBuddy integration installed.");
@@ -237,12 +237,15 @@ pub fn codebuddy_uninstall(project_root: &Path) -> Result<()> {
 
 /// `graphify-rs codex install` — project-level Codex integration.
 pub fn codex_install(project_root: &Path) -> Result<()> {
+    let output_dir = crate::paths::resolve_default_output(project_root)
+        .to_string_lossy()
+        .to_string();
     let agents_md = project_root.join("AGENTS.md");
-    append_section(&agents_md, AGENTS_MD_SECTION, AGENTS_MD_MARKER)?;
+    append_section(&agents_md, &graph_md_section(&output_dir), AGENTS_MD_MARKER)?;
     println!("  Updated {}", agents_md.display());
 
     let hooks_path = project_root.join(".codex/hooks.json");
-    write_codex_hooks(&hooks_path)?;
+    write_codex_hooks(&hooks_path, &output_dir)?;
     println!("  Wrote hook to {}", hooks_path.display());
 
     println!("\n  Codex integration installed.");
@@ -267,12 +270,15 @@ pub fn codex_uninstall(project_root: &Path) -> Result<()> {
 
 /// `graphify-rs opencode install` — project-level OpenCode integration.
 pub fn opencode_install(project_root: &Path) -> Result<()> {
+    let output_dir = crate::paths::resolve_default_output(project_root)
+        .to_string_lossy()
+        .to_string();
     let agents_md = project_root.join("AGENTS.md");
-    append_section(&agents_md, AGENTS_MD_SECTION, AGENTS_MD_MARKER)?;
+    append_section(&agents_md, &graph_md_section(&output_dir), AGENTS_MD_MARKER)?;
     println!("  Updated {}", agents_md.display());
 
     let plugin_path = project_root.join(".opencode/plugins/graphify-rs.js");
-    write_opencode_plugin(&plugin_path)?;
+    write_opencode_plugin(&plugin_path, &output_dir)?;
     println!("  Wrote plugin to {}", plugin_path.display());
 
     let config_path = project_root.join("opencode.json");
@@ -305,8 +311,11 @@ pub fn opencode_uninstall(project_root: &Path) -> Result<()> {
 
 /// Generic platform install — just writes AGENTS.md section.
 pub fn generic_platform_install(project_root: &Path, platform: &str) -> Result<()> {
+    let output_dir = crate::paths::resolve_default_output(project_root)
+        .to_string_lossy()
+        .to_string();
     let agents_md = project_root.join("AGENTS.md");
-    append_section(&agents_md, AGENTS_MD_SECTION, AGENTS_MD_MARKER)?;
+    append_section(&agents_md, &graph_md_section(&output_dir), AGENTS_MD_MARKER)?;
     println!("  Updated {}", agents_md.display());
     println!("\n  {platform} integration installed.");
     Ok(())
@@ -417,7 +426,7 @@ fn register_in_file(path: &Path, registration_text: &str, marker: &str) -> Resul
 }
 
 /// Write Claude PreToolUse hook to .claude/settings.json.
-fn write_claude_settings_hook(path: &Path) -> Result<()> {
+fn write_claude_settings_hook(path: &Path, output_dir: &str) -> Result<()> {
     let mut settings: serde_json::Value = if path.exists() {
         let content = fs::read_to_string(path)?;
         serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
@@ -429,11 +438,14 @@ fn write_claude_settings_hook(path: &Path) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
 
+    let cmd = format!(
+        "[ -f \"{output_dir}/graph.json\" ] && echo '{{\"hookSpecificOutput\":{{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"graphify-rs: Knowledge graph exists. Read {output_dir}/GRAPH_REPORT.md for god nodes and community structure before searching raw files.\"}}}}' || true"
+    );
     let hook_entry = serde_json::json!({
         "matcher": "Glob|Grep",
         "hooks": [{
             "type": "command",
-            "command": "[ -f graphify-out/graph.json ] && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"graphify-rs: Knowledge graph exists. Read graphify-out/GRAPH_REPORT.md for god nodes and community structure before searching raw files.\"}}' || true"
+            "command": cmd
         }]
     });
 
@@ -488,7 +500,7 @@ fn remove_claude_settings_hook(path: &Path) -> Result<()> {
 }
 
 /// Write CodeBuddy PreToolUse hook to .codebuddy/settings.json.
-fn write_codebuddy_settings_hook(path: &Path) -> Result<()> {
+fn write_codebuddy_settings_hook(path: &Path, output_dir: &str) -> Result<()> {
     let mut settings: serde_json::Value = if path.exists() {
         let content = fs::read_to_string(path)?;
         serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
@@ -500,11 +512,14 @@ fn write_codebuddy_settings_hook(path: &Path) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
 
+    let cmd = format!(
+        "[ -f \"{output_dir}/graph.json\" ] && echo '{{\"hookSpecificOutput\":{{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"graphify-rs: Knowledge graph exists. Read {output_dir}/GRAPH_REPORT.md for god nodes and community structure before searching raw files.\"}}}}' || true"
+    );
     let hook_entry = serde_json::json!({
         "matcher": "Glob|Grep",
         "hooks": [{
             "type": "command",
-            "command": "[ -f graphify-out/graph.json ] && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"graphify-rs: Knowledge graph exists. Read graphify-out/GRAPH_REPORT.md for god nodes and community structure before searching raw files.\"}}' || true"
+            "command": cmd
         }]
     });
 
@@ -559,18 +574,21 @@ fn remove_codebuddy_settings_hook(path: &Path) -> Result<()> {
 }
 
 /// Write Codex hooks.json.
-fn write_codex_hooks(path: &Path) -> Result<()> {
+fn write_codex_hooks(path: &Path, output_dir: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
 
+    let cmd = format!(
+        "[ -f \"{output_dir}/graph.json\" ] && echo '{{\"hookSpecificOutput\":{{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"systemMessage\":\"graphify-rs: Knowledge graph exists. Read {output_dir}/GRAPH_REPORT.md for god nodes and community structure before searching raw files.\"}}}}' || true"
+    );
     let hooks = serde_json::json!({
         "hooks": {
             "PreToolUse": [{
                 "matcher": "Bash",
                 "hooks": [{
                     "type": "command",
-                    "command": "[ -f graphify-out/graph.json ] && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"systemMessage\":\"graphify-rs: Knowledge graph exists. Read graphify-out/GRAPH_REPORT.md for god nodes and community structure before searching raw files.\"}}' || true"
+                    "command": cmd
                 }]
             }]
         }
@@ -582,27 +600,29 @@ fn write_codex_hooks(path: &Path) -> Result<()> {
 }
 
 /// Write OpenCode plugin file.
-fn write_opencode_plugin(path: &Path) -> Result<()> {
+fn write_opencode_plugin(path: &Path, output_dir: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
 
-    let plugin_content = r#"// graphify-rs plugin for OpenCode
-module.exports = {
+    let plugin_content = format!(
+        r#"// graphify-rs plugin for OpenCode
+module.exports = {{
     name: "graphify-rs",
     description: "Knowledge graph integration",
-    hooks: {
-        preToolUse: async (ctx) => {
+    hooks: {{
+        preToolUse: async (ctx) => {{
             const fs = require("fs");
-            if (fs.existsSync("graphify-out/graph.json")) {
-                return {
-                    prefix: "[graphify-rs] Knowledge graph available. Read graphify-out/GRAPH_REPORT.md for architecture overview."
-                };
-            }
-        }
-    }
-};
-"#;
+            if (fs.existsSync("{output_dir}/graph.json")) {{
+                return {{
+                    prefix: "[graphify-rs] Knowledge graph available. Read {output_dir}/GRAPH_REPORT.md for architecture overview."
+                }};
+            }}
+        }}
+    }}
+}};
+"#
+    );
 
     fs::write(path, plugin_content)?;
     Ok(())

@@ -169,6 +169,7 @@ pub(crate) fn handle_rust_impl(
             source_file: ctx.str_path.to_string(),
             source_location: Some(format!("L{line}")),
             weight: 1.0,
+            provenance: Some("ast:implements".to_string()),
             extra: HashMap::new(),
         });
     }

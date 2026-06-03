@@ -11,13 +11,14 @@
   - [diff](#graphify-rs-diff) — Compare two graph snapshots
   - [stats](#graphify-rs-stats) — Show graph statistics
   - [watch](#graphify-rs-watch) — Auto-rebuild on file changes
-  - [serve](#graphify-rs-serve) — Start MCP server (15 tools)
+  - [serve](#graphify-rs-serve) — Start MCP server (16 tools)
   - [ingest](#graphify-rs-ingest) — Fetch URL content
   - [hook](#graphify-rs-hook) — Git hook management
   - [install](#graphify-rs-install) — Install skill for AI agents
   - [init](#graphify-rs-init) — Create config file
   - [completions](#graphify-rs-completions) — Shell completions
   - [benchmark](#graphify-rs-benchmark) — Token efficiency
+  - [affected](#graphify-rs-affected) — Test impact analysis
 - [Configuration](#configuration-graphifytoml)
 - [Agent Integration](#agent-integration)
 
@@ -51,7 +52,7 @@ Build the knowledge graph from files in a directory. This is the main pipeline: 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--path <PATH>` | `-p` | `String` | `"."` | Root directory to scan for source files. |
-| `--output <DIR>` | `-o` | `String` | `"graphify-out"` | Output directory for all generated files. |
+| `--output <DIR>` | `-o` | `String` | `~/.graphify-rs/<name>-<hash>/` | Output directory for all generated files. |
 | `--no-llm` | | `bool` | `false` | Skip LLM semantic extraction (pass 2). Only AST extraction runs. |
 | `--code-only` | | `bool` | `false` | Only process code files, skip docs and papers. |
 | `--update` | | `bool` | `false` | Incremental rebuild: only re-extract new/modified files since last build. |
@@ -90,7 +91,7 @@ graphify-rs build --update --code-only --no-llm --format json,report
 
 1. **Detect** — Scans `--path` for code, doc, paper, and image files (respects `.graphifyignore`, skips sensitive files).
 2. **Extract AST (Pass 1)** — Deterministic tree-sitter + regex extraction for code files. Per-file SHA256 cache in `<output>/cache/`.
-3. **Semantic Extraction (Pass 2)** — Concurrent LLM extraction for docs/papers (skipped with `--no-llm` or `--code-only`). Supports Anthropic, OpenAI, Ollama, and OpenAI-compatible providers. Configure via `[llm]` in `graphify-rs.toml`, or set `ANTHROPIC_API_KEY` env var for backward compat. Concurrency = `min(--jobs, 8)`, default 4.
+3. **Semantic Extraction (Pass 2)** — Concurrent LLM extraction for docs/papers (skipped with `--no-llm` or `--code-only`). Supports Anthropic, OpenAI, Ollama, and OpenAI-compatible providers. Configure via `[llm]` in `graphify.toml`, or set `ANTHROPIC_API_KEY` env var for backward compat. Concurrency = `min(--jobs, 8)`, default 4.
 4. **Build Graph** — Assemble nodes and edges, deduplicate.
 5. **Cluster** — Leiden community detection + cohesion scoring.
 6. **Analyze** — God nodes, surprising connections, suggested questions.
@@ -109,7 +110,7 @@ Query the knowledge graph using natural language. Returns a subgraph context as 
 | `<QUESTION>` (positional) | `String` | *required* | The natural language question to query. |
 | `--dfs` | `bool` | `false` | Use depth-first search instead of breadth-first search for traversal. |
 | `--budget <N>` | `usize` | `2000` | Maximum token budget for the output text. |
-| `--graph <PATH>` | `String` | `"graphify-out/graph.json"` | Path to the graph JSON file. |
+| `--graph <PATH>` | `String` | `~/.graphify-rs/<name>-<hash>/graph.json` | Path to the graph JSON file. |
 
 #### Examples
 
@@ -158,7 +159,7 @@ Show graph statistics without rebuilding. Displays node/edge counts, communities
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `<GRAPH>` (positional) | `String` | `"graphify-out/graph.json"` | Path to the graph JSON file. |
+| `<GRAPH>` (positional) | `String` | `~/.graphify-rs/<name>-<hash>/graph.json` | Path to the graph JSON file. |
 
 #### Examples
 
@@ -181,7 +182,7 @@ Watch a directory for file changes and automatically rebuild the graph increment
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--path <PATH>` | `-p` | `String` | `"."` | Directory to watch for changes. |
-| `--output <DIR>` | `-o` | `String` | `"graphify-out"` | Output directory for graph files. |
+| `--output <DIR>` | `-o` | `String` | `~/.graphify-rs/<name>-<hash>/` | Output directory for graph files. |
 
 #### Examples
 
@@ -197,7 +198,7 @@ graphify-rs watch --path src --output my-graph
 
 ### `graphify-rs serve`
 
-Start the MCP (Model Context Protocol) server over JSON-RPC 2.0 (stdio). Provides 15 tools that AI agents can call directly.
+Start the MCP (Model Context Protocol) server over JSON-RPC 2.0 (stdio). Provides 16 tools that AI agents can call directly.
 
 If the specified graph file does not exist, `serve` automatically runs a fast AST-only build (`--no-llm --code-only --format json`) on the current directory before starting the server. This means `graphify-rs serve` works as a zero-config entry point — no manual `build` step required.
 
@@ -205,7 +206,7 @@ If the specified graph file does not exist, `serve` automatically runs a fast AS
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--graph <PATH>` | `String` | `"graphify-out/graph.json"` | Path to the graph JSON file to serve. |
+| `--graph <PATH>` | `String` | `~/.graphify-rs/<name>-<hash>/graph.json` | Path to the graph JSON file to serve. |
 
 #### Available MCP Tools
 
@@ -226,6 +227,7 @@ If the specified graph file does not exist, `serve` automatically runs a fast AS
 | `detect_cycles` | Detect dependency cycles using Tarjan's SCC algorithm |
 | `smart_summary` | Multi-level graph summary (detailed / community / architecture) |
 | `find_similar` | Find structurally similar node pairs via graph embeddings |
+| `explore` | Explore the graph for a task: keyword search + BFS + file grouping in a single call |
 
 #### Examples
 
@@ -248,7 +250,7 @@ Ingest content from a URL (arXiv papers, tweets, PDFs, webpages) and add it to t
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `<URL>` (positional) | `String` | *required* | URL to ingest content from. |
-| `--output <DIR>` | `-o` | `String` | `"graphify-out"` | Output directory. |
+| `--output <DIR>` | `-o` | `String` | `~/.graphify-rs/<name>-<hash>/` | Output directory. |
 
 #### Examples
 
@@ -453,8 +455,8 @@ Generated file:
 # graphify-rs configuration
 # These values serve as defaults and can be overridden by CLI flags.
 
-# Output directory for graph files
-# output = "graphify-out"
+# Output directory for graph files (default: ~/.graphify-rs/<name>-<hash>/)
+# output = "~/.graphify-rs/my-project-a1b2c3d4"
 
 # Disable LLM-based semantic extraction
 # no_llm = false
@@ -517,7 +519,7 @@ Run a token-efficiency benchmark against a graph file.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `<GRAPH_PATH>` (positional) | `String` | `"graphify-out/graph.json"` | Path to the graph JSON file. |
+| `<GRAPH_PATH>` (positional) | `String` | `~/.graphify-rs/<name>-<hash>/graph.json` | Path to the graph JSON file. |
 
 #### Examples
 
@@ -527,6 +529,38 @@ graphify-rs benchmark
 
 # Benchmark a specific graph
 graphify-rs benchmark /path/to/graph.json
+```
+
+---
+
+### `graphify-rs affected`
+
+Test impact analysis — given changed files, find which tests may be affected by traversing reverse dependencies in the knowledge graph.
+
+#### Parameters
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `<FILES>...` (positional) | `Vec<String>` | *required (or `--stdin`)* | Changed file paths to analyze. |
+| `--stdin` | `bool` | `false` | Read changed file paths from stdin (one per line). |
+| `--depth <N>` | `usize` | `5` | Maximum BFS traversal depth for reverse dependency search. |
+| `--output <FORMAT>` | `String` | `"text"` | Output format: `text` (human-readable) or `json`. |
+| `--graph <PATH>` | `String` | `~/.graphify-rs/<name>-<hash>/graph.json` | Path to the graph JSON file. |
+
+#### Examples
+
+```bash
+# Find tests affected by specific file changes
+graphify-rs affected src/auth.rs src/db.rs
+
+# Read changed files from git
+git diff --name-only | graphify-rs affected --stdin
+
+# JSON output for CI pipelines
+git diff --name-only origin/main | graphify-rs affected --stdin --output json
+
+# Deeper traversal for large codebases
+graphify-rs affected src/core/mod.rs --depth 10
 ```
 
 ---
@@ -543,7 +577,7 @@ Save a query result to the memory directory for future reference.
 | `--answer <TEXT>` | `String` | *required* | The answer that was generated. |
 | `--type <TYPE>` | `String` | `"query"` | Result type identifier. |
 | `--nodes <ID>...` | `Vec<String>` | `[]` | Related node IDs (can be specified multiple times). |
-| `--memory-dir <DIR>` | `String` | `"graphify-out/memory"` | Directory to save the result in. |
+| `--memory-dir <DIR>` | `String` | `~/.graphify-rs/<name>-<hash>/memory` | Directory to save the result in. |
 
 #### Examples
 
@@ -572,7 +606,7 @@ Create a `graphify-rs.toml` file in your project root (or run `graphify-rs init`
 
 | Field | Type | Default | CLI Override | Description |
 |-------|------|---------|-------------|-------------|
-| `output` | `String` | `"graphify-out"` | `--output` | Output directory for graph files. |
+| `output` | `String` | `~/.graphify-rs/<name>-<hash>/` | `--output` | Output directory for graph files. |
 | `no_llm` | `bool` | `false` | `--no-llm` | Disable LLM-based semantic extraction. |
 | `code_only` | `bool` | `false` | `--code-only` | Only process code files (skip docs/papers). |
 | `formats` | `String[]` | `[]` (all formats) | `--format` | Export formats to generate. |
@@ -625,7 +659,7 @@ openai_compatible_base_url = "http://localhost:8000/v1"
 3. **Built-in defaults** are used when neither CLI nor config specifies a value.
 
 Specific merging rules:
-- `output`: CLI value is used if it differs from the built-in default (`"graphify-out"`); otherwise falls back to config.
+- `output`: CLI value is used if it differs from the built-in default (`~/.graphify-rs/<name>-<hash>/`); otherwise falls back to config.
 - `no_llm`: `true` if **either** CLI flag or config is `true` (OR logic).
 - `code_only`: `true` if **either** CLI flag or config is `true` (OR logic).
 - `formats`: CLI value is used if non-empty; otherwise falls back to config. Empty means all formats.
@@ -741,10 +775,10 @@ These platforms use a generic integration that only writes the `## graphify-rs` 
 
 Once installed, the agent follows these rules (injected into `CLAUDE.md` or `AGENTS.md`):
 
-1. **Before answering architecture or codebase questions** — read `graphify-out/GRAPH_REPORT.md` for god nodes and community structure.
-2. **If `graphify-out/wiki/index.md` exists** — navigate the wiki instead of reading raw files.
+1. **Before answering architecture or codebase questions** — read `GRAPH_REPORT.md` for god nodes and community structure.
+2. **If `wiki/index.md` exists** — navigate the wiki instead of reading raw files.
 3. **For specific questions** — run `graphify-rs query "<question>"` to get relevant subgraph context.
-4. **After modifying code files** — run `graphify-rs build --path . --output graphify-out --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s).
+4. **After modifying code files** — run `graphify-rs build --path . --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s).
 
 The `PreToolUse` hook automatically fires when the agent uses `Glob` or `Grep` tools (Claude/CodeBuddy) or `Bash` (Codex), injecting a reminder to check the graph first.
 
@@ -761,7 +795,7 @@ Add to your Claude Desktop MCP config (`claude_desktop_config.json`):
   "mcpServers": {
     "graphify-rs": {
       "command": "graphify-rs",
-      "args": ["serve", "--graph", "graphify-out/graph.json"]
+      "args": ["serve"]
     }
   }
 }
@@ -776,7 +810,7 @@ Add to `.claude/settings.json`:
   "mcpServers": {
     "graphify-rs": {
       "command": "graphify-rs",
-      "args": ["serve", "--graph", "graphify-out/graph.json"]
+      "args": ["serve"]
     }
   }
 }

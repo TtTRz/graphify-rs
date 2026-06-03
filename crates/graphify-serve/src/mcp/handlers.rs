@@ -503,3 +503,104 @@ pub(crate) fn handle_find_similar(graph: &KnowledgeGraph, args: &Value) -> Value
         tool_result_json(&pairs)
     }
 }
+
+pub(crate) fn handle_explore(graph: &KnowledgeGraph, args: &Value) -> Value {
+    let task = args["task"].as_str().unwrap_or("");
+    let depth = args["depth"].as_u64().unwrap_or(2) as usize;
+    let budget = args["budget"].as_u64().unwrap_or(4000) as usize;
+    let max_files = args["max_files"].as_u64().unwrap_or(15) as usize;
+
+    if task.is_empty() {
+        return tool_result_error("Missing required parameter: task");
+    }
+
+    let terms: Vec<String> = task
+        .split_whitespace()
+        .filter(|w| w.len() > 2)
+        .map(|w| w.to_lowercase())
+        .collect();
+
+    if terms.is_empty() {
+        return tool_result_text("No meaningful search terms found in the task description.");
+    }
+
+    let scored = score_nodes(graph, &terms);
+    if scored.is_empty() {
+        return tool_result_text("No matching nodes found for the given task.");
+    }
+
+    let seeds: Vec<String> = scored.iter().take(5).map(|(_, id)| id.clone()).collect();
+    let (nodes, edges) = bfs(graph, &seeds, depth);
+
+    let mut file_groups: HashMap<String, Vec<Value>> = HashMap::new();
+    for node_id in &nodes {
+        if let Some(node) = graph.get_node(node_id) {
+            file_groups
+                .entry(node.source_file.clone())
+                .or_default()
+                .push(json!({
+                    "id": node.id,
+                    "label": node.label,
+                    "type": node.node_type,
+                    "location": node.source_location,
+                    "community": node.community,
+                }));
+        }
+    }
+
+    let mut sorted_files: Vec<_> = file_groups.into_iter().collect();
+    sorted_files.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    sorted_files.truncate(max_files);
+
+    let char_budget = budget * 4;
+    let mut files_output: Vec<Value> = Vec::new();
+    let mut used = 0;
+
+    for (file_path, symbols) in &sorted_files {
+        if used >= char_budget {
+            break;
+        }
+        files_output.push(json!({
+            "file": file_path,
+            "symbols": symbols,
+        }));
+        used += file_path.len() + symbols.len() * 100;
+    }
+
+    // Limit relation_map to remaining budget
+    let remaining = char_budget.saturating_sub(used);
+    let max_relations = (remaining / 80).max(20);
+    let relation_map: Vec<Value> = edges
+        .iter()
+        .take(max_relations)
+        .map(|(src, tgt)| {
+            let src_label = graph.get_node(src).map(|n| n.label.as_str()).unwrap_or(src);
+            let tgt_label = graph.get_node(tgt).map(|n| n.label.as_str()).unwrap_or(tgt);
+            json!({
+                "from": src_label,
+                "from_id": src,
+                "to": tgt_label,
+                "to_id": tgt,
+            })
+        })
+        .collect();
+
+    let seed_labels: Vec<Value> = seeds
+        .iter()
+        .filter_map(|id| {
+            graph
+                .get_node(id)
+                .map(|n| json!({"id": id, "label": n.label}))
+        })
+        .collect();
+
+    tool_result_json(&json!({
+        "task": task,
+        "seed_nodes": seed_labels,
+        "files_explored": files_output.len(),
+        "total_symbols": nodes.len(),
+        "relationships": relation_map.len(),
+        "files": files_output,
+        "relationships_map": relation_map,
+    }))
+}
