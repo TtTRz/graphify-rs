@@ -92,7 +92,7 @@ graphify-rs build --update --code-only --no-llm --format json,report
 1. **Detect** — Scans `--path` for code, doc, paper, and image files (respects `.graphifyignore`, skips sensitive files).
 2. **Extract AST (Pass 1)** — Deterministic tree-sitter + regex extraction for code files. Per-file SHA256 cache in `<output>/cache/`.
 3. **Semantic Extraction (Pass 2)** — Concurrent LLM extraction for docs/papers (skipped with `--no-llm` or `--code-only`). Supports Anthropic, OpenAI, Ollama, and OpenAI-compatible providers. Configure via `[llm]` in `graphify.toml`, or set `ANTHROPIC_API_KEY` env var for backward compat. Concurrency = `min(--jobs, 8)`, default 4.
-4. **Build Graph** — Assemble nodes and edges, deduplicate.
+4. **Build Graph** — Assemble nodes and edges, deduplicate. If `.codegraph/codegraph.db` exists in the project root, CodeGraph edges (calls, imports, contains, etc.) are merged automatically.
 5. **Cluster** — Leiden community detection + cohesion scoring.
 6. **Analyze** — God nodes, surprising connections, suggested questions.
 7. **Export** — Write selected formats to `--output`.

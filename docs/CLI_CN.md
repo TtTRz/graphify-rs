@@ -92,7 +92,7 @@ graphify-rs build --update --code-only --no-llm --format json,report
 1. **检测** — 扫描 `--path` 目录中的代码、文档、论文和图片文件（遵循 `.graphifyignore`，跳过敏感文件）。
 2. **AST 提取（第一遍）** — 对代码文件进行确定性的 tree-sitter + 正则提取。按文件 SHA256 缓存于 `<output>/cache/`。
 3. **语义提取（第二遍）** — 对文档/论文进行并发 LLM 提取（使用 `--no-llm` 或 `--code-only` 时跳过）。支持 Anthropic、OpenAI、Ollama 和 OpenAI 兼容端点。通过 `graphify.toml` 的 `[llm]` 段配置，或设置 `ANTHROPIC_API_KEY` 环境变量以向后兼容。并发数 = `min(--jobs, 8)`，默认 4。
-4. **构建图谱** — 组装节点和边，去重。
+4. **构建图谱** — 组装节点和边，去重。若项目根目录存在 `.codegraph/codegraph.db`，将自动合并 CodeGraph 的边（calls、imports、contains 等）。
 5. **社区聚类** — Leiden 社区检测 + 内聚度评分。
 6. **分析** — God 节点、意外连接、建议问题。
 7. **导出** — 将选定格式写入 `--output`。
