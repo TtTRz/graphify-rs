@@ -776,7 +776,7 @@ fn cmd_init() -> Result<()> {
 # These values serve as defaults and can be overridden by CLI flags.
 
 # Output directory for graph files
-# output = "graphify-out"
+# output = "graphify-rs-out"
 
 # Disable LLM-based semantic extraction
 # no_llm = false

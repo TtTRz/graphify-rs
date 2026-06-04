@@ -89,6 +89,8 @@ exclude = [
     ".github/",
     "tests/",
     "graphify-out/",
+    "graphify-rs-out/",
+    "graphify.toml",
     "graphify-rs.toml",
     "README_CN.md",
     "AUDIT_*.md",
