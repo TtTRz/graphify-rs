@@ -62,6 +62,7 @@ mod tests {
             source_file: "test.rs".to_string(),
             source_location: None,
             weight: 1.0,
+            provenance: None,
             extra: HashMap::new(),
         }
     }

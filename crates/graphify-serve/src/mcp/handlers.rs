@@ -5,7 +5,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use graphify_core::graph::KnowledgeGraph;
 use serde_json::{Value, json};
 
-use crate::{bfs, graph_stats, score_nodes, subgraph_to_text};
+use crate::search::SearchIndex;
+use crate::{bfs, graph_stats, subgraph_to_text};
 
 pub(crate) fn tool_result_text(text: &str) -> Value {
     json!({
@@ -32,7 +33,11 @@ pub(crate) fn tool_result_error(text: &str) -> Value {
     })
 }
 
-pub(crate) fn handle_query_graph(graph: &KnowledgeGraph, args: &Value) -> Value {
+pub(crate) fn handle_query_graph(
+    graph: &KnowledgeGraph,
+    index: &SearchIndex,
+    args: &Value,
+) -> Value {
     let question = args["question"].as_str().unwrap_or("");
     let budget = args["budget"].as_u64().unwrap_or(2000) as usize;
 
@@ -50,7 +55,7 @@ pub(crate) fn handle_query_graph(graph: &KnowledgeGraph, args: &Value) -> Value 
         return tool_result_text("No meaningful search terms found in the question.");
     }
 
-    let scored = score_nodes(graph, &terms);
+    let scored = index.search(&terms);
     if scored.is_empty() {
         return tool_result_text("No matching nodes found for the given question.");
     }
@@ -504,7 +509,7 @@ pub(crate) fn handle_find_similar(graph: &KnowledgeGraph, args: &Value) -> Value
     }
 }
 
-pub(crate) fn handle_explore(graph: &KnowledgeGraph, args: &Value) -> Value {
+pub(crate) fn handle_explore(graph: &KnowledgeGraph, index: &SearchIndex, args: &Value) -> Value {
     let task = args["task"].as_str().unwrap_or("");
     let depth = args["depth"].as_u64().unwrap_or(2) as usize;
     let budget = args["budget"].as_u64().unwrap_or(4000) as usize;
@@ -524,7 +529,7 @@ pub(crate) fn handle_explore(graph: &KnowledgeGraph, args: &Value) -> Value {
         return tool_result_text("No meaningful search terms found in the task description.");
     }
 
-    let scored = score_nodes(graph, &terms);
+    let scored = index.search(&terms);
     if scored.is_empty() {
         return tool_result_text("No matching nodes found for the given task.");
     }

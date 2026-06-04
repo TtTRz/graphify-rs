@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use graphify_core::confidence::Confidence;
 use graphify_core::id::make_id;
 use graphify_core::model::{GraphEdge, GraphNode, NodeType};
+use serde_json::Value;
 use tree_sitter::Node;
 
 use super::node_text;
@@ -33,6 +34,7 @@ pub(crate) fn extract_import(
                 .unwrap_or(&import_text)
                 .trim_end_matches(';')
                 .trim();
+            let imported_symbol = module.rsplit("::").next().filter(|&s| s != module);
             add_import_node(
                 nodes,
                 edges,
@@ -41,6 +43,7 @@ pub(crate) fn extract_import(
                 line,
                 module,
                 NodeType::Module,
+                imported_symbol.map(|s| vec![s]).as_deref(),
             );
         }
         "go" => {
@@ -55,6 +58,7 @@ pub(crate) fn extract_import(
                 .unwrap_or(after_import)
                 .trim_end_matches(';')
                 .trim();
+            let imported_symbol = module.rsplit('.').next().filter(|&s| s != module);
             add_import_node(
                 nodes,
                 edges,
@@ -63,6 +67,7 @@ pub(crate) fn extract_import(
                 line,
                 module,
                 NodeType::Module,
+                imported_symbol.map(|s| vec![s]).as_deref(),
             );
         }
         "c" | "cpp" => {
@@ -83,6 +88,7 @@ pub(crate) fn extract_import(
                 line,
                 module,
                 NodeType::Module,
+                None,
             );
         }
         "csharp" => {
@@ -102,6 +108,7 @@ pub(crate) fn extract_import(
                 line,
                 module,
                 NodeType::Module,
+                None,
             );
         }
         "ruby" => {
@@ -119,6 +126,7 @@ pub(crate) fn extract_import(
                 line,
                 &import_text,
                 NodeType::Module,
+                None,
             );
         }
     }
@@ -155,7 +163,7 @@ pub(crate) fn extract_python_import(
                     let name = node_text(nn, source);
                     if name != module {
                         let full = if module.is_empty() {
-                            name
+                            name.clone()
                         } else {
                             format!("{module}.{name}")
                         };
@@ -167,6 +175,7 @@ pub(crate) fn extract_python_import(
                             line,
                             &full,
                             NodeType::Module,
+                            Some(&[&name]),
                         );
                     }
                 }
@@ -182,6 +191,7 @@ pub(crate) fn extract_python_import(
                 line,
                 &module,
                 NodeType::Module,
+                None,
             );
         }
     } else {
@@ -204,6 +214,7 @@ pub(crate) fn extract_python_import(
                         line,
                         &name,
                         NodeType::Module,
+                        None,
                     );
                 }
             }
@@ -246,6 +257,7 @@ pub(crate) fn extract_js_import(
                             line,
                             &full,
                             NodeType::Module,
+                            Some(&[&name]),
                         );
                         found_names = true;
                     }
@@ -266,6 +278,7 @@ pub(crate) fn extract_js_import(
                                     line,
                                     &full,
                                     NodeType::Module,
+                                    Some(&[&name]),
                                 );
                                 found_names = true;
                             }
@@ -286,6 +299,7 @@ pub(crate) fn extract_js_import(
             line,
             &module,
             NodeType::Module,
+            None,
         );
     }
 }
@@ -314,6 +328,7 @@ pub(crate) fn extract_go_import(
                         spec_line,
                         &module,
                         NodeType::Package,
+                        None,
                     );
                 }
             }
@@ -333,6 +348,7 @@ pub(crate) fn extract_go_import(
                             spec_line,
                             &module,
                             NodeType::Package,
+                            None,
                         );
                     }
                 }
@@ -347,6 +363,7 @@ pub(crate) fn extract_go_import(
                     line,
                     &module,
                     NodeType::Package,
+                    None,
                 );
             }
             _ => {}
@@ -388,6 +405,7 @@ pub(crate) fn extract_ruby_import(
                         line,
                         &module,
                         NodeType::Module,
+                        None,
                     );
                 }
                 return;
@@ -411,6 +429,7 @@ pub(crate) fn extract_ruby_import(
             line,
             module,
             NodeType::Module,
+            None,
         );
     }
 }
@@ -458,11 +477,13 @@ pub(crate) fn extract_dart_import(
             line,
             module,
             NodeType::Module,
+            None,
         );
     }
 }
 
-/// Extract text from a tree-sitter node.
+/// Create an import node and edge, optionally recording which symbols were imported.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn add_import_node(
     nodes: &mut Vec<GraphNode>,
     edges: &mut Vec<GraphEdge>,
@@ -471,6 +492,7 @@ pub(crate) fn add_import_node(
     line: usize,
     module: &str,
     node_type: NodeType,
+    imported_symbols: Option<&[&str]>,
 ) {
     let import_id = make_id(&[str_path, "import", module]);
     nodes.push(GraphNode {
@@ -482,6 +504,17 @@ pub(crate) fn add_import_node(
         community: None,
         extra: HashMap::new(),
     });
+
+    let mut extra: HashMap<String, Value> = HashMap::new();
+    if let Some(syms) = imported_symbols
+        && !syms.is_empty()
+    {
+        extra.insert(
+            "imported_symbols".to_string(),
+            Value::Array(syms.iter().map(|s| Value::String(s.to_string())).collect()),
+        );
+    }
+
     edges.push(GraphEdge {
         source: file_nid.to_string(),
         target: import_id,
@@ -492,6 +525,6 @@ pub(crate) fn add_import_node(
         source_location: Some(format!("L{line}")),
         weight: 1.0,
         provenance: Some("ast:import".to_string()),
-        extra: HashMap::new(),
+        extra,
     });
 }

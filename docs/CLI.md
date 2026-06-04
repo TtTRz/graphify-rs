@@ -101,7 +101,7 @@ graphify-rs build --update --code-only --no-llm --format json,report
 
 ### `graphify-rs query`
 
-Query the knowledge graph using natural language. Returns a subgraph context as text.
+Query the knowledge graph using natural language. Returns a subgraph context as text. Searches use an in-memory inverted index that tokenizes node labels, IDs, and file paths on camelCase/snake_case/path boundaries, with prefix matching and degree-based ranking.
 
 #### Parameters
 

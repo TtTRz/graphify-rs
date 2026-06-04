@@ -440,6 +440,46 @@ fn resolve_cross_file_imports(result: &mut ExtractionResult) {
                 continue;
             }
 
+            // If the edge carries imported_symbols, use them for precise matching
+            // against target entity labels instead of falling back to all entities.
+            if let Some(symbols) = edge
+                .extra
+                .get("imported_symbols")
+                .and_then(|v| v.as_array())
+            {
+                let edges_before = new_edges.len();
+                for sym in symbols {
+                    let sym_str = sym.as_str().unwrap_or("");
+                    for (lbl, target_id, _nt) in &target_entities {
+                        if lbl == sym_str {
+                            if local_id == target_id {
+                                continue;
+                            }
+                            let key = (local_id.clone(), target_id.clone());
+                            if seen.contains(&key) {
+                                continue;
+                            }
+                            seen.insert(key);
+                            new_edges.push(GraphEdge {
+                                source: local_id.clone(),
+                                target: target_id.clone(),
+                                relation: "uses".to_string(),
+                                confidence: Confidence::Inferred,
+                                confidence_score: 0.85,
+                                source_file: source_file.clone(),
+                                source_location: None,
+                                weight: 0.85,
+                                provenance: Some("cross-file:import-resolve".to_string()),
+                                extra: HashMap::new(),
+                            });
+                        }
+                    }
+                }
+                if new_edges.len() > edges_before {
+                    continue; // skip the all-entities fallback
+                }
+            }
+
             const MAX_FALLBACK_EDGES: usize = 50;
             let mut fallback_count = 0;
             for (_, target_id, _) in &target_entities {

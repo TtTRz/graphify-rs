@@ -35,6 +35,7 @@ fn make_test_edge(source: &str, target: &str, relation: &str, source_file: &str)
         source_location: None,
         weight: 1.0,
         extra: Default::default(),
+        provenance: None,
     }
 }
 
@@ -973,6 +974,7 @@ fn cross_file_calls_no_duplicate_with_existing() {
                 source_location: None,
                 weight: 1.0,
                 extra: HashMap::new(),
+                provenance: None,
             },
             make_test_edge("run", "init", "uses", "src/main.rs"),
         ],

@@ -4,6 +4,7 @@
 //! engine and MCP protocol server. Port of Python query tools.
 
 pub mod mcp;
+pub mod search;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
@@ -25,44 +26,14 @@ pub enum ServeError {
     Serialization(#[from] serde_json::Error),
 }
 
-/// Score nodes by relevance to search terms.
+/// Score nodes by relevance to search terms using a pre-built SearchIndex.
 ///
+/// Builds a fresh index per call. Callers doing repeated searches should use
+/// [`SearchIndex::build`] + [`SearchIndex::search`] directly instead.
 /// Returns `(score, node_id)` pairs sorted by descending score.
-/// Scoring: +2.0 for exact label match, +1.0 for label contains,
-/// +0.5 for id contains, plus a small degree-based boost.
 pub fn score_nodes(graph: &KnowledgeGraph, terms: &[String]) -> Vec<(f64, String)> {
-    let lower_terms: Vec<String> = terms.iter().map(|t| t.to_lowercase()).collect();
-
-    let mut scored = Vec::new();
-    for node_id in graph.node_ids() {
-        if let Some(node) = graph.get_node(&node_id) {
-            let label_lower = node.label.to_lowercase();
-            let id_lower = node.id.to_lowercase();
-
-            let mut score: f64 = 0.0;
-
-            for term in &lower_terms {
-                if label_lower == *term {
-                    score += 2.0;
-                } else if label_lower.contains(term.as_str()) {
-                    score += 1.0;
-                }
-
-                if id_lower.contains(term.as_str()) {
-                    score += 0.5;
-                }
-            }
-
-            if score > 0.0 {
-                let degree_boost = (graph.degree(&node_id) as f64).ln_1p() * 0.1;
-                score += degree_boost;
-                scored.push((score, node_id.clone()));
-            }
-        }
-    }
-
-    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    scored
+    let index = search::SearchIndex::build(graph);
+    index.search(terms)
 }
 
 /// BFS traversal from start nodes up to a maximum depth.
@@ -611,6 +582,7 @@ mod tests {
             source_file: "test.rs".into(),
             source_location: None,
             weight: 1.0,
+            provenance: None,
             extra: HashMap::new(),
         }
     }

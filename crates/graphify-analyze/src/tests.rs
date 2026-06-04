@@ -42,6 +42,7 @@ fn make_edge(src: &str, tgt: &str, relation: &str, confidence: Confidence) -> Gr
         source_file: "test.rs".into(),
         source_location: None,
         weight: 1.0,
+        provenance: None,
         extra: StdHashMap::new(),
     }
 }

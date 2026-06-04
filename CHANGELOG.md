@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.7.1] - 2026-06-03
+## [0.8.1] - 2026-06-04
 
 ### Fixed
 - **js plugin renamed** — plugin js files renamed from `graphify.js` to `graphify-rs.js` (breaking change)
@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **git hook marker renamed** — git hook marker renamed from `graphify-hook-...` to `graphify-rs-hook...` (breaking change)
 - **Version staleness check** — warns on startup if installed skill is from an older version
   - `.graphify_version` stamp name — changed to `.graphify_rs_version` (breaking change)
+
+## [0.8.0] - 2026-06-04
+
+### Added
+
+- **In-memory full-text search index** — `SearchIndex` struct (`graphify-serve::search`) builds an inverted index at graph load time. Tokenizes node labels, IDs, and source file paths on camelCase/snake_case/path boundaries. Supports exact token match + prefix match with degree-based ranking. MCP server builds the index once at startup; `query_graph` and `explore` tools use it for sub-millisecond lookups instead of the previous O(n×m) linear scan.
+- **Symbol-level import resolution** — import edges now carry `imported_symbols` in their `extra` field, recording which specific symbols were imported (e.g., `from pathlib import Path` → `["Path"]`). Supported for Python, JavaScript/TypeScript, Rust, and Java via tree-sitter extraction. The cross-file resolver uses these symbols for precise entity matching (confidence 0.85) before falling back to the all-entities heuristic (0.80).
 
 ## [0.7.0] - 2026-06-03
 
@@ -258,6 +265,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Git hook integration (post-commit, post-checkout)
 - CLI with 21 subcommands via clap derive
 
+[0.8.0]: https://github.com/TtTRz/graphify-rs/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/TtTRz/graphify-rs/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/TtTRz/graphify-rs/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/TtTRz/graphify-rs/compare/v0.5.2...v0.5.3

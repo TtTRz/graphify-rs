@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 use tracing::{debug, error, info};
 
 use crate::ServeError;
+use crate::search::SearchIndex;
 
 const SERVER_NAME: &str = "graphify-rs";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -38,7 +39,7 @@ fn jsonrpc_error(id: &Value, code: i64, message: &str) -> Value {
     })
 }
 
-fn dispatch_tools_call(graph: &KnowledgeGraph, request: &Value) -> Value {
+fn dispatch_tools_call(graph: &KnowledgeGraph, index: &SearchIndex, request: &Value) -> Value {
     let id = &request["id"];
     let tool_name = request["params"]["name"].as_str().unwrap_or("");
     let args = &request["params"]["arguments"];
@@ -46,7 +47,7 @@ fn dispatch_tools_call(graph: &KnowledgeGraph, request: &Value) -> Value {
     debug!("tools/call: {tool_name}");
 
     let result = match tool_name {
-        "query_graph" => handlers::handle_query_graph(graph, args),
+        "query_graph" => handlers::handle_query_graph(graph, index, args),
         "get_node" => handlers::handle_get_node(graph, args),
         "get_neighbors" => handlers::handle_get_neighbors(graph, args),
         "get_community" => handlers::handle_get_community(graph, args),
@@ -61,14 +62,14 @@ fn dispatch_tools_call(graph: &KnowledgeGraph, request: &Value) -> Value {
         "detect_cycles" => handlers::handle_detect_cycles(graph, args),
         "smart_summary" => handlers::handle_smart_summary(graph, args),
         "find_similar" => handlers::handle_find_similar(graph, args),
-        "explore" => handlers::handle_explore(graph, args),
+        "explore" => handlers::handle_explore(graph, index, args),
         _ => handlers::tool_result_error(&format!("Unknown tool: {tool_name}")),
     };
 
     jsonrpc_response(id, result)
 }
 
-fn dispatch(graph: &KnowledgeGraph, request: &Value) -> Option<Value> {
+fn dispatch(graph: &KnowledgeGraph, index: &SearchIndex, request: &Value) -> Option<Value> {
     let method = request["method"].as_str().unwrap_or("");
     let id = &request["id"];
 
@@ -102,7 +103,7 @@ fn dispatch(graph: &KnowledgeGraph, request: &Value) -> Option<Value> {
                 }),
             ))
         }
-        "tools/call" => Some(dispatch_tools_call(graph, request)),
+        "tools/call" => Some(dispatch_tools_call(graph, index, request)),
         "ping" => Some(jsonrpc_response(id, json!({}))),
         _ => {
             if id.is_null() {
@@ -123,6 +124,7 @@ fn dispatch(graph: &KnowledgeGraph, request: &Value) -> Option<Value> {
 /// protocol.
 pub fn run_mcp_server(graph_path: &Path) -> Result<(), ServeError> {
     let graph = crate::load_graph(graph_path)?;
+    let search_index = SearchIndex::build(&graph);
     let stats = crate::graph_stats(&graph);
     let null = Value::Null;
     info!(
@@ -162,7 +164,7 @@ pub fn run_mcp_server(graph_path: &Path) -> Result<(), ServeError> {
             }
         };
 
-        if let Some(response) = dispatch(&graph, &request) {
+        if let Some(response) = dispatch(&graph, &search_index, &request) {
             let out = match serde_json::to_string(&response) {
                 Ok(s) => s,
                 Err(e) => {
@@ -211,6 +213,7 @@ mod tests {
             source_file: "test.rs".into(),
             source_location: None,
             weight: 1.0,
+            provenance: None,
             extra: HashMap::new(),
         }
     }
@@ -231,11 +234,16 @@ mod tests {
         g
     }
 
+    fn test_index(g: &KnowledgeGraph) -> SearchIndex {
+        SearchIndex::build(g)
+    }
+
     #[test]
     fn test_initialize() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({"jsonrpc": "2.0", "method": "initialize", "id": 1});
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         assert_eq!(resp["id"], 1);
         assert!(resp["result"]["protocolVersion"].is_string());
         assert!(resp["result"]["capabilities"]["tools"].is_object());
@@ -245,10 +253,11 @@ mod tests {
     #[test]
     fn test_tools_list() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({"jsonrpc": "2.0", "method": "tools/list", "id": 2});
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 15);
+        assert_eq!(tools.len(), 16);
 
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"query_graph"));
@@ -263,11 +272,12 @@ mod tests {
     #[test]
     fn test_query_graph() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 3,
             "params": {"name": "query_graph", "arguments": {"question": "auth service"}}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("Knowledge Graph Context"));
         assert!(text.contains("AuthService"));
@@ -276,11 +286,12 @@ mod tests {
     #[test]
     fn test_get_node() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 4,
             "params": {"name": "get_node", "arguments": {"node_id": "auth"}}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("AuthService"));
         assert!(text.contains("\"degree\""));
@@ -289,22 +300,24 @@ mod tests {
     #[test]
     fn test_get_node_not_found() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 5,
             "params": {"name": "get_node", "arguments": {"node_id": "nonexistent"}}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         assert!(resp["result"]["isError"].as_bool().unwrap_or(false));
     }
 
     #[test]
     fn test_get_neighbors() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 6,
             "params": {"name": "get_neighbors", "arguments": {"node_id": "auth", "depth": 1}}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("total_neighbors"));
     }
@@ -312,11 +325,12 @@ mod tests {
     #[test]
     fn test_get_community() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 7,
             "params": {"name": "get_community", "arguments": {"community_id": 0}}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("AuthService") || text.contains("UserManager"));
     }
@@ -324,11 +338,12 @@ mod tests {
     #[test]
     fn test_god_nodes() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 8,
             "params": {"name": "god_nodes", "arguments": {"top_n": 3}}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("god_nodes"));
     }
@@ -336,11 +351,12 @@ mod tests {
     #[test]
     fn test_graph_stats() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 9,
             "params": {"name": "graph_stats", "arguments": {}}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("node_count"));
         assert!(text.contains("edge_count"));
@@ -349,11 +365,12 @@ mod tests {
     #[test]
     fn test_shortest_path() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 10,
             "params": {"name": "shortest_path", "arguments": {"source": "auth", "target": "cache"}}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("path_length"));
         // auth -> user -> cache = length 2
@@ -366,11 +383,12 @@ mod tests {
         let mut g = KnowledgeGraph::new();
         g.add_node(make_node("a", "A", None)).unwrap();
         g.add_node(make_node("b", "B", None)).unwrap();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 11,
             "params": {"name": "shortest_path", "arguments": {"source": "a", "target": "b"}}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("No path found"));
     }
@@ -378,11 +396,12 @@ mod tests {
     #[test]
     fn test_shortest_path_same_node() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 12,
             "params": {"name": "shortest_path", "arguments": {"source": "auth", "target": "auth"}}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         let parsed: Value = serde_json::from_str(text).unwrap();
         assert_eq!(parsed["path_length"], 0);
@@ -391,19 +410,21 @@ mod tests {
     #[test]
     fn test_unknown_tool() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 13,
             "params": {"name": "nonexistent_tool", "arguments": {}}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         assert!(resp["result"]["isError"].as_bool().unwrap_or(false));
     }
 
     #[test]
     fn test_unknown_method() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({"jsonrpc": "2.0", "method": "unknown/method", "id": 14});
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         assert!(resp["error"].is_object());
         assert_eq!(resp["error"]["code"], -32601);
     }
@@ -411,15 +432,17 @@ mod tests {
     #[test]
     fn test_notification_no_response() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
-        assert!(dispatch(&g, &req).is_none());
+        assert!(dispatch(&g, &idx, &req).is_none());
     }
 
     #[test]
     fn test_ping() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({"jsonrpc": "2.0", "method": "ping", "id": 15});
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         assert_eq!(resp["id"], 15);
         assert!(resp["result"].is_object());
     }
@@ -427,13 +450,14 @@ mod tests {
     #[test]
     fn test_find_all_paths() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 20,
             "params": {"name": "find_all_paths", "arguments": {
                 "source": "auth", "target": "db", "max_length": 4
             }}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         let parsed: serde_json::Value = serde_json::from_str(text).unwrap();
         assert!(
@@ -447,13 +471,14 @@ mod tests {
         let mut g = KnowledgeGraph::new();
         g.add_node(make_node("x", "X", None)).unwrap();
         g.add_node(make_node("y", "Y", None)).unwrap();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 21,
             "params": {"name": "find_all_paths", "arguments": {
                 "source": "x", "target": "y"
             }}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         let parsed: serde_json::Value = serde_json::from_str(text).unwrap();
         assert_eq!(parsed["path_count"].as_u64().unwrap(), 0);
@@ -462,13 +487,14 @@ mod tests {
     #[test]
     fn test_weighted_path() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 22,
             "params": {"name": "weighted_path", "arguments": {
                 "source": "auth", "target": "cache"
             }}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         let parsed: serde_json::Value = serde_json::from_str(text).unwrap();
         assert!(parsed["path_length"].as_u64().unwrap() >= 1);
@@ -480,13 +506,14 @@ mod tests {
         let mut g = KnowledgeGraph::new();
         g.add_node(make_node("x", "X", None)).unwrap();
         g.add_node(make_node("y", "Y", None)).unwrap();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 23,
             "params": {"name": "weighted_path", "arguments": {
                 "source": "x", "target": "y"
             }}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("No path found"));
     }
@@ -494,11 +521,12 @@ mod tests {
     #[test]
     fn test_community_bridges() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 24,
             "params": {"name": "community_bridges", "arguments": {"top_n": 5}}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         let parsed: serde_json::Value = serde_json::from_str(text).unwrap();
         assert!(parsed["bridges"].as_array().is_some());
@@ -507,13 +535,14 @@ mod tests {
     #[test]
     fn test_graph_diff_missing_file() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 25,
             "params": {"name": "graph_diff", "arguments": {
                 "other_graph": "/nonexistent/graph.json"
             }}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("Failed to load graph"));
     }
@@ -521,13 +550,14 @@ mod tests {
     #[test]
     fn test_find_all_paths_missing_source() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 26,
             "params": {"name": "find_all_paths", "arguments": {
                 "source": "nonexistent", "target": "db"
             }}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("not found"));
     }
@@ -535,13 +565,14 @@ mod tests {
     #[test]
     fn test_weighted_path_with_min_confidence() {
         let g = test_graph();
+        let idx = test_index(&g);
         let req = json!({
             "jsonrpc": "2.0", "method": "tools/call", "id": 27,
             "params": {"name": "weighted_path", "arguments": {
                 "source": "auth", "target": "db", "min_confidence": 0.5
             }}
         });
-        let resp = dispatch(&g, &req).unwrap();
+        let resp = dispatch(&g, &idx, &req).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         let parsed: serde_json::Value = serde_json::from_str(text).unwrap();
         assert!(parsed["path_length"].as_u64().unwrap() >= 1);

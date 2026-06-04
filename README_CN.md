@@ -149,7 +149,7 @@ graphify-rs build                  # 添加 LLM 推断的 INFERRED 边
 | `graphify-cache` | SHA256 内容哈希缓存，支持增量重建 |
 | `graphify-security` | URL 校验（SSRF 防御）、路径遍历防护、标签注入防御 |
 | `graphify-ingest` | URL 抓取：arXiv 摘要、推文（oEmbed）、PDF、通用网页 |
-| `graphify-serve` | MCP 服务器，16 个查询工具，JSON-RPC 2.0 stdio |
+| `graphify-serve` | MCP 服务器，16 个查询工具，全文搜索索引，JSON-RPC 2.0 stdio |
 | `graphify-watch` | 文件监控 + debounce、代码变更时增量重建 |
 | `graphify-hooks` | Git 钩子安装/卸载/状态（post-commit, post-checkout）|
 | `graphify-benchmark` | Token 效率测量（图谱 token vs 原始语料 token）|

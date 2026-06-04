@@ -162,7 +162,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_millis() as i64
-            + 3600_000;
+            + 3_600_000;
         write!(
             f,
             r#"{{"accessToken": "valid-token", "expiresAt": {}}}"#,

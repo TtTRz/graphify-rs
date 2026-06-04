@@ -101,7 +101,7 @@ graphify-rs build --update --code-only --no-llm --format json,report
 
 ### `graphify-rs query`
 
-使用自然语言查询知识图谱，返回子图上下文文本。
+使用自然语言查询知识图谱，返回子图上下文文本。搜索基于内存倒排索引，对节点标签、ID 和文件路径进行 camelCase/snake_case/路径分词，支持前缀匹配和基于连接度的排序。
 
 #### 参数
 

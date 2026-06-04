@@ -401,6 +401,7 @@ mod tests {
             source_file: file.into(),
             source_location: None,
             weight: 1.0,
+            provenance: None,
             extra: std::collections::HashMap::new(),
         }
     }

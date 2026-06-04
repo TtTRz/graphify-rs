@@ -130,7 +130,7 @@ Agents auto-check the graph before architecture questions and rebuild after code
 | `graphify-extract` | AST extraction (21 languages), multi-provider LLM semantic extraction |
 | `graphify-cluster` | Leiden community detection, incremental re-clustering |
 | `graphify-analyze` | PageRank, cycles, embeddings, god nodes, temporal risk |
-| `graphify-serve` | MCP server (16 tools), smart summarization |
+| `graphify-serve` | MCP server (16 tools), smart summarization, full-text search index |
 | `graphify-export` | 9 formats: JSON, HTML, SVG, GraphML, Cypher, Wiki, Obsidian, Report |
 | + 8 more | Cache, security, ingestion, watch, hooks, benchmark, detect, build |
 
