@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **git hook marker renamed** — git hook marker renamed from `graphify-hook-...` to `graphify-rs-hook...` (breaking change)
 - **Version staleness check** — warns on startup if installed skill is from an older version
   - `.graphify_version` stamp name — changed to `.graphify_rs_version` (breaking change)
+- **default output directory name changed** — from `graphify-out` to `graphify-rs-out` (breaking change)
 
 ## [0.8.0] - 2026-06-04
 
