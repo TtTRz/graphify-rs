@@ -201,11 +201,13 @@ mod tests {
 
     #[test]
     fn test_strip_marker_block() {
-        let input = "#!/bin/sh\n# graphify-rs-hook-start\nsome stuff\n# graphify-rs-hook-end\nother";
+        let input =
+            "#!/bin/sh\n# graphify-rs-hook-start\nsome stuff\n# graphify-rs-hook-end\nother";
         let result = strip_marker_block(input);
         assert_eq!(result, "#!/bin/shother");
 
-        let input2 = "#!/bin/sh\n\n# graphify-rs-hook-start\nsome stuff\n# graphify-rs-hook-end\nother";
+        let input2 =
+            "#!/bin/sh\n\n# graphify-rs-hook-start\nsome stuff\n# graphify-rs-hook-end\nother";
         let result2 = strip_marker_block(input2);
         assert_eq!(result2, "#!/bin/sh\nother");
     }
