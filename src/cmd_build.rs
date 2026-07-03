@@ -122,7 +122,7 @@ fn step_detect(
         let manifest_path = output_dir.join(".graphify_manifest.json");
         graphify_detect::detect_incremental(root, Some(manifest_path.to_str().unwrap_or("")))
     } else {
-        graphify_detect::detect_with_changeindex(root, output_dir)
+        graphify_detect::detect(root)
     };
     let n_code = detection
         .files
@@ -159,14 +159,6 @@ fn step_detect(
             "  {} Skipped {} sensitive file(s)",
             "⚠".yellow(),
             detection.skipped_sensitive.len()
-        );
-    }
-    if !detection.deleted_files.is_empty() {
-        info_print!(
-            verb,
-            "  {} {} file(s) removed since last build",
-            "−".red(),
-            detection.deleted_files.len()
         );
     }
     Ok(detection)

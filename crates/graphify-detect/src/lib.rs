@@ -4,7 +4,6 @@
 //! directories and sensitive files, and classifies each file into a
 //! [`FileType`] category for downstream extraction.
 
-pub mod changeindex;
 pub mod classify;
 pub mod constants;
 pub mod ignore;
@@ -19,7 +18,6 @@ use thiserror::Error;
 use tracing::{debug, info, warn};
 use walkdir::WalkDir;
 
-pub use changeindex::{ChangeIndex, load_changeindex, save_changeindex};
 pub use classify::{DetectedFile, FileType, classify_file};
 pub use ignore::load_graphifyignore;
 pub use sensitive::is_sensitive;
@@ -57,11 +55,6 @@ pub struct DetectResult {
     pub skipped_sensitive: Vec<String>,
     /// Number of patterns loaded from `.graphifyignore`.
     pub graphifyignore_patterns: usize,
-    /// Relative paths that were present in a previous changeindex but are no
-    /// longer on disk after filtering. Only populated by
-    /// [`detect_with_changeindex`].
-    #[serde(default)]
-    pub deleted_files: Vec<String>,
 }
 
 /// A simple manifest that records which files were previously detected.
@@ -90,85 +83,21 @@ pub fn save_manifest(path: &Path, manifest: &Manifest) -> Result<(), DetectError
 
 /// Walk `root` and return a [`DetectResult`] with all discovered files.
 pub fn detect(root: &Path) -> DetectResult {
-    detect_inner(root, false, None, None).0
+    detect_inner(root, false, None).0
 }
 
-/// Walk `root`, apply all standard filters, then use `changeindex.db` inside
-/// `changeindex_dir` to skip files whose mtime and size are unchanged.
+/// Internal detect that optionally computes content hashes during the walk
+/// to avoid double I/O when doing incremental detection.
 ///
-/// On the first run (no `changeindex.db`) all detected files are returned and
-/// the index is written.  On subsequent runs only new, modified, and deleted
-/// files are included in the result; the index is updated to reflect the
-/// current state of every file on disk.
-///
-/// `DetectResult::deleted_files` contains paths that were in the previous
-/// index but are absent from the current walk (after filters).
-pub fn detect_with_changeindex(root: &Path, changeindex_dir: &Path) -> DetectResult {
-    // Single walk: get both the full file list and the filtered result.
-    let (mut result, _, all_walked) = detect_inner(root, false, None, None);
-
-    let index_path = changeindex_dir.join(changeindex::CHANGEINDEX_NAME);
-    let old_index = changeindex::load_changeindex(&index_path);
-
-    // Always save an up-to-date index covering every file on disk.
-    let new_index = changeindex::build_from_relative(root, &all_walked);
-    if let Err(e) = changeindex::save_changeindex(&index_path, &new_index) {
-        warn!("failed to save changeindex: {e}");
-    }
-
-    let old = match old_index {
-        None => {
-            info!(
-                "changeindex: first run, indexing {} files",
-                all_walked.len()
-            );
-            return result;
-        }
-        Some(idx) => idx,
-    };
-
-    let (to_scan, deleted) = changeindex::diff(root, &all_walked, &old);
-
-    let scan_set: std::collections::HashSet<String> = to_scan.into_iter().collect();
-    let unchanged = all_walked.len().saturating_sub(scan_set.len());
-
-    for vec in result.files.values_mut() {
-        vec.retain(|p| scan_set.contains(p));
-    }
-    result.files.retain(|_, v| !v.is_empty());
-
-    let filtered_total: usize = result.files.values().map(std::vec::Vec::len).sum();
-    result.total_files = filtered_total;
-    result.deleted_files = deleted;
-
-    info!(
-        "changeindex: {} to scan ({} unchanged, {} deleted)",
-        filtered_total,
-        unchanged,
-        result.deleted_files.len(),
-    );
-
-    result
-}
-
-/// Internal detect that optionally computes content hashes during the walk.
-///
-/// Parameters:
-/// - `compute_hashes`: compute SHA256 for change detection (incremental mode).
-/// - `old_hashes`: known-good hashes from the previous manifest; unchanged
-///   files are excluded from the returned result.
-/// - `metadata_skip`: if a file's mtime+size match this index, the file is
-///   treated as unchanged without any file reads (fast-path for incremental).
-///
-/// Returns `(DetectResult, Option<hashes>, all_walked)` where `all_walked`
-/// is every relative path that passed filters — regardless of hash status —
-/// so callers can build a complete changeindex.
+/// When `compute_hashes` is true, hashes are computed from the file content
+/// already read by `count_words`, eliminating a separate read pass.
+/// Returns `(DetectResult, Option<HashMap<String, String>>)` where the second
+/// element is the hash map when `compute_hashes` is true.
 fn detect_inner(
     root: &Path,
     compute_hashes: bool,
     old_hashes: Option<&HashMap<String, String>>,
-    metadata_skip: Option<&changeindex::ChangeIndex>,
-) -> (DetectResult, Option<HashMap<String, String>>, Vec<String>) {
+) -> (DetectResult, Option<HashMap<String, String>>) {
     let ignore_patterns = load_graphifyignore(root);
     let ignore_set = IgnoreSet::new(&ignore_patterns);
     let pattern_count = ignore_patterns.len();
@@ -177,7 +106,6 @@ fn detect_inner(
     let mut total_words = 0usize;
     let mut skipped_sensitive = Vec::new();
     let mut hashes: HashMap<String, String> = HashMap::new();
-    let mut all_walked: Vec<String> = Vec::new();
 
     let walker = WalkDir::new(root).follow_links(false);
 
@@ -218,26 +146,6 @@ fn detect_inner(
             .to_string_lossy()
             .into_owned();
 
-        all_walked.push(rel.clone());
-
-        // Metadata fast-path: if mtime+size match the changeindex, skip all
-        // file reads and treat this file as unchanged (no SHA256 needed).
-        if let Some(idx) = metadata_skip {
-            if let Some(old_meta) = idx.files.get(&rel) {
-                if let Some(cur_meta) = changeindex::file_entry(path) {
-                    if cur_meta.mtime == old_meta.mtime && cur_meta.size == old_meta.size {
-                        if compute_hashes {
-                            if let Some(old_h) = old_hashes.and_then(|h| h.get(&rel)) {
-                                hashes.insert(rel.clone(), old_h.clone());
-                            }
-                        }
-                        files.entry(file_type).or_default();
-                        continue;
-                    }
-                }
-            }
-        }
-
         if compute_hashes {
             if let Some(old) = old_hashes.and_then(|h| h.get(&rel)) {
                 let full_path = root.join(&rel);
@@ -247,7 +155,7 @@ fn detect_inner(
                         hashes.insert(rel.clone(), hash.clone());
                         if old == &hash {
                             total_words += content.split_whitespace().count();
-                            files.entry(file_type).or_default();
+                            files.entry(file_type).or_default(); // ensure key exists
                             continue;
                         }
                         total_words += content.split_whitespace().count();
@@ -331,44 +239,22 @@ fn detect_inner(
         warning,
         skipped_sensitive,
         graphifyignore_patterns: pattern_count,
-        deleted_files: Vec::new(),
     };
 
-    (
-        result,
-        if compute_hashes { Some(hashes) } else { None },
-        all_walked,
-    )
+    (result, if compute_hashes { Some(hashes) } else { None })
 }
 
-/// Incremental detection: returns only changed / new files by comparing SHA256
-/// content hashes against the previous manifest.
+/// Incremental detection: compares against a stored manifest and returns only
+/// changed / new files. Uses content hashes to detect modifications in
+/// existing files.
 ///
-/// When a `changeindex.db` exists alongside the manifest, files whose mtime
-/// and size are unchanged bypass the SHA256 read entirely (metadata fast-path),
-/// making subsequent runs significantly faster on large repos. The changeindex
-/// is always updated so future runs stay in sync.
+/// Computes hashes during the directory walk (sharing file reads with word
+/// counting) so unchanged files are never re-read.
 pub fn detect_incremental(root: &Path, manifest_path: Option<&str>) -> DetectResult {
-    let manifest_file = if std::path::Path::new(manifest_path.unwrap_or("")).is_absolute() {
-        std::path::PathBuf::from(manifest_path.unwrap())
-    } else {
-        root.join(manifest_path.unwrap_or(DEFAULT_MANIFEST_NAME))
-    };
+    let manifest_file = root.join(manifest_path.unwrap_or(DEFAULT_MANIFEST_NAME));
     let old_manifest = load_manifest(&manifest_file).unwrap_or_default();
 
-    // Changeindex lives alongside the manifest.
-    let changeindex_path = manifest_file
-        .parent()
-        .unwrap_or(root)
-        .join(changeindex::CHANGEINDEX_NAME);
-    let old_changeindex = changeindex::load_changeindex(&changeindex_path);
-
-    let (result, new_hashes, all_walked) = detect_inner(
-        root,
-        true,
-        Some(&old_manifest.hashes),
-        old_changeindex.as_ref(),
-    );
+    let (result, new_hashes) = detect_inner(root, true, Some(&old_manifest.hashes));
     let new_hashes = new_hashes.unwrap_or_default();
 
     let mut new_manifest = Manifest {
@@ -397,15 +283,9 @@ pub fn detect_incremental(root: &Path, manifest_path: Option<&str>) -> DetectRes
         warn!("failed to save manifest: {e}");
     }
 
-    // Save an updated changeindex covering all files currently on disk.
-    let new_changeindex = changeindex::build_from_relative(root, &all_walked);
-    if let Err(e) = changeindex::save_changeindex(&changeindex_path, &new_changeindex) {
-        warn!("failed to save changeindex: {e}");
-    }
-
     info!(
         "detect_incremental: {filtered_total} new/changed files (total {total} on disk)",
-        total = all_walked.len(),
+        total = result.total_files,
     );
 
     result
