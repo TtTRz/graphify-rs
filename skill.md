@@ -6,7 +6,7 @@ trigger: /graphify-rs
 
 # /graphify-rs
 
-Turn any folder of files into a navigable knowledge graph with community detection, an honest audit trail, and multiple outputs: GraphRAG-ready JSON, an agent-crawlable wiki, and a plain-language GRAPH_REPORT.md.
+Turn any folder of files into a navigable knowledge graph with community detection, an honest audit trail, and two Claude-facing outputs: GraphRAG-ready JSON and a plain-language GRAPH_REPORT.md.
 
 ## Usage
 
@@ -73,7 +73,7 @@ Replace INPUT_PATH with the actual path the user provided.
 Available flags:
 - `--no-llm`: skip Claude API semantic extraction (AST-only, free, fast)
 - `--code-only`: only process code files
-- `--format json,wiki,report,html,svg,graphml,cypher,obsidian`: select export formats (default: json,wiki,report)
+- `--format json,wiki,report,html,svg,graphml,cypher,obsidian`: select export formats (default: json,report)
 - `--jobs N`: control parallelism
 - `--max-viz-nodes N`: maximum nodes in HTML visualization (only applies with `--format html`)
 
@@ -96,22 +96,17 @@ Present these sections directly in chat:
 
 Do NOT paste the full report - just those three sections. Keep it concise.
 
-For deeper node-by-node navigation, `wiki/index.md` in the output dir lists all nodes as links — use it when the user wants to explore a specific concept or module in detail.
-
 ### Step 4 - Offer to explore
 
 Pick the single most interesting suggested question from the report and ask:
 
 > "The most interesting question this graph can answer: **[question]**. Want me to trace it?"
 
-If the user says yes, use `graphify-rs query` for broad BFS traversal or `wiki/` pages for focused node-level detail:
+If the user says yes, run:
 
 ```bash
 graphify-rs query "QUESTION" --graph graphify-rs-out/graph.json
 ```
-
-- Use `query` when you need to trace connections across the whole graph (BFS/DFS traversal)
-- Use `wiki/<NodeName>.md` when you need full detail about a specific node (imports, callers, relationships)
 
 Walk them through the answer using the graph structure. Each answer should end with a natural follow-up so the session feels like navigation.
 
@@ -119,14 +114,14 @@ Walk them through the answer using the graph structure. Each answer should end w
 
 ## When to use graph tools vs. file search
 
-**NEVER read `graph.json` directly.** It is hundreds of megabytes — it will overflow your context and is unreadable. All graph access must go through the CLI or wiki files.
+**NEVER read `graph.json` directly.** It is hundreds of megabytes — it will overflow your context and is unreadable. All graph access must go through the CLI (`graphify-rs query`) or `GRAPH_REPORT.md`.
 
 When `graphify-rs-out/` exists in the project, prefer graph tools over Grep/Glob for structure and relationship questions:
 
 | Question type | Use |
 |---|---|
-| "What calls function X?" / "What imports Y?" | `cat graphify-rs-out/wiki/<NodeName>.md` — callers/callees already resolved |
-| "What does module Y depend on?" | `cat graphify-rs-out/wiki/<NodeName>.md` |
+| "What calls function X?" / "What imports Y?" | `graphify-rs query "what calls X"` |
+| "What does module Y depend on?" | `graphify-rs query "dependencies of Y"` |
 | "How does X connect to Y?" / "What's the architecture?" | `graphify-rs query "..."` |
 | "What would break if I change X?" | `graphify-rs query "impact of changing X"` |
 | "What are the main modules / entry points?" | `cat graphify-rs-out/GRAPH_REPORT.md` — God Nodes section |
@@ -153,7 +148,7 @@ graphify-rs build --path . --output graphify-rs-out --no-llm
 
 - `--no-llm`: skip Claude API (AST-only rebuild is free and fast, ~2-5s)
 - Automatically skips the full rebuild if no file content changed (changeindex detects this)
-- This updates `graph.json`, `wiki/`, and `GRAPH_REPORT.md`
+- This updates `graph.json` and `GRAPH_REPORT.md` (plus any other selected formats)
 
 ### When to rebuild
 
@@ -295,4 +290,4 @@ graphify-rs completions bash                           # generate shell completi
 - Never skip the corpus check warning.
 - Always show token cost in the report.
 - Never hide cohesion scores behind symbols - show the raw number.
-- Never run HTML viz (`--format html`) on a graph with more than 5,000 nodes without warning the user first — HTML is not needed for Claude; prefer `json,wiki,report`.
+- Never run HTML viz (`--format html`) on a graph with more than 5,000 nodes without warning the user first — HTML is not needed for Claude; prefer `json,report`.

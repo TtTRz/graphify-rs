@@ -27,7 +27,7 @@ pub async fn cmd_build(
     let output_dir = PathBuf::from(output);
     let cache_dir = output_dir.join("cache");
 
-    let all_formats = ["json", "wiki", "report"];
+    let all_formats = ["json", "report"];
     let selected: Vec<&str> = if formats.is_empty() {
         all_formats.to_vec()
     } else {
