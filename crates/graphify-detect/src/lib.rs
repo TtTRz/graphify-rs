@@ -93,6 +93,63 @@ pub fn detect(root: &Path) -> DetectResult {
     detect_inner(root, false, None, None).0
 }
 
+/// Walk `root`, apply all standard filters, then use `changeindex.db` inside
+/// `changeindex_dir` to skip files whose mtime and size are unchanged.
+///
+/// On the first run (no `changeindex.db`) all detected files are returned and
+/// the index is written.  On subsequent runs only new, modified, and deleted
+/// files are included in the result; the index is updated to reflect the
+/// current state of every file on disk.
+///
+/// `DetectResult::deleted_files` contains paths that were in the previous
+/// index but are absent from the current walk (after filters).
+pub fn detect_with_changeindex(root: &Path, changeindex_dir: &Path) -> DetectResult {
+    // Single walk: get both the full file list and the filtered result.
+    let (mut result, _, all_walked) = detect_inner(root, false, None, None);
+
+    let index_path = changeindex_dir.join(changeindex::CHANGEINDEX_NAME);
+    let old_index = changeindex::load_changeindex(&index_path);
+
+    // Always save an up-to-date index covering every file on disk.
+    let new_index = changeindex::build_from_relative(root, &all_walked);
+    if let Err(e) = changeindex::save_changeindex(&index_path, &new_index) {
+        warn!("failed to save changeindex: {e}");
+    }
+
+    let old = match old_index {
+        None => {
+            info!(
+                "changeindex: first run, indexing {} files",
+                all_walked.len()
+            );
+            return result;
+        }
+        Some(idx) => idx,
+    };
+
+    let (to_scan, deleted) = changeindex::diff(root, &all_walked, &old);
+
+    let scan_set: std::collections::HashSet<String> = to_scan.into_iter().collect();
+    let unchanged = all_walked.len().saturating_sub(scan_set.len());
+
+    for vec in result.files.values_mut() {
+        vec.retain(|p| scan_set.contains(p));
+    }
+    result.files.retain(|_, v| !v.is_empty());
+
+    let filtered_total: usize = result.files.values().map(std::vec::Vec::len).sum();
+    result.total_files = filtered_total;
+    result.deleted_files = deleted;
+
+    info!(
+        "changeindex: {} to scan ({} unchanged, {} deleted)",
+        filtered_total,
+        unchanged,
+        result.deleted_files.len(),
+    );
+
+    result
+}
 
 /// Internal detect that optionally computes content hashes during the walk.
 ///

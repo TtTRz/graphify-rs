@@ -8,8 +8,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use tracing::warn;
-
 use crate::{Verbosity, info_print, verbose_print};
 
 /// Full build pipeline: detect -> extract (with cache) -> build -> cluster -> analyze -> export
@@ -124,22 +122,7 @@ fn step_detect(
         let manifest_path = output_dir.join(".graphify_manifest.json");
         graphify_detect::detect_incremental(root, Some(manifest_path.to_str().unwrap_or("")))
     } else {
-        let result = graphify_detect::detect(root);
-        // Always recreate the changeindex on a full build so subsequent
-        // --update runs have an accurate baseline without scanning all files.
-        let all_paths: Vec<String> = result
-            .files
-            .values()
-            .flat_map(|v| v.iter().cloned())
-            .collect();
-        let new_index =
-            graphify_detect::changeindex::build_from_relative(root, &all_paths);
-        let index_path =
-            output_dir.join(graphify_detect::changeindex::CHANGEINDEX_NAME);
-        if let Err(e) = graphify_detect::save_changeindex(&index_path, &new_index) {
-            warn!("failed to save changeindex: {e}");
-        }
-        result
+        graphify_detect::detect_with_changeindex(root, output_dir)
     };
     let n_code = detection
         .files
