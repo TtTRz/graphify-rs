@@ -4,6 +4,7 @@
 //! directories and sensitive files, and classifies each file into a
 //! [`FileType`] category for downstream extraction.
 
+pub mod changeindex;
 pub mod classify;
 pub mod constants;
 pub mod ignore;
@@ -57,47 +58,19 @@ pub struct DetectResult {
     pub graphifyignore_patterns: usize,
 }
 
-/// A simple manifest that records which files were previously detected.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Manifest {
-    pub files: HashMap<String, FileType>,
-    /// Content hashes keyed by relative path, for incremental change detection.
-    #[serde(default)]
-    pub hashes: HashMap<String, String>,
-}
-
-const DEFAULT_MANIFEST_NAME: &str = ".graphify_manifest.json";
-
-/// Load a previously-saved manifest from disk.
-pub fn load_manifest(path: &Path) -> Option<Manifest> {
-    let content = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&content).ok()
-}
-
-/// Persist the current manifest to disk.
-pub fn save_manifest(path: &Path, manifest: &Manifest) -> Result<(), DetectError> {
-    let json = serde_json::to_string_pretty(manifest).map_err(std::io::Error::other)?;
-    fs::write(path, json)?;
-    Ok(())
-}
-
 /// Walk `root` and return a [`DetectResult`] with all discovered files.
 pub fn detect(root: &Path) -> DetectResult {
-    detect_inner(root, false, None).0
+    detect_inner(root)
 }
 
-/// Internal detect that optionally computes content hashes during the walk
-/// to avoid double I/O when doing incremental detection.
+/// Like [`detect`], but uses a lightweight mtime+size+words index at
+/// `index_path` to skip re-reading unchanged files for word counting.
 ///
-/// When `compute_hashes` is true, hashes are computed from the file content
-/// already read by `count_words`, eliminating a separate read pass.
-/// Returns `(DetectResult, Option<HashMap<String, String>>)` where the second
-/// element is the hash map when `compute_hashes` is true.
-fn detect_inner(
-    root: &Path,
-    compute_hashes: bool,
-    old_hashes: Option<&HashMap<String, String>>,
-) -> (DetectResult, Option<HashMap<String, String>>) {
+/// All files are still returned — the index only speeds up the walk by
+/// caching word counts. The index is created on the first run and kept
+/// up-to-date on every subsequent run.
+pub fn detect_fast(root: &Path, index_path: &Path) -> (DetectResult, bool) {
+    let old_index = changeindex::load(index_path);
     let ignore_patterns = load_graphifyignore(root);
     let ignore_set = IgnoreSet::new(&ignore_patterns);
     let pattern_count = ignore_patterns.len();
@@ -105,7 +78,7 @@ fn detect_inner(
     let mut files: HashMap<FileType, Vec<String>> = HashMap::new();
     let mut total_words = 0usize;
     let mut skipped_sensitive = Vec::new();
-    let mut hashes: HashMap<String, String> = HashMap::new();
+    let mut new_index = changeindex::ChangeIndex::default();
 
     let walker = WalkDir::new(root).follow_links(false);
 
@@ -146,59 +119,124 @@ fn detect_inner(
             .to_string_lossy()
             .into_owned();
 
-        if compute_hashes {
-            if let Some(old) = old_hashes.and_then(|h| h.get(&rel)) {
-                let full_path = root.join(&rel);
-                match fs::read_to_string(&full_path) {
-                    Ok(content) => {
-                        let hash = graphify_cache::content_hash(content.as_bytes());
-                        hashes.insert(rel.clone(), hash.clone());
-                        if old == &hash {
-                            total_words += content.split_whitespace().count();
-                            files.entry(file_type).or_default(); // ensure key exists
-                            continue;
-                        }
-                        total_words += content.split_whitespace().count();
-                    }
-                    Err(_) => {
-                        let hash = graphify_cache::file_hash(path).unwrap_or_default();
-                        hashes.insert(rel.clone(), hash.clone());
-                        if old == &hash {
-                            files.entry(file_type).or_default();
-                            continue;
-                        }
-                    }
-                }
-            } else {
-                let full_path = root.join(&rel);
-                match fs::read_to_string(&full_path) {
-                    Ok(content) => {
-                        hashes.insert(
-                            rel.clone(),
-                            graphify_cache::content_hash(content.as_bytes()),
-                        );
-                        match file_type {
-                            FileType::Code | FileType::Document | FileType::Paper => {
-                                total_words += content.split_whitespace().count();
-                            }
-                            FileType::Image => {}
-                        }
-                    }
-                    Err(_) => {
-                        hashes.insert(
-                            rel.clone(),
-                            graphify_cache::file_hash(path).unwrap_or_default(),
-                        );
-                    }
-                }
+        let (mtime, size) = changeindex::file_meta(path).unwrap_or((0, 0));
+
+        let old_entry = old_index.as_ref().and_then(|i| i.files.get(&rel));
+        let (words, hash) = entry_words_and_hash(path, file_type, mtime, size, old_entry);
+
+        total_words += words as usize;
+        new_index.files.insert(
+            rel.clone(),
+            changeindex::ChangeEntry { mtime, size, words, hash },
+        );
+        files.entry(file_type).or_default().push(rel);
+    }
+
+    let changed = match old_index.as_ref() {
+        None => true,
+        Some(old) => {
+            old.files.len() != new_index.files.len()
+                || new_index.files.iter().any(|(k, v)| {
+                    old.files.get(k).map_or(true, |e| e.hash != v.hash)
+                })
+        }
+    };
+
+    if let Err(e) = changeindex::save(index_path, &new_index) {
+        warn!("failed to save changeindex: {e}");
+    }
+
+    let total_files: usize = files.values().map(std::vec::Vec::len).sum();
+
+    let warning = if total_words > CORPUS_UPPER_THRESHOLD {
+        Some(format!(
+            "Corpus is very large ({total_words} words, {total_files} files). \
+             Consider narrowing scope with .graphifyignore."
+        ))
+    } else if total_words > CORPUS_WARN_THRESHOLD || total_files > FILE_COUNT_UPPER {
+        Some(format!(
+            "Large corpus detected ({total_words} words, {total_files} files). \
+             Graph build may be slow."
+        ))
+    } else {
+        None
+    };
+
+    if let Some(ref w) = warning {
+        warn!("{w}");
+    }
+    info!(
+        "detect_fast: {total_files} files, {total_words} words, {} sensitive skipped, \
+         {pattern_count} ignore patterns",
+        skipped_sensitive.len()
+    );
+
+    let result = DetectResult {
+        files,
+        total_files,
+        total_words,
+        needs_graph: total_files >= 2,
+        warning,
+        skipped_sensitive,
+        graphifyignore_patterns: pattern_count,
+    };
+
+    (result, changed)
+}
+
+fn detect_inner(root: &Path) -> DetectResult {
+    let ignore_patterns = load_graphifyignore(root);
+    let ignore_set = IgnoreSet::new(&ignore_patterns);
+    let pattern_count = ignore_patterns.len();
+
+    let mut files: HashMap<FileType, Vec<String>> = HashMap::new();
+    let mut total_words = 0usize;
+    let mut skipped_sensitive = Vec::new();
+
+    let walker = WalkDir::new(root).follow_links(false);
+
+    for entry in walker
+        .into_iter()
+        .filter_entry(|e| !should_skip_entry(e, root, &ignore_set))
+    {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(err) => {
+                debug!("walk error (skipped): {err}");
+                continue;
             }
-        } else {
-            match file_type {
-                FileType::Code | FileType::Document | FileType::Paper => {
-                    total_words += count_words(path);
-                }
-                FileType::Image => {}
+        };
+
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        let path = entry.path();
+
+        if is_sensitive(path) {
+            if let Ok(rel) = path.strip_prefix(root) {
+                skipped_sensitive.push(rel.to_string_lossy().into_owned());
             }
+            debug!("skipping sensitive file: {}", path.display());
+            continue;
+        }
+
+        let file_type = match classify_file(path) {
+            Some(ft) => ft,
+            None => continue,
+        };
+
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .into_owned();
+
+        match file_type {
+            FileType::Code | FileType::Document | FileType::Paper => {
+                total_words += count_words(path);
+            }
+            FileType::Image => {}
         }
 
         files.entry(file_type).or_default().push(rel);
@@ -231,7 +269,7 @@ fn detect_inner(
         skipped_sensitive.len()
     );
 
-    let result = DetectResult {
+    DetectResult {
         files,
         total_files,
         total_words,
@@ -239,56 +277,7 @@ fn detect_inner(
         warning,
         skipped_sensitive,
         graphifyignore_patterns: pattern_count,
-    };
-
-    (result, if compute_hashes { Some(hashes) } else { None })
-}
-
-/// Incremental detection: compares against a stored manifest and returns only
-/// changed / new files. Uses content hashes to detect modifications in
-/// existing files.
-///
-/// Computes hashes during the directory walk (sharing file reads with word
-/// counting) so unchanged files are never re-read.
-pub fn detect_incremental(root: &Path, manifest_path: Option<&str>) -> DetectResult {
-    let manifest_file = root.join(manifest_path.unwrap_or(DEFAULT_MANIFEST_NAME));
-    let old_manifest = load_manifest(&manifest_file).unwrap_or_default();
-
-    let (result, new_hashes) = detect_inner(root, true, Some(&old_manifest.hashes));
-    let new_hashes = new_hashes.unwrap_or_default();
-
-    let mut new_manifest = Manifest {
-        files: result
-            .files
-            .iter()
-            .flat_map(|(ft, paths)| paths.iter().map(|p| (p.clone(), *ft)))
-            .collect(),
-        hashes: new_hashes.clone(),
-    };
-
-    for (rel, ft) in &old_manifest.files {
-        if !new_manifest.files.contains_key(rel) {
-            new_manifest.files.insert(rel.clone(), *ft);
-        }
-        if !new_manifest.hashes.contains_key(rel)
-            && let Some(h) = old_manifest.hashes.get(rel)
-        {
-            new_manifest.hashes.insert(rel.clone(), h.clone());
-        }
     }
-
-    let filtered_total: usize = result.files.values().map(std::vec::Vec::len).sum();
-
-    if let Err(e) = save_manifest(&manifest_file, &new_manifest) {
-        warn!("failed to save manifest: {e}");
-    }
-
-    info!(
-        "detect_incremental: {filtered_total} new/changed files (total {total} on disk)",
-        total = result.total_files,
-    );
-
-    result
 }
 
 /// Returns `true` if this entry should be pruned from the walk.
@@ -317,6 +306,63 @@ fn is_noise_dir(name: &str) -> bool {
         || name.ends_with("_venv")
         || name.ends_with("_env")
         || name.ends_with(".egg-info")
+}
+
+/// Compute `(words, hash)` for a file, using the changeindex cache where possible.
+///
+/// Decision tree:
+/// - mtime + size unchanged → return cached values (no I/O)
+/// - size unchanged, mtime different → read file, compute hash; if hash matches cache
+///   treat as a spurious touch (return cached words with updated hash); else compute fresh
+/// - size changed / new file / meta unavailable → compute fresh
+fn entry_words_and_hash(
+    path: &Path,
+    file_type: FileType,
+    mtime: u64,
+    size: u64,
+    old: Option<&changeindex::ChangeEntry>,
+) -> (u64, String) {
+    if mtime != 0 {
+        if let Some(e) = old {
+            if mtime == e.mtime && size == e.size {
+                return (e.words, e.hash.clone());
+            }
+            if size == e.size {
+                // Same size but mtime changed — verify hash before treating as modified.
+                match file_type {
+                    FileType::Image => {
+                        let h = graphify_cache::file_hash(path).unwrap_or_default();
+                        return if h == e.hash { (e.words, h) } else { (0, h) };
+                    }
+                    _ => match fs::read_to_string(path) {
+                        Ok(content) => {
+                            let h = graphify_cache::content_hash(content.as_bytes());
+                            return if h == e.hash {
+                                (e.words, h)
+                            } else {
+                                (content.split_whitespace().count() as u64, h)
+                            };
+                        }
+                        Err(_) => {
+                            let h = graphify_cache::file_hash(path).unwrap_or_default();
+                            return (0, h);
+                        }
+                    },
+                }
+            }
+        }
+    }
+    // New file, size changed, or meta unavailable → compute fresh.
+    match file_type {
+        FileType::Image => (0, graphify_cache::file_hash(path).unwrap_or_default()),
+        _ => match fs::read_to_string(path) {
+            Ok(content) => {
+                let h = graphify_cache::content_hash(content.as_bytes());
+                (content.split_whitespace().count() as u64, h)
+            }
+            Err(_) => (0, graphify_cache::file_hash(path).unwrap_or_default()),
+        },
+    }
 }
 
 /// Approximate word count for a file by splitting on whitespace.
@@ -448,29 +494,6 @@ mod tests {
     }
 
     #[test]
-    fn detect_incremental_filters_known() {
-        let dir = make_test_tree();
-        let root = dir.path();
-
-        let r1 = detect_incremental(root, None);
-        assert!(r1.total_files >= 3);
-
-        let r2 = detect_incremental(root, None);
-        let r2_new_count: usize = r2.files.values().map(|v| v.len()).sum();
-        assert_eq!(
-            r2_new_count, 0,
-            "no new/changed files expected on second run"
-        );
-
-        fs::write(root.join("new_file.ts"), "const x = 1;").unwrap();
-        let r3 = detect_incremental(root, None);
-        let r3_new_count: usize = r3.files.values().map(|v| v.len()).sum();
-        assert_eq!(r3_new_count, 1, "expected exactly 1 new file");
-        let code = r3.files.get(&FileType::Code).expect("expected code");
-        assert!(code.iter().any(|p| p.contains("new_file.ts")));
-    }
-
-    #[test]
     fn is_noise_dir_known() {
         assert!(is_noise_dir("node_modules"));
         assert!(is_noise_dir(".git"));
@@ -504,21 +527,6 @@ mod tests {
     #[test]
     fn count_words_returns_zero_for_missing() {
         assert_eq!(count_words(Path::new("/nonexistent/file.txt")), 0);
-    }
-
-    #[test]
-    fn manifest_roundtrip() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("manifest.json");
-
-        let mut m = Manifest::default();
-        m.files.insert("src/main.rs".into(), FileType::Code);
-        m.files.insert("README.md".into(), FileType::Document);
-
-        save_manifest(&p, &m).unwrap();
-        let loaded = load_manifest(&p).unwrap();
-        assert_eq!(loaded.files.len(), 2);
-        assert_eq!(loaded.files["src/main.rs"], FileType::Code);
     }
 
     #[test]

@@ -93,7 +93,7 @@ This project has a graphify-rs knowledge graph at {output_dir}/.
 Rules:
 - Before answering architecture or codebase questions, read {output_dir}/GRAPH_REPORT.md for god nodes and community structure
 - If {output_dir}/wiki/index.md exists, navigate it instead of reading raw files
-- After modifying code files in this session, run `graphify-rs build --path . --output {output_dir} --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s)
+- After modifying code files in this session, run `graphify-rs build --path . --output {output_dir} --no-llm` to keep the graph current (fast, AST-only, ~2-5s; skips rebuild automatically if nothing changed)
 "
     )
 }

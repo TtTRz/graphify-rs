@@ -17,7 +17,6 @@ pub async fn cmd_build(
     output: &str,
     no_llm: bool,
     code_only: bool,
-    update: bool,
     formats: &[String],
     verb: Verbosity,
     jobs: Option<usize>,
@@ -28,9 +27,7 @@ pub async fn cmd_build(
     let output_dir = PathBuf::from(output);
     let cache_dir = output_dir.join("cache");
 
-    let all_formats = [
-        "json", "html", "graphml", "cypher", "svg", "wiki", "obsidian", "report",
-    ];
+    let all_formats = ["json", "wiki", "report"];
     let selected: Vec<&str> = if formats.is_empty() {
         all_formats.to_vec()
     } else {
@@ -38,7 +35,12 @@ pub async fn cmd_build(
     };
     let should_export = |name: &str| selected.iter().any(|s| s.eq_ignore_ascii_case(name));
 
-    let detection = step_detect(&root, &output_dir, update, verb)?;
+    let (detection, changed) = step_detect(&root, &output_dir, verb)?;
+
+    if !changed && output_dir.join("graph.json").exists() {
+        info_print!(verb, "  {} No files changed, skipping rebuild.", "✓".green());
+        return Ok(());
+    }
 
     let mut extractions = step_extract_ast(&root, &cache_dir, &detection, code_only, verb)?;
 
@@ -114,16 +116,11 @@ pub async fn cmd_build(
 fn step_detect(
     root: &Path,
     output_dir: &Path,
-    update: bool,
     verb: Verbosity,
-) -> Result<graphify_detect::DetectResult> {
+) -> Result<(graphify_detect::DetectResult, bool)> {
     info_print!(verb, "  {} files...", "Detecting".cyan());
-    let detection = if update {
-        let manifest_path = output_dir.join(".graphify_manifest.json");
-        graphify_detect::detect_incremental(root, Some(manifest_path.to_str().unwrap_or("")))
-    } else {
-        graphify_detect::detect(root)
-    };
+    let index_path = output_dir.join(graphify_detect::changeindex::CHANGEINDEX_NAME);
+    let (detection, changed) = graphify_detect::detect_fast(root, &index_path);
     let n_code = detection
         .files
         .get(&graphify_detect::FileType::Code)
@@ -161,7 +158,7 @@ fn step_detect(
             detection.skipped_sensitive.len()
         );
     }
-    Ok(detection)
+    Ok((detection, changed))
 }
 
 fn step_extract_ast(
@@ -653,17 +650,6 @@ fn step_export(
             obsidian_path.display().to_string().dimmed()
         );
     }
-
-    let manifest_path = output_dir.join(".graphify_manifest.json");
-    let manifest = graphify_detect::Manifest {
-        files: detection
-            .files
-            .iter()
-            .flat_map(|(ft, paths)| paths.iter().map(move |p| (p.clone(), *ft)))
-            .collect(),
-        hashes: HashMap::new(),
-    };
-    graphify_detect::save_manifest(&manifest_path, &manifest)?;
 
     Ok(())
 }

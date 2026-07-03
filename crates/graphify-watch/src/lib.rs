@@ -214,17 +214,6 @@ fn rebuild(
         let _ = std::fs::write(&report_path, &report);
     }
 
-    let manifest_path = output_dir.join(".graphify_manifest.json");
-    let manifest = graphify_detect::Manifest {
-        files: detection
-            .files
-            .iter()
-            .flat_map(|(ft, paths)| paths.iter().map(move |p| (p.clone(), *ft)))
-            .collect(),
-        hashes: HashMap::new(),
-    };
-    let _ = graphify_detect::save_manifest(&manifest_path, &manifest);
-
     info!("rebuild: done");
     Ok(())
 }

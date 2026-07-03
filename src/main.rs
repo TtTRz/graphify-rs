@@ -47,9 +47,6 @@ enum Commands {
         no_llm: bool,
         #[arg(long)]
         code_only: bool,
-        /// Only re-extract new/modified files since last build
-        #[arg(long)]
-        update: bool,
         /// Export formats (comma-separated). Available: json,html,graphml,cypher,svg,wiki,obsidian,report. Default: all
         #[arg(long, value_delimiter = ',')]
         format: Vec<String>,
@@ -292,7 +289,6 @@ async fn main() -> Result<()> {
             output,
             no_llm,
             code_only,
-            update,
             format,
             max_viz_nodes,
         } => {
@@ -318,7 +314,6 @@ async fn main() -> Result<()> {
                 &effective_output,
                 effective_no_llm,
                 effective_code_only,
-                update,
                 &effective_formats,
                 verb,
                 cli.jobs,
@@ -461,7 +456,6 @@ async fn main() -> Result<()> {
                     &output_dir,
                     true,
                     true,
-                    false,
                     &["json".to_string()],
                     Verbosity::Quiet,
                     None,
