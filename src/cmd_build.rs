@@ -312,22 +312,57 @@ async fn step_extract_semantic(
                 graphify_extract::semantic::LLMProvider::Ollama => "Ollama",
                 graphify_extract::semantic::LLMProvider::OpenAICompatible => "OpenAI-compatible",
             };
-            info_print!(
-                verb,
-                "  {} on {} doc/paper files via {} ({})...",
-                "Semantic extraction".cyan(),
-                doc_files.len(),
-                provider_name,
-                config.model,
-            );
+
+            // Pre-split: serve cache hits immediately, collect only new files for LLM.
+            let mut to_process: Vec<(PathBuf, String)> = Vec::new();
+            for doc_path in &doc_files {
+                if let Some(cached) = graphify_cache::load_cached_from::<
+                    graphify_core::model::ExtractionResult,
+                >(doc_path, root, cache_dir)
+                {
+                    extractions.push(cached);
+                    continue;
+                }
+                if let Ok(content) = std::fs::read_to_string(doc_path) {
+                    to_process.push((doc_path.clone(), content));
+                }
+            }
+            let cached_count = doc_files.len() - to_process.len();
+
+            if to_process.is_empty() {
+                if cached_count > 0 {
+                    info_print!(
+                        verb,
+                        "  {} {} doc/paper files (all cached)",
+                        "Semantic extraction".cyan(),
+                        cached_count,
+                    );
+                }
+            } else {
+                let cache_note = if cached_count > 0 {
+                    format!(", {} cached", cached_count)
+                } else {
+                    String::new()
+                };
+                info_print!(
+                    verb,
+                    "  {} on {} doc/paper files via {} ({}){} ...",
+                    "Semantic extraction".cyan(),
+                    to_process.len(),
+                    provider_name,
+                    config.model,
+                    cache_note,
+                );
+            }
+
             let concurrency = jobs.unwrap_or(4).min(8);
             let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
             let rt = tokio::runtime::Handle::current();
 
-            let pb_sem = if verb.is_quiet() {
+            let pb_sem = if verb.is_quiet() || to_process.is_empty() {
                 None
             } else {
-                let pb = ProgressBar::new(doc_files.len() as u64);
+                let pb = ProgressBar::new(to_process.len() as u64);
                 pb.set_style(
                     ProgressStyle::with_template(
                         "  {bar:40.green/dim} {pos}/{len} docs ({eta} remaining)",
@@ -339,31 +374,12 @@ async fn step_extract_semantic(
             };
 
             let mut handles = Vec::new();
-            for doc_path in &doc_files {
-                if let Some(cached) = graphify_cache::load_cached_from::<
-                    graphify_core::model::ExtractionResult,
-                >(doc_path, root, cache_dir)
-                {
-                    extractions.push(cached);
-                    if let Some(ref pb) = pb_sem {
-                        pb.inc(1);
-                    }
-                    continue;
-                }
-                let content = if let Ok(c) = std::fs::read_to_string(doc_path) {
-                    c
-                } else {
-                    if let Some(ref pb) = pb_sem {
-                        pb.inc(1);
-                    }
-                    continue;
-                };
-                let file_type = if doc_path.extension().and_then(|e| e.to_str()) == Some("pdf") {
+            for (doc_p, content) in to_process {
+                let file_type = if doc_p.extension().and_then(|e| e.to_str()) == Some("pdf") {
                     "paper"
                 } else {
                     "document"
                 };
-                let doc_p = doc_path.clone();
                 let cfg_clone = config.clone();
                 let sem_clone = sem.clone();
                 let handle = rt.spawn(async move {
