@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-07-05
+
+### Changed
+
+- **Default output moved back into project directory** — reverts the `~/.graphify-rs/<name>-<hash>/` behavior introduced in 0.6.0. Output now writes to `graphify-rs-out/` inside the directory where the command is run. Explicit `--output` still works as before.
+- **Default export formats narrowed to `json, report`** — visual and graph formats (`html`, `svg`, `graphml`, `cypher`, `wiki`, `obsidian`) are now opt-in via `--format`. Reduces default run time and output size for typical use.
+- **`--update` flag removed** — replaced by automatic change detection. The build step now checks `changeindex.json` and skips the full rebuild when no file content has changed.
+- **Wiki format removed from defaults** — no meaningful use for larger repos; still available via `--format wiki`.
+
+### Added
+
+- **Change index for incremental detection** — new `changeindex.json` (replaces `.graphify_manifest.json`) stores mtime, size, and hash per file. `detect_fast()` uses this to short-circuit rebuilds when nothing changed, without re-hashing unchanged files.
+- **Semantic extraction cache-hit fast path** — doc/paper files with a valid cache entry are served immediately; only genuinely new files are sent to the LLM. Progress output shows how many were cached vs. newly processed.
+- **Skill guidance: graph tools vs. file search** — new section in `skill.md` with a decision table for when to use `graphify-rs query` vs. Grep/Glob.
+
 ## [0.8.1] - 2026-06-04
 
 ### Fixed
