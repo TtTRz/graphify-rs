@@ -93,14 +93,23 @@ pub fn is_sensitive(path: &Path) -> bool {
         }
     }
 
-    let stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    for word in SENSITIVE_WORDS {
-        if matches_word(&stem, word) {
-            return true;
+    const SKIP_KEYWORD_EXTS: &[&str] = &["cs", "html", "ts", "js", "tsx", "jsx", "vue"];
+    let skip_keywords = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| SKIP_KEYWORD_EXTS.contains(&e))
+        .unwrap_or(false);
+
+    if !skip_keywords {
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        for word in SENSITIVE_WORDS {
+            if matches_word(&stem, word) {
+                return true;
+            }
         }
     }
 

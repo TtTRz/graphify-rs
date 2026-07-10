@@ -30,16 +30,28 @@ pub fn load(path: &Path) -> Option<ChangeIndex> {
 }
 
 pub fn save(path: &Path, index: &ChangeIndex) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let json = serde_json::to_vec(index).map_err(std::io::Error::other)?;
     let tmp = path.with_extension("tmp");
-    let mut f = fs::File::create(&tmp)?;
-    f.write_all(&json)?;
-    f.flush()?;
-    fs::rename(&tmp, path)?;
+    {
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(&json)?;
+        f.flush()?;
+    } // drop/close before rename — required on Windows
+    if fs::rename(&tmp, path).is_err() {
+        // Windows: rename fails when destination exists; remove then retry.
+        let _ = fs::remove_file(path);
+        fs::rename(&tmp, path)?;
+    }
     Ok(())
 }
 
-/// Returns `(mtime_secs, size_bytes)` for a file without reading its content.
+/// Returns `(mtime_nanos, size_bytes)` for a file without reading its content.
+///
+/// Nanosecond resolution prevents missed changes from rapid saves within the
+/// same second (common in editor save-on-change loops).
 pub fn file_meta(path: &Path) -> Option<(u64, u64)> {
     let meta = fs::metadata(path).ok()?;
     let mtime = meta
@@ -47,6 +59,6 @@ pub fn file_meta(path: &Path) -> Option<(u64, u64)> {
         .ok()?
         .duration_since(UNIX_EPOCH)
         .ok()?
-        .as_secs();
+        .as_nanos() as u64;
     Some((mtime, meta.len()))
 }

@@ -37,9 +37,23 @@ pub async fn cmd_build(
 
     let (detection, changed) = step_detect(&root, &output_dir, verb)?;
 
-    if !changed && output_dir.join("graph.json").exists() {
-        info_print!(verb, "  {} No files changed, skipping rebuild.", "✓".green());
-        return Ok(());
+    if !changed {
+        let all_outputs_present = selected.iter().all(|fmt| {
+            let p = match *fmt {
+                "json" => output_dir.join("graph.json"),
+                "report" => output_dir.join("GRAPH_REPORT.md"),
+                "html" => output_dir.join("graph.html"),
+                "svg" => output_dir.join("graph.svg"),
+                "graphml" => output_dir.join("graph.graphml"),
+                "cypher" => output_dir.join("graph.cypher"),
+                _ => return true,
+            };
+            p.exists()
+        });
+        if all_outputs_present {
+            info_print!(verb, "  {} No files changed, skipping rebuild.", "✓".green());
+            return Ok(());
+        }
     }
 
     let mut extractions = step_extract_ast(&root, &cache_dir, &detection, code_only, verb)?;
@@ -119,6 +133,8 @@ fn step_detect(
     verb: Verbosity,
 ) -> Result<(graphify_detect::DetectResult, bool)> {
     info_print!(verb, "  {} files...", "Detecting".cyan());
+    // Ensure output_dir exists so detect_fast can persist changeindex.json on first run.
+    let _ = std::fs::create_dir_all(output_dir);
     let index_path = output_dir.join(graphify_detect::changeindex::CHANGEINDEX_NAME);
     let (detection, changed) = graphify_detect::detect_fast(root, &index_path);
     let n_code = detection
@@ -313,8 +329,10 @@ async fn step_extract_semantic(
                 graphify_extract::semantic::LLMProvider::OpenAICompatible => "OpenAI-compatible",
             };
 
-            // Pre-split: serve cache hits immediately, collect only new files for LLM.
-            let mut to_process: Vec<(PathBuf, String)> = Vec::new();
+            // Pre-split: serve cache hits immediately, collect only paths for uncached files.
+            // File contents are read inside each task after acquiring the semaphore so at most
+            // `concurrency` files are in memory at once.
+            let mut to_process: Vec<PathBuf> = Vec::new();
             for doc_path in &doc_files {
                 if let Some(cached) = graphify_cache::load_cached_from::<
                     graphify_core::model::ExtractionResult,
@@ -323,9 +341,7 @@ async fn step_extract_semantic(
                     extractions.push(cached);
                     continue;
                 }
-                if let Ok(content) = std::fs::read_to_string(doc_path) {
-                    to_process.push((doc_path.clone(), content));
-                }
+                to_process.push(doc_path.clone());
             }
             let cached_count = doc_files.len() - to_process.len();
 
@@ -374,7 +390,7 @@ async fn step_extract_semantic(
             };
 
             let mut handles = Vec::new();
-            for (doc_p, content) in to_process {
+            for doc_p in to_process {
                 let file_type = if doc_p.extension().and_then(|e| e.to_str()) == Some("pdf") {
                     "paper"
                 } else {
@@ -387,6 +403,11 @@ async fn step_extract_semantic(
                         .acquire()
                         .await
                         .map_err(|e| anyhow::anyhow!("semaphore closed: {e}"))?;
+                    // Read content after acquiring the semaphore so at most `concurrency`
+                    // files are held in memory simultaneously.
+                    let content = tokio::fs::read_to_string(&doc_p)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", doc_p.display()))?;
                     let result = graphify_extract::semantic::extract_semantic(
                         &doc_p, &content, file_type, &cfg_clone,
                     )
