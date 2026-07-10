@@ -387,18 +387,18 @@ async fn step_extract_semantic(
                         .acquire()
                         .await
                         .map_err(|e| anyhow::anyhow!("semaphore closed: {e}"))?;
-                    graphify_extract::semantic::extract_semantic(
+                    let result = graphify_extract::semantic::extract_semantic(
                         &doc_p, &content, file_type, &cfg_clone,
                     )
-                    .await
-                    .map(|r| (doc_p, r))
+                    .await;
+                    Ok::<_, anyhow::Error>((doc_p, result))
                 });
                 handles.push(handle);
             }
 
             for handle in handles {
                 match handle.await {
-                    Ok(Ok((doc_p, sem_result))) => {
+                    Ok(Ok((doc_p, Ok(sem_result)))) => {
                         verbose_print!(
                             verb,
                             "    {} → {} nodes, {} edges",
@@ -410,8 +410,19 @@ async fn step_extract_semantic(
                             graphify_cache::save_cached_to(&doc_p, &sem_result, root, cache_dir);
                         extractions.push(sem_result);
                     }
-                    Ok(Err(e)) => {
+                    Ok(Ok((doc_p, Err(e)))) => {
                         verbose_print!(verb, "    {} semantic extraction: {}", "⚠".yellow(), e);
+                        // Cache an empty result so this file is not retried on every build.
+                        // Run `graphify-rs clean` to force re-extraction.
+                        let _ = graphify_cache::save_cached_to(
+                            &doc_p,
+                            &graphify_core::model::ExtractionResult::default(),
+                            root,
+                            cache_dir,
+                        );
+                    }
+                    Ok(Err(e)) => {
+                        verbose_print!(verb, "    {} semaphore error: {}", "⚠".yellow(), e);
                     }
                     Err(e) => {
                         verbose_print!(verb, "    {} task join error: {}", "⚠".yellow(), e);

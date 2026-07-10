@@ -1,6 +1,6 @@
 //! MCP tool handler implementations.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::HashMap;
 
 use graphify_core::graph::KnowledgeGraph;
 use serde_json::{Value, json};
@@ -242,52 +242,11 @@ pub(crate) fn handle_shortest_path(graph: &KnowledgeGraph, args: &Value) -> Valu
         return tool_result_error(&format!("Target node not found: {target}"));
     }
 
-    if source == target {
-        let node = graph.get_node(source).unwrap();
-        let result = json!({
-            "source": source,
-            "target": target,
-            "path_length": 0,
-            "path": [{"id": node.id, "label": node.label}],
-        });
-        return tool_result_json(&result);
-    }
-
-    let mut visited: HashSet<String> = HashSet::new();
-    let mut parent: HashMap<String, String> = HashMap::new();
-    let mut queue: VecDeque<String> = VecDeque::new();
-
-    visited.insert(source.to_string());
-    queue.push_back(source.to_string());
-
-    let mut found = false;
-    while let Some(current) = queue.pop_front() {
-        if current == target {
-            found = true;
-            break;
-        }
-        for neighbor in graph.neighbor_ids(&current) {
-            if !visited.contains(&neighbor) {
-                visited.insert(neighbor.clone());
-                parent.insert(neighbor.clone(), current.clone());
-                queue.push_back(neighbor);
-            }
-        }
-    }
-
-    if !found {
+    let Some(path) = graph.shortest_path(source, target) else {
         return tool_result_text(&format!(
             "No path found between '{source}' and '{target}'. They may be in disconnected components."
         ));
-    }
-
-    let mut path = vec![target.to_string()];
-    let mut current = target.to_string();
-    while let Some(p) = parent.get(&current) {
-        path.push(p.clone());
-        current = p.clone();
-    }
-    path.reverse();
+    };
 
     let path_nodes: Vec<Value> = path
         .iter()

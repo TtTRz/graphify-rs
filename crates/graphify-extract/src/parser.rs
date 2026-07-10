@@ -34,7 +34,8 @@ impl Parser for RegexParser {
     fn supported_extensions(&self) -> &[&str] {
         // All extensions from the DISPATCH table
         &[
-            ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java", ".c", ".h", ".cpp", ".cc",
+            ".py", ".js", ".jsx", ".ts", ".tsx", ".vue", ".go", ".rs", ".java", ".c", ".h", ".cpp",
+            ".cc",
             ".cxx", ".hpp", ".rb", ".cs", ".kt", ".kts", ".scala", ".php", ".swift", ".lua",
             ".toc", ".zig", ".ps1", ".ex", ".exs", ".m", ".mm", ".jl",
         ]

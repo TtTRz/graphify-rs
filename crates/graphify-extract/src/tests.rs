@@ -2,6 +2,35 @@ use super::*;
 use graphify_core::model::{GraphEdge, GraphNode};
 
 #[test]
+fn vue_extract_script_js() {
+    let sfc = b"<template><div/></template>\n<script>\nexport default {}\n</script>\n<style/>";
+    let (cleaned, lang) = vue_extract_script(sfc);
+    assert_eq!(lang, "javascript");
+    let text = String::from_utf8(cleaned).unwrap();
+    assert!(text.contains("export default {}"), "script content preserved");
+    assert!(!text.contains("<template>"), "<template> blanked");
+    assert!(!text.contains("<style/>"), "<style> blanked");
+    assert_eq!(text.chars().filter(|&c| c == '\n').count(),
+               std::str::from_utf8(sfc).unwrap().chars().filter(|&c| c == '\n').count(),
+               "newline count preserved");
+}
+
+#[test]
+fn vue_extract_script_ts() {
+    let sfc = b"<template/>\n<script lang=\"ts\">\nconst x: number = 1\n</script>";
+    let (_, lang) = vue_extract_script(sfc);
+    assert_eq!(lang, "typescript");
+}
+
+#[test]
+fn vue_extract_script_no_script_block() {
+    let sfc = b"<template><div/></template>";
+    let (cleaned, lang) = vue_extract_script(sfc);
+    assert_eq!(lang, "javascript");
+    assert_eq!(cleaned, sfc);
+}
+
+#[test]
 fn dispatch_table_covers_all_languages() {
     let map = dispatch_map();
     assert_eq!(map.get(".py"), Some(&"python"));

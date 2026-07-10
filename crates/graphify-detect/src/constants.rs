@@ -2,9 +2,9 @@
 
 /// Source code file extensions.
 pub const CODE_EXTENSIONS: &[&str] = &[
-    ".py", ".ts", ".js", ".jsx", ".tsx", ".go", ".rs", ".java", ".cpp", ".cc", ".cxx", ".c", ".h",
-    ".hpp", ".rb", ".swift", ".kt", ".kts", ".cs", ".scala", ".php", ".lua", ".toc", ".zig",
-    ".ps1", ".ex", ".exs", ".m", ".mm", ".jl", ".dart",
+    ".py", ".ts", ".js", ".jsx", ".tsx", ".vue", ".go", ".rs", ".java", ".cpp", ".cc", ".cxx",
+    ".c", ".h", ".hpp", ".rb", ".swift", ".kt", ".kts", ".cs", ".scala", ".php", ".lua", ".toc",
+    ".zig", ".ps1", ".ex", ".exs", ".m", ".mm", ".jl", ".dart",
 ];
 
 /// Documentation file extensions.

@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::Write;
 
 use petgraph::Undirected;
 use petgraph::stable_graph::{NodeIndex, StableGraph};
+use petgraph::visit::NodeIndexable;
 use serde_json::{Value, json};
 use tracing::warn;
 
@@ -117,6 +118,55 @@ impl KnowledgeGraph {
             .iter()
             .map(|n| n.id.clone())
             .collect()
+    }
+
+    /// BFS shortest path between two node IDs.
+    ///
+    /// Uses flat arrays indexed by `NodeIndex::index()` (a u32 slot) instead
+    /// of hash sets — O(1) array access with no hashing overhead.
+    /// `node_bound()` accounts for gaps in StableGraph after any deletions.
+    pub fn shortest_path(&self, source: &str, target: &str) -> Option<Vec<String>> {
+        let &src_idx = self.index_map.get(source)?;
+        let &tgt_idx = self.index_map.get(target)?;
+
+        if src_idx == tgt_idx {
+            return Some(vec![source.to_string()]);
+        }
+
+        let bound = self.graph.node_bound();
+        let mut visited = vec![false; bound];
+        let mut parent: Vec<NodeIndex> = vec![NodeIndex::end(); bound];
+        let mut queue: VecDeque<NodeIndex> = VecDeque::new();
+
+        visited[src_idx.index()] = true;
+        queue.push_back(src_idx);
+
+        while let Some(current) = queue.pop_front() {
+            if current == tgt_idx {
+                let mut path_indices = vec![tgt_idx];
+                let mut node = tgt_idx;
+                while node != src_idx {
+                    node = parent[node.index()];
+                    path_indices.push(node);
+                }
+                path_indices.reverse();
+                return Some(
+                    path_indices
+                        .iter()
+                        .filter_map(|&idx| self.graph.node_weight(idx))
+                        .map(|n| n.id.clone())
+                        .collect(),
+                );
+            }
+            for neighbor in self.graph.neighbors(current) {
+                if !visited[neighbor.index()] {
+                    visited[neighbor.index()] = true;
+                    parent[neighbor.index()] = current;
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+        None
     }
 
     /// Collect all nodes as a Vec.
