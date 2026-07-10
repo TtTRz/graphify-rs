@@ -107,7 +107,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#graph-algorithms) for complexity
 
 | Native tree-sitter | Regex fallback |
 |---------------------|----------------|
-| Python, JavaScript, TypeScript, Rust, Go, Java, C, C++, Ruby, C#, Dart | Kotlin, Scala, PHP, Swift, Lua, Zig, PowerShell, Elixir, Obj-C, Julia |
+| Python, JavaScript, TypeScript, Rust, Go, Java, C, C++, Ruby, C#, Dart | Kotlin, Scala, PHP, Swift, Lua, Zig, PowerShell, Elixir, Obj-C, Julia, Vue |
 
 ## Agent Integration
 
