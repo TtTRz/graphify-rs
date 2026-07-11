@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **SQL language support** — extraction of DDL (tables/views), `FROM`/`JOIN` dependencies, foreign keys, and column-level lineage via `tree-sitter-sequel`. Relations are scoped globally by `schema.name`, so references resolve across files.
+- **dbt project support** — parses `target/manifest.json` into Relation nodes and `depends_on` edges. Compiled models under `target/compiled/` are mapped back to their manifest node (via `compiled_path`) and analyzed for column-level lineage attributed to that model. Manifest parsing is the default; running `dbt compile` is opt-in via `--dbt-compile` (with `--dbt-timeout-secs`, default 120) since it executes the project's dbt.
+- Column-level lineage traces through CTEs and inline subqueries down to base-table columns (`derives_from` edges).
+- dbt models are identified by their warehouse-side name (`alias`, falling back to model name; `identifier` for sources), so plain-SQL references to materialized tables resolve to the dbt Relation node. The dbt-side name is kept in `extra["dbt_name"]`; `relation_kind` carries the actual resource type (`model`/`seed`/`snapshot`/`source`).
+
+### Notes
+- **3-part (catalog.schema.name) relation lookup**: The relation ID is intentionally derived only from `schema.name` to merge representations of identical tables across files. If two relations share `schema.name` but differ in `catalog`, they will collide on the same ID. The `catalog` is extracted and preserved in the `extra` metadata.
+- Ambiguous unqualified columns (multiple tables in scope) produce no `derives_from` edge rather than an `unknown_table` placeholder.
+- Cross-file SQL stub resolution is scoped to SQL/dbt edges only and never affects edges from other extractors. The build pipeline strips per-file stubs after merging all extraction results (including dbt) and re-resolves once against the full graph, so a stub can never shadow a relation defined in another file.
+
 ## [0.8.1] - 2026-06-04
 
 ### Fixed

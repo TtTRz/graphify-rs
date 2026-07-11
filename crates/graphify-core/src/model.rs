@@ -26,6 +26,10 @@ pub enum NodeType {
     Variable,
     Package,
     Namespace,
+    Application,
+    Relation,
+    Column,
+    Expression,
 }
 
 impl std::fmt::Display for NodeType {
@@ -47,6 +51,10 @@ impl std::fmt::Display for NodeType {
             NodeType::Variable => write!(f, "Variable"),
             NodeType::Package => write!(f, "Package"),
             NodeType::Namespace => write!(f, "Namespace"),
+            NodeType::Application => write!(f, "Application"),
+            NodeType::Relation => write!(f, "Relation"),
+            NodeType::Column => write!(f, "Column"),
+            NodeType::Expression => write!(f, "Expression"),
         }
     }
 }
@@ -237,6 +245,22 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&NodeType::Namespace).unwrap(),
             r#""namespace""#
+        );
+        assert_eq!(
+            serde_json::to_string(&NodeType::Application).unwrap(),
+            r#""application""#
+        );
+        assert_eq!(
+            serde_json::to_string(&NodeType::Relation).unwrap(),
+            r#""relation""#
+        );
+        assert_eq!(
+            serde_json::to_string(&NodeType::Column).unwrap(),
+            r#""column""#
+        );
+        assert_eq!(
+            serde_json::to_string(&NodeType::Expression).unwrap(),
+            r#""expression""#
         );
     }
 

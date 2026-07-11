@@ -56,6 +56,14 @@ enum Commands {
         /// Maximum nodes in HTML visualization (default: 2000). Larger values may slow browser.
         #[arg(long)]
         max_viz_nodes: Option<usize>,
+        /// Run `dbt compile` to regenerate manifest.json before extracting dbt projects.
+        /// Off by default: this executes the project's dbt (which may connect to a live
+        /// warehouse and run arbitrary macros). Without it, an existing manifest is parsed.
+        #[arg(long)]
+        dbt_compile: bool,
+        /// Wall-clock timeout (seconds) for each `dbt compile` invocation.
+        #[arg(long, default_value_t = 120)]
+        dbt_timeout_secs: u64,
     },
     /// Install graphify skill for AI coding assistant
     Install {
@@ -295,6 +303,8 @@ async fn main() -> Result<()> {
             update,
             format,
             max_viz_nodes,
+            dbt_compile,
+            dbt_timeout_secs,
         } => {
             let app_cfg = config::load_config(Path::new(&path));
             let effective_path = path;
@@ -313,6 +323,11 @@ async fn main() -> Result<()> {
                 format
             };
 
+            let dbt_options = graphify_extract::dbt::DbtOptions {
+                compile: dbt_compile,
+                compile_timeout_secs: dbt_timeout_secs,
+            };
+
             cmd_build::cmd_build(
                 &effective_path,
                 &effective_output,
@@ -324,6 +339,7 @@ async fn main() -> Result<()> {
                 cli.jobs,
                 max_viz_nodes,
                 app_cfg.llm,
+                dbt_options,
             )
             .await?;
         }
@@ -467,6 +483,7 @@ async fn main() -> Result<()> {
                     None,
                     None,
                     None,
+                    graphify_extract::dbt::DbtOptions::default(),
                 )
                 .await
                 .context("Auto-build failed")?;

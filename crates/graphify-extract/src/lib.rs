@@ -8,10 +8,12 @@
 //!   from documents, papers, and images.
 
 pub mod ast_extract;
+pub mod dbt;
 pub mod dedup;
 pub mod lang_config;
 pub mod parser;
 pub mod semantic;
+pub mod sql;
 pub mod treesitter;
 
 use std::collections::{HashMap, HashSet};
@@ -55,6 +57,7 @@ pub const DISPATCH: &[(&str, &str)] = &[
     (".mm", "objc"),
     (".jl", "julia"),
     (".dart", "dart"),
+    (".sql", "sql"),
 ];
 
 /// Build a hashmap for fast extension lookup (cached).
@@ -139,7 +142,11 @@ pub fn extract(paths: &[PathBuf]) -> ExtractionResult {
 
             debug!("extracting {} ({})", path.display(), lang);
 
-            let mut result = if let Some(ts_result) = treesitter::try_extract(path, &source, lang) {
+            // Try tree-sitter first, fall back to regex
+            let mut result = if lang == "sql" {
+                let source_str = String::from_utf8_lossy(&source);
+                sql::extract_sql(path, &source_str)
+            } else if let Some(ts_result) = treesitter::try_extract(path, &source, lang) {
                 debug!("used tree-sitter for {} ({})", path.display(), lang);
                 ts_result
             } else {
@@ -164,6 +171,10 @@ pub fn extract(paths: &[PathBuf]) -> ExtractionResult {
     resolve_cross_file_imports(&mut combined);
 
     resolve_cross_file_calls(&mut combined);
+
+    // Cross-file resolution for SQL dependencies is deferred to the caller
+    // (e.g., cmd_build::step_extract_ast) to avoid caching redundant per-file stubs.
+    // See review.md priority 1.
 
     info!(
         "extraction complete: {} nodes, {} edges",

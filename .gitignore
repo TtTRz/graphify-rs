@@ -9,3 +9,4 @@ graphify-out/
 .claude
 .understand-anything/
 docs/superpowers/
+*.patch
