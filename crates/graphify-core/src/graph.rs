@@ -287,6 +287,29 @@ impl KnowledgeGraph {
             }
         }
 
+        // Rebuild community index from per-node community assignments.
+        // Cohesion cannot be recovered from the node-link format; callers that
+        // need it must recompute via graphify_cluster::score_all.
+        let mut community_nodes: HashMap<usize, Vec<String>> = HashMap::new();
+        for node_id in kg.node_ids() {
+            if let Some(node) = kg.get_node(&node_id) {
+                if let Some(cid) = node.community {
+                    community_nodes.entry(cid).or_default().push(node_id);
+                }
+            }
+        }
+        let mut infos: Vec<CommunityInfo> = community_nodes
+            .into_iter()
+            .map(|(id, nodes)| CommunityInfo {
+                id,
+                nodes,
+                cohesion: 0.0,
+                label: None,
+            })
+            .collect();
+        infos.sort_by_key(|c| c.id);
+        kg.communities = infos;
+
         Ok(kg)
     }
 }
