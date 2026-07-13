@@ -172,10 +172,8 @@ pub fn extract(paths: &[PathBuf]) -> ExtractionResult {
 
     resolve_cross_file_calls(&mut combined);
 
-    // Cross-file resolution for SQL dependencies is deferred to the caller
-    // (e.g., cmd_build::step_extract_ast) to avoid caching redundant per-file stubs.
-    // See review.md priority 1.
-
+// Cross-file resolution for SQL dependencies is deferred to the caller
+// (e.g., cmd_build::step_extract_ast) to avoid caching redundant per-file stubs.
     info!(
         "extraction complete: {} nodes, {} edges",
         combined.nodes.len(),
