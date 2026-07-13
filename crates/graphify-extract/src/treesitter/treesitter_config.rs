@@ -39,6 +39,9 @@ pub fn resolve_language(lang: &str) -> Option<(Language, TsConfig)> {
         "ruby" => Some((tree_sitter_ruby::LANGUAGE.into(), ruby_config())),
         "csharp" => Some((tree_sitter_c_sharp::LANGUAGE.into(), csharp_config())),
         "dart" => Some((tree_sitter_dart::LANGUAGE.into(), dart_config())),
+        // SQL is bypassed here because it requires a dedicated extractor (src/sql.rs)
+        // to handle DDL, CTEs, and column-level lineage which the generic TsConfig cannot express.
+        "sql" => None,
         _ => None,
     }
 }

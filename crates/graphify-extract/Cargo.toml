@@ -8,6 +8,7 @@ description = "AST and semantic extraction engine for graphify"
 
 [dependencies]
 graphify-core.workspace = true
+graphify-detect.workspace = true
 graphify-cache.workspace = true
 graphify-security.workspace = true
 serde.workspace = true
@@ -17,7 +18,9 @@ tracing.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
 regex.workspace = true
+walkdir.workspace = true
 tree-sitter = "0.26"
+tree-sitter-sequel = "0.3"
 tree-sitter-python = "0.25"
 tree-sitter-javascript = "0.25"
 tree-sitter-typescript = "0.23"

@@ -6,6 +6,7 @@
 
 pub mod classify;
 pub mod constants;
+pub mod dbt;
 pub mod ignore;
 pub mod sensitive;
 
@@ -19,6 +20,7 @@ use tracing::{debug, info, warn};
 use walkdir::WalkDir;
 
 pub use classify::{DetectedFile, FileType, classify_file};
+pub use dbt::{DbtProject, detect_dbt_projects};
 pub use ignore::load_graphifyignore;
 pub use sensitive::is_sensitive;
 

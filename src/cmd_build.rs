@@ -23,6 +23,7 @@ pub async fn cmd_build(
     jobs: Option<usize>,
     max_viz_nodes: Option<usize>,
     llm_config: Option<crate::config::LLMConfig>,
+    dbt_options: graphify_extract::dbt::DbtOptions,
 ) -> Result<()> {
     let root = PathBuf::from(path);
     let output_dir = PathBuf::from(output);
@@ -40,7 +41,8 @@ pub async fn cmd_build(
 
     let detection = step_detect(&root, &output_dir, update, verb)?;
 
-    let mut extractions = step_extract_ast(&root, &cache_dir, &detection, code_only, verb)?;
+    let mut extractions =
+        step_extract_ast(&root, &cache_dir, &detection, code_only, dbt_options, verb)?;
 
     if !no_llm && !code_only {
         step_extract_semantic(
@@ -169,12 +171,26 @@ fn step_extract_ast(
     cache_dir: &Path,
     detection: &graphify_detect::DetectResult,
     code_only: bool,
+    dbt_options: graphify_extract::dbt::DbtOptions,
     verb: Verbosity,
 ) -> Result<Vec<graphify_core::model::ExtractionResult>> {
+    // ── Detect dbt projects so their managed SQL files are extracted via the
+    //    dbt path (manifest.json) instead of the generic SQL pipeline.
+    let dbt_projects = graphify_detect::detect_dbt_projects(root);
+    let mut dbt_managed_paths = std::collections::HashSet::new();
+    for project in &dbt_projects {
+        dbt_managed_paths.extend(project.managed_sql_paths.iter().cloned());
+    }
+
     let code_files: Vec<PathBuf> = detection
         .files
         .get(&graphify_detect::FileType::Code)
-        .map(|v| v.iter().map(|f| root.join(f)).collect())
+        .map(|v| {
+            v.iter()
+                .map(|f| root.join(f))
+                .filter(|p| !dbt_managed_paths.contains(p))
+                .collect()
+        })
         .unwrap_or_default();
 
     if code_files.is_empty() && code_only {
@@ -252,6 +268,33 @@ fn step_extract_ast(
     if let Some(pb) = pb {
         pb.finish_and_clear();
     }
+
+    // ── Extract dbt projects (manifest.json → nodes/edges) ──
+    if !dbt_projects.is_empty() {
+        info_print!(
+            verb,
+            "  {} dbt from {} project(s)...",
+            "Extracting".cyan(),
+            dbt_projects.len()
+        );
+        let dbt_result = graphify_extract::dbt::extract_dbt_projects(&dbt_projects, dbt_options);
+        ast_result.nodes.extend(dbt_result.nodes);
+        ast_result.edges.extend(dbt_result.edges);
+        ast_result.hyperedges.extend(dbt_result.hyperedges);
+    }
+
+    // ── Cross-file SQL/dbt resolution over the *merged* graph ──
+    //
+    // Each per-file extract() call above minted stub nodes against a single-file
+    // scope (and those stubs are content-hash cached). A stub for `staging.orders`
+    // from file B must not shadow the real Relation defined in file A — node dedup
+    // in build() is first-write-wins. So: strip ALL stubs from the merged result,
+    // then re-run resolution once with every SQL file and dbt project in scope.
+    // Only targets that are genuinely undefined anywhere get a stub back.
+    ast_result
+        .nodes
+        .retain(|n| !graphify_extract::sql::is_sql_stub(n));
+    graphify_extract::sql::resolve_sql_cross_file(&mut ast_result);
     let cache_hits = cache_hits.load(Ordering::Relaxed);
     let extract_errors = extract_errors.load(Ordering::Relaxed);
     if cache_hits > 0 {

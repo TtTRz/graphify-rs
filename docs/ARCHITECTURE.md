@@ -19,7 +19,7 @@ Source Files → detect → extract → build → cluster → analyze → export
 |-------|---------|---------------|
 | `graphify-core` | Data models, graph structure, ID generation, confidence system | `KnowledgeGraph`, `GraphNode`, `GraphEdge` |
 | `graphify-detect` | File discovery, classification, `.graphifyignore`, sensitive file filtering | `classify_file()`, `is_sensitive()` |
-| `graphify-extract` | AST extraction (21 languages via tree-sitter + regex), multi-provider LLM semantic extraction | `extract()`, `extract_file()`, `resolve_cross_file_imports()` |
+| `graphify-extract` | AST extraction (22 languages via tree-sitter + regex), SQL & dbt extraction, multi-provider LLM semantic extraction | `extract()`, `extract_file()`, `resolve_cross_file_imports()`, `sql::extract_sql()`, `dbt::extract_dbt_projects()` |
 | `graphify-build` | Graph assembly from extraction results, node/edge deduplication, CodeGraph SQLite edge merge | `build_from_extraction()`, `merge_codegraph_edges()` |
 | `graphify-cluster` | Leiden community detection, cohesion scoring, incremental re-clustering | `cluster()`, `cluster_incremental()`, `cohesion_score()` |
 | `graphify-analyze` | PageRank, dependency cycles, god nodes, surprising connections, graph embeddings, temporal risk | `pagerank()`, `detect_cycles()`, `god_nodes()` |
@@ -75,11 +75,11 @@ Every edge carries a confidence tag:
 | `INFERRED` | Reasonable inference from context | 0.4–0.9 | LLM-file resolution |
 | `AMBIGUOUS` | Uncertain — flagged for human review | 0.1–0.3 | LLM |
 
-## Supported Languages (21)
+## Supported Languages (22)
 
 | Native (tree-sitter) | Regex Fallback |
 |----------------------|----------------|
-| Python, JavaScript, TypeScript, Rust, Go, Java | Kotlin, Scala, PHP, Swift, Lua |
+| Python, JavaScript, TypeScript, Rust, Go, Java, SQL | Kotlin, Scala, PHP, Swift, Lua |
 | C, C++, Ruby, C#, Dart | Zig, PowerShell, Elixir, Obj-C, Julia |
 
 ## Dependency Graph

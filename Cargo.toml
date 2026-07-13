@@ -50,6 +50,12 @@ thiserror = "2"
 # Regex
 regex = "1"
 
+# File system walking
+walkdir = "2"
+
+# YAML
+serde_yaml_ng = "0.10"
+
 # SHA256
 sha2 = "0.10"
 
