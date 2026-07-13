@@ -48,6 +48,8 @@ pub const SKIP_DIRS: &[&str] = &[
     ".ruff_cache",
     ".tox",
     ".eggs",
+    // Default graphify-rs output directory — skip so generated files aren't re-ingested.
+    "graphify-rs-out",
 ];
 
 /// Regex patterns that signal academic paper content.

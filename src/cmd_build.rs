@@ -46,7 +46,9 @@ pub async fn cmd_build(
                 "svg" => output_dir.join("graph.svg"),
                 "graphml" => output_dir.join("graph.graphml"),
                 "cypher" => output_dir.join("graph.cypher"),
-                _ => return true,
+                "wiki" => output_dir.join("wiki"),
+                "obsidian" => output_dir.join("obsidian"),
+                _ => return false, // unknown format → always rebuild
             };
             p.exists()
         });
@@ -134,7 +136,8 @@ fn step_detect(
 ) -> Result<(graphify_detect::DetectResult, bool)> {
     info_print!(verb, "  {} files...", "Detecting".cyan());
     // Ensure output_dir exists so detect_fast can persist changeindex.json on first run.
-    let _ = std::fs::create_dir_all(output_dir);
+    std::fs::create_dir_all(output_dir)
+        .with_context(|| format!("failed to create output directory: {}", output_dir.display()))?;
     let index_path = output_dir.join(graphify_detect::changeindex::CHANGEINDEX_NAME);
     let (detection, changed) = graphify_detect::detect_fast(root, &index_path);
     let n_code = detection
@@ -433,14 +436,24 @@ async fn step_extract_semantic(
                     }
                     Ok(Ok((doc_p, Err(e)))) => {
                         verbose_print!(verb, "    {} semantic extraction: {}", "⚠".yellow(), e);
-                        // Cache an empty result so this file is not retried on every build.
-                        // Run `graphify-rs clean` to force re-extraction.
-                        let _ = graphify_cache::save_cached_to(
-                            &doc_p,
-                            &graphify_core::model::ExtractionResult::default(),
-                            root,
-                            cache_dir,
-                        );
+                        // Only cache the empty result for permanent failures (e.g. malformed LLM
+                        // response). Transient failures (rate limits, network, timeouts) are left
+                        // uncached so the next build retries automatically.
+                        let err_lower = e.to_string().to_ascii_lowercase();
+                        let is_transient = err_lower.contains("rate limit")
+                            || err_lower.contains("429")
+                            || err_lower.contains("timeout")
+                            || err_lower.contains("timed out")
+                            || err_lower.contains("connection")
+                            || err_lower.contains("network");
+                        if !is_transient {
+                            let _ = graphify_cache::save_cached_to(
+                                &doc_p,
+                                &graphify_core::model::ExtractionResult::default(),
+                                root,
+                                cache_dir,
+                            );
+                        }
                     }
                     Ok(Err(e)) => {
                         verbose_print!(verb, "    {} semaphore error: {}", "⚠".yellow(), e);

@@ -103,11 +103,11 @@ Rust rewrite of [graphify](https://github.com/safishamsi/graphify) (Python) — 
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#graph-algorithms) for complexity analysis.
 
-## Supported Languages (21)
+## Supported Languages (22)
 
 | Native tree-sitter | Regex fallback |
 |---------------------|----------------|
-| Python, JavaScript, TypeScript, Rust, Go, Java, C, C++, Ruby, C#, Dart | Kotlin, Scala, PHP, Swift, Lua, Zig, PowerShell, Elixir, Obj-C, Julia, Vue |
+| Python, JavaScript, TypeScript, Vue (via JS/TS), Rust, Go, Java, C, C++, Ruby, C#, Dart | Kotlin, Scala, PHP, Swift, Lua, Zig, PowerShell, Elixir, Obj-C, Julia |
 
 ## Agent Integration
 

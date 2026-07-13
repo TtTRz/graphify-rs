@@ -47,7 +47,7 @@ enum Commands {
         no_llm: bool,
         #[arg(long)]
         code_only: bool,
-        /// Export formats (comma-separated). Available: json,html,graphml,cypher,svg,wiki,obsidian,report. Default: all
+        /// Export formats (comma-separated). Available: json,html,graphml,cypher,svg,wiki,obsidian,report. Default: json,report
         #[arg(long, value_delimiter = ',')]
         format: Vec<String>,
         /// Maximum nodes in HTML visualization (default: 2000). Larger values may slow browser.
