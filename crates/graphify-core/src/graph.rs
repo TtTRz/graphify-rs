@@ -292,10 +292,10 @@ impl KnowledgeGraph {
         // need it must recompute via graphify_cluster::score_all.
         let mut community_nodes: HashMap<usize, Vec<String>> = HashMap::new();
         for node_id in kg.node_ids() {
-            if let Some(node) = kg.get_node(&node_id) {
-                if let Some(cid) = node.community {
-                    community_nodes.entry(cid).or_default().push(node_id);
-                }
+            if let Some(node) = kg.get_node(&node_id)
+                && let Some(cid) = node.community
+            {
+                community_nodes.entry(cid).or_default().push(node_id);
             }
         }
         let mut infos: Vec<CommunityInfo> = community_nodes

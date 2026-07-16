@@ -137,7 +137,7 @@ pub fn detect_fast(root: &Path, index_path: &Path) -> (DetectResult, bool) {
         Some(old) => {
             old.files.len() != new_index.files.len()
                 || new_index.files.iter().any(|(k, v)| {
-                    old.files.get(k).map_or(true, |e| e.hash != v.hash)
+                    old.files.get(k).is_none_or(|e| e.hash != v.hash)
                 })
         }
     };
@@ -322,33 +322,33 @@ fn entry_words_and_hash(
     size: u64,
     old: Option<&changeindex::ChangeEntry>,
 ) -> (u64, String) {
-    if mtime != 0 {
-        if let Some(e) = old {
-            if mtime == e.mtime && size == e.size {
-                return (e.words, e.hash.clone());
-            }
-            if size == e.size {
-                // Same size but mtime changed — verify hash before treating as modified.
-                match file_type {
-                    FileType::Image => {
-                        let h = graphify_cache::file_hash(path).unwrap_or_default();
-                        return if h == e.hash { (e.words, h) } else { (0, h) };
-                    }
-                    _ => match fs::read_to_string(path) {
-                        Ok(content) => {
-                            let h = graphify_cache::content_hash(content.as_bytes());
-                            return if h == e.hash {
-                                (e.words, h)
-                            } else {
-                                (content.split_whitespace().count() as u64, h)
-                            };
-                        }
-                        Err(_) => {
-                            let h = graphify_cache::file_hash(path).unwrap_or_default();
-                            return (0, h);
-                        }
-                    },
+    if mtime != 0
+        && let Some(e) = old
+    {
+        if mtime == e.mtime && size == e.size {
+            return (e.words, e.hash.clone());
+        }
+        if size == e.size {
+            // Same size but mtime changed — verify hash before treating as modified.
+            match file_type {
+                FileType::Image => {
+                    let h = graphify_cache::file_hash(path).unwrap_or_default();
+                    return if h == e.hash { (e.words, h) } else { (0, h) };
                 }
+                _ => match fs::read_to_string(path) {
+                    Ok(content) => {
+                        let h = graphify_cache::content_hash(content.as_bytes());
+                        return if h == e.hash {
+                            (e.words, h)
+                        } else {
+                            (content.split_whitespace().count() as u64, h)
+                        };
+                    }
+                    Err(_) => {
+                        let h = graphify_cache::file_hash(path).unwrap_or_default();
+                        return (0, h);
+                    }
+                },
             }
         }
     }
