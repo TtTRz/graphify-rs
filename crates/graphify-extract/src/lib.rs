@@ -198,6 +198,12 @@ fn resolve_python_imports(result: &mut ExtractionResult) {
         map
     };
 
+    let id_to_label: HashMap<&str, &str> = result
+        .nodes
+        .iter()
+        .map(|n| (n.id.as_str(), n.label.as_str()))
+        .collect();
+
     let mut stem_to_entity_ids: HashMap<String, Vec<String>> = HashMap::new();
     let defined_targets: HashSet<String> = result
         .edges
@@ -224,11 +230,7 @@ fn resolve_python_imports(result: &mut ExtractionResult) {
 
     for edge in &mut result.edges {
         if edge.relation == "imports" {
-            let import_label = result
-                .nodes
-                .iter()
-                .find(|n| n.id == edge.target)
-                .map_or("", |n| n.label.as_str());
+            let import_label = id_to_label.get(edge.target.as_str()).copied().unwrap_or("");
 
             if import_label.contains('*') {
                 // `from module import *` — expand to all entities in module

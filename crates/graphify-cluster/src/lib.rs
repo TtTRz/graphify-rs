@@ -501,6 +501,12 @@ fn compact_ids(community_of: &mut HashMap<String, usize>) {
 
 /// Merge communities smaller than `MIN_COMMUNITY_SIZE` into their
 /// most-connected neighboring community.
+///
+/// Uses a worklist instead of repeatedly rescanning every community: each
+/// candidate is processed once, and only merge results still under threshold
+/// are re-queued. This keeps the pass O(N) amortized rather than O(N) work
+/// per merge (O(N * merges) overall), which dominates runtime on graphs that
+/// fragment into tens of thousands of small communities.
 fn merge_small_communities(
     communities: &mut HashMap<usize, Vec<String>>,
     adj: &HashMap<String, Vec<(String, f64)>>,
@@ -510,38 +516,49 @@ fn merge_small_communities(
         .flat_map(|(&cid, nodes)| nodes.iter().map(move |n| (n.clone(), cid)))
         .collect();
 
-    loop {
-        let merge = communities
-            .iter()
-            .filter(|(_, nodes)| nodes.len() < MIN_COMMUNITY_SIZE)
-            .find_map(|(&small_cid, nodes)| {
-                let mut neighbor_edges: HashMap<usize, f64> = HashMap::new();
-                for node in nodes {
-                    if let Some(neighbors) = adj.get(node.as_str()) {
-                        for (neighbor, weight) in neighbors {
-                            if let Some(&ncid) = node_to_cid.get(neighbor.as_str())
-                                && ncid != small_cid
-                            {
-                                *neighbor_edges.entry(ncid).or_default() += weight;
-                            }
-                        }
+    let mut queue: VecDeque<usize> = communities
+        .iter()
+        .filter(|(_, nodes)| nodes.len() < MIN_COMMUNITY_SIZE)
+        .map(|(&cid, _)| cid)
+        .collect();
+    let mut queued: HashSet<usize> = queue.iter().copied().collect();
+
+    while let Some(small_cid) = queue.pop_front() {
+        queued.remove(&small_cid);
+
+        let Some(nodes) = communities.get(&small_cid) else {
+            continue; // already merged away
+        };
+        if nodes.len() >= MIN_COMMUNITY_SIZE {
+            continue; // grew past threshold from an earlier merge into it
+        }
+
+        let mut neighbor_edges: HashMap<usize, f64> = HashMap::new();
+        for node in nodes {
+            if let Some(neighbors) = adj.get(node.as_str()) {
+                for (neighbor, weight) in neighbors {
+                    if let Some(&ncid) = node_to_cid.get(neighbor.as_str())
+                        && ncid != small_cid
+                    {
+                        *neighbor_edges.entry(ncid).or_default() += weight;
                     }
                 }
-                neighbor_edges
-                    .iter()
-                    .max_by(|a, b| a.1.total_cmp(b.1))
-                    .map(|(&best_cid, _)| (small_cid, best_cid))
-            });
-
-        match merge {
-            Some((small_cid, best_cid)) => {
-                let nodes = communities.remove(&small_cid).unwrap_or_default();
-                for node in &nodes {
-                    node_to_cid.insert(node.clone(), best_cid);
-                }
-                communities.entry(best_cid).or_default().extend(nodes);
             }
-            None => break, // No more small communities to merge
+        }
+
+        let Some((&best_cid, _)) = neighbor_edges.iter().max_by(|a, b| a.1.total_cmp(b.1)) else {
+            continue; // no external neighbor — nothing to merge into
+        };
+
+        let nodes = communities.remove(&small_cid).unwrap_or_default();
+        for node in &nodes {
+            node_to_cid.insert(node.clone(), best_cid);
+        }
+        let merged = communities.entry(best_cid).or_default();
+        merged.extend(nodes);
+
+        if merged.len() < MIN_COMMUNITY_SIZE && queued.insert(best_cid) {
+            queue.push_back(best_cid);
         }
     }
 }
