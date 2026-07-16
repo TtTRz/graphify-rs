@@ -53,7 +53,11 @@ pub async fn cmd_build(
             p.exists()
         });
         if all_outputs_present {
-            info_print!(verb, "  {} No files changed, skipping rebuild.", "✓".green());
+            info_print!(
+                verb,
+                "  {} No files changed, skipping rebuild.",
+                "✓".green()
+            );
             return Ok(());
         }
     }
@@ -136,8 +140,12 @@ fn step_detect(
 ) -> Result<(graphify_detect::DetectResult, bool)> {
     info_print!(verb, "  {} files...", "Detecting".cyan());
     // Ensure output_dir exists so detect_fast can persist changeindex.json on first run.
-    std::fs::create_dir_all(output_dir)
-        .with_context(|| format!("failed to create output directory: {}", output_dir.display()))?;
+    std::fs::create_dir_all(output_dir).with_context(|| {
+        format!(
+            "failed to create output directory: {}",
+            output_dir.display()
+        )
+    })?;
     let index_path = output_dir.join(graphify_detect::changeindex::CHANGEINDEX_NAME);
     let (detection, changed) = graphify_detect::detect_fast(root, &index_path);
     let n_code = detection

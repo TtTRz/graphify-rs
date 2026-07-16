@@ -141,13 +141,12 @@ pub fn extract(paths: &[PathBuf]) -> ExtractionResult {
             debug!("extracting {} ({})", path.display(), lang);
 
             // Vue SFCs: isolate the <script> block so tree-sitter sees clean JS/TS.
-            let (source, lang) =
-                if path.extension().and_then(|e| e.to_str()) == Some("vue") {
-                    let (cleaned, detected_lang) = vue_extract_script(&source);
-                    (cleaned, detected_lang)
-                } else {
-                    (source, lang)
-                };
+            let (source, lang) = if path.extension().and_then(|e| e.to_str()) == Some("vue") {
+                let (cleaned, detected_lang) = vue_extract_script(&source);
+                (cleaned, detected_lang)
+            } else {
+                (source, lang)
+            };
 
             let mut result = if let Some(ts_result) = treesitter::try_extract(path, &source, lang) {
                 debug!("used tree-sitter for {} ({})", path.display(), lang);

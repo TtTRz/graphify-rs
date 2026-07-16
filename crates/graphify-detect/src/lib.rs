@@ -127,7 +127,12 @@ pub fn detect_fast(root: &Path, index_path: &Path) -> (DetectResult, bool) {
         total_words += words as usize;
         new_index.files.insert(
             rel.clone(),
-            changeindex::ChangeEntry { mtime, size, words, hash },
+            changeindex::ChangeEntry {
+                mtime,
+                size,
+                words,
+                hash,
+            },
         );
         files.entry(file_type).or_default().push(rel);
     }
@@ -136,9 +141,10 @@ pub fn detect_fast(root: &Path, index_path: &Path) -> (DetectResult, bool) {
         None => true,
         Some(old) => {
             old.files.len() != new_index.files.len()
-                || new_index.files.iter().any(|(k, v)| {
-                    old.files.get(k).is_none_or(|e| e.hash != v.hash)
-                })
+                || new_index
+                    .files
+                    .iter()
+                    .any(|(k, v)| old.files.get(k).is_none_or(|e| e.hash != v.hash))
         }
     };
 
