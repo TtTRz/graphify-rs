@@ -8,6 +8,7 @@ mod tools;
 
 use std::io::{self, BufRead, Write};
 use std::path::Path;
+use std::time::SystemTime;
 
 use graphify_core::graph::KnowledgeGraph;
 use serde_json::{Value, json};
@@ -119,12 +120,54 @@ fn dispatch(graph: &KnowledgeGraph, index: &SearchIndex, request: &Value) -> Opt
     }
 }
 
+/// Return the file's last-modified time, or `None` if it can't be read.
+fn file_mtime(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+/// Reload the graph and search index from `path` if its mtime has advanced
+/// past `last_modified`. On success, updates all three in place. On failure
+/// (e.g. the file is mid-write from a concurrent `graphify build`), logs the
+/// error and keeps serving the previously loaded graph; the reload is retried
+/// on the next request since `last_modified` is left unchanged.
+fn reload_if_changed(
+    path: &Path,
+    graph: &mut KnowledgeGraph,
+    index: &mut SearchIndex,
+    last_modified: &mut Option<SystemTime>,
+) {
+    let current = file_mtime(path);
+    if current.is_none() || current == *last_modified {
+        return;
+    }
+
+    match crate::load_graph(path) {
+        Ok(new_graph) => {
+            let new_index = SearchIndex::build(&new_graph);
+            let stats = crate::graph_stats(&new_graph);
+            let null = Value::Null;
+            info!(
+                "reloaded graph: {} nodes, {} edges",
+                stats.get("node_count").unwrap_or(&null),
+                stats.get("edge_count").unwrap_or(&null),
+            );
+            *graph = new_graph;
+            *index = new_index;
+            *last_modified = current;
+        }
+        Err(e) => {
+            error!("failed to reload graph {}: {e}", path.display());
+        }
+    }
+}
+
 /// Start the MCP server, reading JSON-RPC requests from stdin and writing
 /// responses to stdout. Logs go to stderr so they don't interfere with the
 /// protocol.
 pub fn run_mcp_server(graph_path: &Path) -> Result<(), ServeError> {
-    let graph = crate::load_graph(graph_path)?;
-    let search_index = SearchIndex::build(&graph);
+    let mut graph = crate::load_graph(graph_path)?;
+    let mut search_index = SearchIndex::build(&graph);
+    let mut last_modified = file_mtime(graph_path);
     let stats = crate::graph_stats(&graph);
     let null = Value::Null;
     info!(
@@ -163,6 +206,13 @@ pub fn run_mcp_server(graph_path: &Path) -> Result<(), ServeError> {
                 continue;
             }
         };
+
+        reload_if_changed(
+            graph_path,
+            &mut graph,
+            &mut search_index,
+            &mut last_modified,
+        );
 
         if let Some(response) = dispatch(&graph, &search_index, &request) {
             let out = match serde_json::to_string(&response) {
