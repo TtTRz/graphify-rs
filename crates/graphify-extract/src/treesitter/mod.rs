@@ -21,7 +21,7 @@ use tree_sitter::{Language, Node, Parser};
 
 pub fn try_extract(path: &Path, source: &[u8], lang: &str) -> Option<ExtractionResult> {
     let (language, config) = treesitter_config::resolve_language(lang)?;
-    extract_with_treesitter(path, source, language, &config, lang)
+    extract_with_treesitter(path, source, language, config, lang)
 }
 
 fn extract_with_treesitter(
@@ -178,7 +178,7 @@ fn collect_callees_recursive(
     config: &TsConfig,
     callees: &mut Vec<String>,
 ) {
-    if config.call_types.contains(node.kind())
+    if config.call_types.contains(&node.kind())
         && let Some(name) = extract_callee_name(node, source, config)
     {
         callees.push(name);
@@ -270,7 +270,7 @@ pub(crate) fn walk_node(
             }
             ElixirCallKind::Other => {}
         }
-    } else if config.import_types.contains(kind) {
+    } else if config.import_types.contains(&kind) {
         if ctx.lang == "ruby" && kind == "call" {
             let method_name = node
                 .child_by_field_name("method")
@@ -300,10 +300,10 @@ pub(crate) fn walk_node(
             );
             return;
         }
-    } else if config.class_types.contains(kind) {
+    } else if config.class_types.contains(&kind) {
         handlers::handle_class_like(node, source, config, ctx);
         return;
-    } else if config.function_types.contains(kind) {
+    } else if config.function_types.contains(&kind) {
         handlers::handle_function(node, source, config, ctx, parent_class_nid);
         return;
     }

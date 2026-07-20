@@ -3,17 +3,22 @@
 //! Each supported language has a `TsConfig` describing which tree-sitter node
 //! kinds correspond to classes, functions, imports, and calls.
 
-use std::collections::HashSet;
+use std::sync::LazyLock;
 
 use tree_sitter::Language;
 
 /// Describes which tree-sitter node kinds correspond to classes, functions,
 /// imports and calls for a given language.
+///
+/// Node-kind sets are small (at most a handful of entries), so a linear scan
+/// over a static slice is cheaper than hashing into a `HashSet` — and, more
+/// importantly, each language's config is built exactly once (via `LazyLock`)
+/// rather than re-allocated for every file that gets extracted.
 pub struct TsConfig {
-    pub class_types: HashSet<&'static str>,
-    pub function_types: HashSet<&'static str>,
-    pub import_types: HashSet<&'static str>,
-    pub call_types: HashSet<&'static str>,
+    pub class_types: &'static [&'static str],
+    pub function_types: &'static [&'static str],
+    pub import_types: &'static [&'static str],
+    pub call_types: &'static [&'static str],
     pub name_field: &'static str,
     pub class_name_field: Option<&'static str>,
     pub body_field: &'static str,
@@ -22,35 +27,70 @@ pub struct TsConfig {
 
 /// Resolve a language identifier to its tree-sitter `Language` and `TsConfig`.
 /// Returns `None` for unsupported languages.
-pub fn resolve_language(lang: &str) -> Option<(Language, TsConfig)> {
+///
+/// Each `TsConfig` is built once per language and cached for the lifetime of
+/// the process, so calling this repeatedly (e.g. once per extracted file)
+/// does not re-allocate the underlying configuration.
+pub fn resolve_language(lang: &str) -> Option<(Language, &'static TsConfig)> {
     match lang {
-        "python" => Some((tree_sitter_python::LANGUAGE.into(), python_config())),
-        "javascript" => Some((tree_sitter_javascript::LANGUAGE.into(), js_config())),
-        "typescript" => Some((
-            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-            js_config(),
-        )),
-        "tsx" => Some((tree_sitter_typescript::LANGUAGE_TSX.into(), js_config())),
-        "rust" => Some((tree_sitter_rust::LANGUAGE.into(), rust_config())),
-        "go" => Some((tree_sitter_go::LANGUAGE.into(), go_config())),
-        "java" => Some((tree_sitter_java::LANGUAGE.into(), java_config())),
-        "c" => Some((tree_sitter_c::LANGUAGE.into(), c_config())),
-        "cpp" => Some((tree_sitter_cpp::LANGUAGE.into(), cpp_config())),
-        "ruby" => Some((tree_sitter_ruby::LANGUAGE.into(), ruby_config())),
-        "csharp" => Some((tree_sitter_c_sharp::LANGUAGE.into(), csharp_config())),
-        "dart" => Some((tree_sitter_dart::LANGUAGE.into(), dart_config())),
+        "python" => {
+            static CONFIG: LazyLock<TsConfig> = LazyLock::new(python_config);
+            Some((tree_sitter_python::LANGUAGE.into(), &CONFIG))
+        }
+        "javascript" => {
+            static CONFIG: LazyLock<TsConfig> = LazyLock::new(js_config);
+            Some((tree_sitter_javascript::LANGUAGE.into(), &CONFIG))
+        }
+        "typescript" => {
+            static CONFIG: LazyLock<TsConfig> = LazyLock::new(js_config);
+            Some((tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(), &CONFIG))
+        }
+        "tsx" => {
+            static CONFIG: LazyLock<TsConfig> = LazyLock::new(js_config);
+            Some((tree_sitter_typescript::LANGUAGE_TSX.into(), &CONFIG))
+        }
+        "rust" => {
+            static CONFIG: LazyLock<TsConfig> = LazyLock::new(rust_config);
+            Some((tree_sitter_rust::LANGUAGE.into(), &CONFIG))
+        }
+        "go" => {
+            static CONFIG: LazyLock<TsConfig> = LazyLock::new(go_config);
+            Some((tree_sitter_go::LANGUAGE.into(), &CONFIG))
+        }
+        "java" => {
+            static CONFIG: LazyLock<TsConfig> = LazyLock::new(java_config);
+            Some((tree_sitter_java::LANGUAGE.into(), &CONFIG))
+        }
+        "c" => {
+            static CONFIG: LazyLock<TsConfig> = LazyLock::new(c_config);
+            Some((tree_sitter_c::LANGUAGE.into(), &CONFIG))
+        }
+        "cpp" => {
+            static CONFIG: LazyLock<TsConfig> = LazyLock::new(cpp_config);
+            Some((tree_sitter_cpp::LANGUAGE.into(), &CONFIG))
+        }
+        "ruby" => {
+            static CONFIG: LazyLock<TsConfig> = LazyLock::new(ruby_config);
+            Some((tree_sitter_ruby::LANGUAGE.into(), &CONFIG))
+        }
+        "csharp" => {
+            static CONFIG: LazyLock<TsConfig> = LazyLock::new(csharp_config);
+            Some((tree_sitter_c_sharp::LANGUAGE.into(), &CONFIG))
+        }
+        "dart" => {
+            static CONFIG: LazyLock<TsConfig> = LazyLock::new(dart_config);
+            Some((tree_sitter_dart::LANGUAGE.into(), &CONFIG))
+        }
         _ => None,
     }
 }
 
 fn python_config() -> TsConfig {
     TsConfig {
-        class_types: ["class_definition"].into_iter().collect(),
-        function_types: ["function_definition"].into_iter().collect(),
-        import_types: ["import_statement", "import_from_statement"]
-            .into_iter()
-            .collect(),
-        call_types: ["call"].into_iter().collect(),
+        class_types: &["class_definition"],
+        function_types: &["function_definition"],
+        import_types: &["import_statement", "import_from_statement"],
+        call_types: &["call"],
         name_field: "name",
         class_name_field: None,
         body_field: "body",
@@ -60,19 +100,17 @@ fn python_config() -> TsConfig {
 
 fn js_config() -> TsConfig {
     TsConfig {
-        class_types: ["class_declaration", "class"].into_iter().collect(),
-        function_types: [
+        class_types: &["class_declaration", "class"],
+        function_types: &[
             "function_declaration",
             "method_definition",
             "arrow_function",
             "generator_function_declaration",
             "generator_function",
             "async_function_declaration",
-        ]
-        .into_iter()
-        .collect(),
-        import_types: ["import_statement"].into_iter().collect(),
-        call_types: ["call_expression"].into_iter().collect(),
+        ],
+        import_types: &["import_statement"],
+        call_types: &["call_expression"],
         name_field: "name",
         class_name_field: None,
         body_field: "body",
@@ -82,12 +120,10 @@ fn js_config() -> TsConfig {
 
 fn rust_config() -> TsConfig {
     TsConfig {
-        class_types: ["struct_item", "enum_item", "trait_item", "impl_item"]
-            .into_iter()
-            .collect(),
-        function_types: ["function_item"].into_iter().collect(),
-        import_types: ["use_declaration"].into_iter().collect(),
-        call_types: ["call_expression"].into_iter().collect(),
+        class_types: &["struct_item", "enum_item", "trait_item", "impl_item"],
+        function_types: &["function_item"],
+        import_types: &["use_declaration"],
+        call_types: &["call_expression"],
         name_field: "name",
         class_name_field: None,
         body_field: "body",
@@ -97,12 +133,10 @@ fn rust_config() -> TsConfig {
 
 fn go_config() -> TsConfig {
     TsConfig {
-        class_types: ["type_declaration"].into_iter().collect(),
-        function_types: ["function_declaration", "method_declaration"]
-            .into_iter()
-            .collect(),
-        import_types: ["import_declaration"].into_iter().collect(),
-        call_types: ["call_expression"].into_iter().collect(),
+        class_types: &["type_declaration"],
+        function_types: &["function_declaration", "method_declaration"],
+        import_types: &["import_declaration"],
+        call_types: &["call_expression"],
         name_field: "name",
         class_name_field: None,
         body_field: "body",
@@ -112,18 +146,14 @@ fn go_config() -> TsConfig {
 
 fn java_config() -> TsConfig {
     TsConfig {
-        class_types: [
+        class_types: &[
             "class_declaration",
             "interface_declaration",
             "enum_declaration",
-        ]
-        .into_iter()
-        .collect(),
-        function_types: ["method_declaration", "constructor_declaration"]
-            .into_iter()
-            .collect(),
-        import_types: ["import_declaration"].into_iter().collect(),
-        call_types: ["method_invocation"].into_iter().collect(),
+        ],
+        function_types: &["method_declaration", "constructor_declaration"],
+        import_types: &["import_declaration"],
+        call_types: &["method_invocation"],
         name_field: "name",
         class_name_field: None,
         body_field: "body",
@@ -133,12 +163,10 @@ fn java_config() -> TsConfig {
 
 fn c_config() -> TsConfig {
     TsConfig {
-        class_types: ["struct_specifier", "enum_specifier", "type_definition"]
-            .into_iter()
-            .collect(),
-        function_types: ["function_definition"].into_iter().collect(),
-        import_types: ["preproc_include"].into_iter().collect(),
-        call_types: ["call_expression"].into_iter().collect(),
+        class_types: &["struct_specifier", "enum_specifier", "type_definition"],
+        function_types: &["function_definition"],
+        import_types: &["preproc_include"],
+        call_types: &["call_expression"],
         name_field: "declarator",
         class_name_field: Some("name"),
         body_field: "body",
@@ -148,17 +176,15 @@ fn c_config() -> TsConfig {
 
 fn cpp_config() -> TsConfig {
     TsConfig {
-        class_types: [
+        class_types: &[
             "class_specifier",
             "struct_specifier",
             "enum_specifier",
             "namespace_definition",
-        ]
-        .into_iter()
-        .collect(),
-        function_types: ["function_definition"].into_iter().collect(),
-        import_types: ["preproc_include"].into_iter().collect(),
-        call_types: ["call_expression"].into_iter().collect(),
+        ],
+        function_types: &["function_definition"],
+        import_types: &["preproc_include"],
+        call_types: &["call_expression"],
         name_field: "declarator",
         class_name_field: Some("name"),
         body_field: "body",
@@ -168,10 +194,10 @@ fn cpp_config() -> TsConfig {
 
 fn ruby_config() -> TsConfig {
     TsConfig {
-        class_types: ["class", "module"].into_iter().collect(),
-        function_types: ["method", "singleton_method"].into_iter().collect(),
-        import_types: ["call"].into_iter().collect(),
-        call_types: ["call"].into_iter().collect(),
+        class_types: &["class", "module"],
+        function_types: &["method", "singleton_method"],
+        import_types: &["call"],
+        call_types: &["call"],
         name_field: "name",
         class_name_field: None,
         body_field: "body",
@@ -181,19 +207,15 @@ fn ruby_config() -> TsConfig {
 
 fn csharp_config() -> TsConfig {
     TsConfig {
-        class_types: [
+        class_types: &[
             "class_declaration",
             "interface_declaration",
             "struct_declaration",
             "enum_declaration",
-        ]
-        .into_iter()
-        .collect(),
-        function_types: ["method_declaration", "constructor_declaration"]
-            .into_iter()
-            .collect(),
-        import_types: ["using_directive"].into_iter().collect(),
-        call_types: ["invocation_expression"].into_iter().collect(),
+        ],
+        function_types: &["method_declaration", "constructor_declaration"],
+        import_types: &["using_directive"],
+        call_types: &["invocation_expression"],
         name_field: "name",
         class_name_field: None,
         body_field: "body",
@@ -203,29 +225,21 @@ fn csharp_config() -> TsConfig {
 
 fn dart_config() -> TsConfig {
     TsConfig {
-        class_types: [
+        class_types: &[
             "class_definition",
             "enum_declaration",
             "mixin_declaration",
             "extension_declaration",
-        ]
-        .into_iter()
-        .collect(),
-        function_types: [
+        ],
+        function_types: &[
             "function_signature",
             "method_signature",
             "function_body",
             "function_declaration",
             "method_definition",
-        ]
-        .into_iter()
-        .collect(),
-        import_types: ["import_or_export", "part_directive", "part_of_directive"]
-            .into_iter()
-            .collect(),
-        call_types: ["method_invocation", "function_expression_invocation"]
-            .into_iter()
-            .collect(),
+        ],
+        import_types: &["import_or_export", "part_directive", "part_of_directive"],
+        call_types: &["method_invocation", "function_expression_invocation"],
         name_field: "name",
         class_name_field: None,
         body_field: "body",
