@@ -9,7 +9,10 @@ use super::provider::LLMProvider;
 #[derive(Serialize)]
 struct ChatRequest {
     model: String,
-    max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_completion_tokens: Option<u32>,
     messages: Vec<ChatMessage>,
 }
 
@@ -32,13 +35,23 @@ struct ChatChoice {
 #[derive(Deserialize)]
 struct ChatMessageResponse {
     content: Option<String>,
+    reasoning_content: Option<String>,
+}
+
+pub fn normalize_chat_endpoint(base_url: &str) -> String {
+    let trimmed = base_url.trim_end_matches('/');
+    if trimmed.ends_with("/chat/completions") {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}/chat/completions")
+    }
 }
 
 pub async fn extract_openai_compatible(
     path: &Path,
     content: &str,
     file_type: &str,
-    provider: LLMProvider,
+    _provider: LLMProvider,
     model: &str,
     api_key: Option<&str>,
     base_url: &str,
@@ -47,12 +60,20 @@ pub async fn extract_openai_compatible(
     let system_prompt = super::build_system_prompt(file_type);
     let user_prompt = super::build_user_prompt(content, file_type);
 
+    let is_o_series = model.starts_with("o1") || model.starts_with("o3");
+    let (max_tokens, max_completion_tokens) = if is_o_series {
+        (None, Some(8192))
+    } else {
+        (Some(8192), None)
+    };
+
     let request_body = ChatRequest {
         model: model.to_string(),
-        max_tokens: 4096,
+        max_tokens,
+        max_completion_tokens,
         messages: vec![
             ChatMessage {
-                role: "system".to_string(),
+                role: if is_o_series { "developer".to_string() } else { "system".to_string() },
                 content: system_prompt,
             },
             ChatMessage {
@@ -62,9 +83,10 @@ pub async fn extract_openai_compatible(
         ],
     };
 
+    let endpoint = normalize_chat_endpoint(base_url);
     let client = reqwest::Client::new();
     let mut request = client
-        .post(format!("{base_url}/chat/completions"))
+        .post(&endpoint)
         .header("content-type", "application/json")
         .json(&request_body);
 
@@ -73,46 +95,13 @@ pub async fn extract_openai_compatible(
     }
 
     let response = request.send().await.with_context(|| {
-        format!("Cannot connect to {base_url}. Make sure the server is running.")
+        format!("Cannot connect to {endpoint}. Make sure the server is running.")
     })?;
-
-    if response.status().as_u16() == 401 {
-        match provider {
-            LLMProvider::OpenAI => {
-                anyhow::bail!(
-                    "OpenAI API key invalid. Set OPENAI_API_KEY or configure in graphify-rs.toml."
-                );
-            }
-            _ => {
-                anyhow::bail!(
-                    "Authentication failed for {base_url}. Check your API key in graphify-rs.toml."
-                );
-            }
-        }
-    }
-
-    if response.status().as_u16() == 404 {
-        match provider {
-            LLMProvider::Ollama => {
-                anyhow::bail!("Model '{model}' not found. Run: ollama pull {model}");
-            }
-            LLMProvider::OpenAI => {
-                anyhow::bail!(
-                    "Model '{model}' not found. Check available models at platform.openai.com"
-                );
-            }
-            _ => {
-                anyhow::bail!(
-                    "Model '{model}' not found at {base_url}. Check that the model is available."
-                );
-            }
-        }
-    }
 
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("LLM API at {base_url} returned {status}: {body}");
+        anyhow::bail!("LLM API at {endpoint} returned HTTP {status}: {body}");
     }
 
     let chat_resp: ChatResponse = response
@@ -123,8 +112,39 @@ pub async fn extract_openai_compatible(
     let text = chat_resp
         .choices
         .first()
-        .and_then(|c| c.message.content.as_deref())
+        .and_then(|c| {
+            c.message
+                .content
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
+                .or(c.message.reasoning_content.as_deref())
+        })
         .unwrap_or("{}");
 
     super::parse_semantic_response(text, &file_str)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_chat_endpoint() {
+        assert_eq!(
+            normalize_chat_endpoint("https://api.kimi.com/coding/v1"),
+            "https://api.kimi.com/coding/v1/chat/completions"
+        );
+        assert_eq!(
+            normalize_chat_endpoint("https://api.kimi.com/coding/v1/"),
+            "https://api.kimi.com/coding/v1/chat/completions"
+        );
+        assert_eq!(
+            normalize_chat_endpoint("https://api.kimi.com/coding/v1/chat/completions"),
+            "https://api.kimi.com/coding/v1/chat/completions"
+        );
+        assert_eq!(
+            normalize_chat_endpoint("https://api.kimi.com/coding/v1/chat/completions/"),
+            "https://api.kimi.com/coding/v1/chat/completions"
+        );
+    }
 }

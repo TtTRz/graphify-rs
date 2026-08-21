@@ -94,10 +94,20 @@ impl LLMProviderConfig {
                 (None, url, AuthType::Bearer)
             }
             LLMProvider::OpenAICompatible => {
-                let key = raw.openai_compatible_api_key.clone();
-                let url = raw.openai_compatible_base_url.clone().context(
-                    "openai_compatible_base_url is required for openai_compatible provider",
-                )?;
+                let key = raw
+                    .openai_compatible_api_key
+                    .clone()
+                    .or_else(|| std::env::var("OPENAI_COMPATIBLE_API_KEY").ok())
+                    .or_else(|| std::env::var("KIMI").ok())
+                    .or_else(|| std::env::var("MINIMAX").ok())
+                    .or_else(|| std::env::var("OPENAI_API_KEY").ok());
+                let url = raw
+                    .openai_compatible_base_url
+                    .clone()
+                    .or_else(|| std::env::var("OPENAI_COMPATIBLE_BASE_URL").ok())
+                    .context(
+                        "openai_compatible_base_url is required for openai_compatible provider",
+                    )?;
                 (key, url, AuthType::Bearer)
             }
         };
@@ -188,6 +198,26 @@ mod tests {
         assert_eq!(config.provider, LLMProvider::OpenAICompatible);
         assert_eq!(config.base_url, "http://localhost:8000/v1");
         assert_eq!(config.api_key.as_deref(), Some("optional-key"));
+    }
+
+    #[test]
+    fn resolve_openai_compatible_reads_kimi_env_var() {
+        unsafe {
+            std::env::set_var("KIMI", "test-kimi-key-123");
+        }
+        let r = LLMConfigRaw {
+            provider: "openai_compatible".into(),
+            model: "k3-256k".into(),
+            openai_compatible_api_key: None,
+            openai_compatible_base_url: Some("https://api.kimi.com/coding/v1".into()),
+            ..Default::default()
+        };
+        let config = LLMProviderConfig::resolve(&r).unwrap();
+        unsafe {
+            std::env::remove_var("KIMI");
+        }
+        assert_eq!(config.provider, LLMProvider::OpenAICompatible);
+        assert_eq!(config.api_key.as_deref(), Some("test-kimi-key-123"));
     }
 
     #[test]

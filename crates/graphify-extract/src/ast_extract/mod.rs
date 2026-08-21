@@ -18,6 +18,7 @@ mod go;
 mod java;
 mod js_ts;
 mod kotlin;
+pub(crate) mod markdown;
 mod python;
 mod ruby;
 mod rust;
@@ -161,6 +162,7 @@ pub fn extract_file(path: &Path, source: &str, lang: &str) -> ExtractionResult {
         "ruby" => ruby::extract_ruby(path, source),
         "csharp" => csharp::extract_csharp(path, source),
         "kotlin" => kotlin::extract_kotlin(path, source),
+        "markdown" => markdown::extract_markdown(path, source),
         _ => generic::extract_generic(path, source, lang),
     }
 }

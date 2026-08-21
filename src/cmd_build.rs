@@ -198,8 +198,10 @@ fn step_extract_ast(
     let code_files: Vec<PathBuf> = detection
         .files
         .get(&graphify_detect::FileType::Code)
-        .map(|v| v.iter().map(|f| root.join(f)).collect())
-        .unwrap_or_default();
+        .into_iter()
+        .chain(detection.files.get(&graphify_detect::FileType::Document))
+        .flat_map(|v| v.iter().map(|f| root.join(f)))
+        .collect();
 
     if code_files.is_empty() && code_only {
         info_print!(verb, "  No code files found. Nothing to extract.");
@@ -208,7 +210,7 @@ fn step_extract_ast(
 
     info_print!(
         verb,
-        "  {} AST from {} code files...",
+        "  {} AST from {} files...",
         "Extracting".cyan(),
         code_files.len()
     );
@@ -443,25 +445,14 @@ async fn step_extract_semantic(
                         extractions.push(sem_result);
                     }
                     Ok(Ok((doc_p, Err(e)))) => {
-                        verbose_print!(verb, "    {} semantic extraction: {}", "⚠".yellow(), e);
-                        // Only cache the empty result for permanent failures (e.g. malformed LLM
-                        // response). Transient failures (rate limits, network, timeouts) are left
-                        // uncached so the next build retries automatically.
-                        let err_lower = e.to_string().to_ascii_lowercase();
-                        let is_transient = err_lower.contains("rate limit")
-                            || err_lower.contains("429")
-                            || err_lower.contains("timeout")
-                            || err_lower.contains("timed out")
-                            || err_lower.contains("connection")
-                            || err_lower.contains("network");
-                        if !is_transient {
-                            let _ = graphify_cache::save_cached_to(
-                                &doc_p,
-                                &graphify_core::model::ExtractionResult::default(),
-                                root,
-                                cache_dir,
-                            );
-                        }
+                        info_print!(
+                            verb,
+                            "    {} semantic extraction for {}: {}",
+                            "⚠".yellow(),
+                            doc_p.file_name().unwrap_or_default().to_string_lossy(),
+                            e
+                        );
+                        // Do NOT save empty results on error — leave uncached so future builds retry cleanly.
                     }
                     Ok(Err(e)) => {
                         verbose_print!(verb, "    {} semaphore error: {}", "⚠".yellow(), e);

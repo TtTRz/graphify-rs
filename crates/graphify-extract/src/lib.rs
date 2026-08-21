@@ -56,6 +56,8 @@ pub const DISPATCH: &[(&str, &str)] = &[
     (".mm", "objc"),
     (".jl", "julia"),
     (".dart", "dart"),
+    (".md", "markdown"),
+    (".markdown", "markdown"),
 ];
 
 /// Build a hashmap for fast extension lookup (cached).
