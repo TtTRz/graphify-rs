@@ -1,0 +1,11 @@
+#!/bin/sh
+# Paslı Beyin post-commit kanca şablonu.
+# Kural: ASLA bloklamaz. pasli trigger en kötü durumda kuyruğa yazar ve
+# her koşulda 0 ile çıkar — GitHub Desktop kilitlenme kuralı (desktop#8847).
+PASLI_BIN="$(command -v pasli 2>/dev/null || true)"
+if [ -z "$PASLI_BIN" ] && [ -n "$LOCALAPPDATA" ] && [ -f "$LOCALAPPDATA/pasli-beyin/pasli.exe" ]; then
+  PASLI_BIN="$LOCALAPPDATA/pasli-beyin/pasli.exe"
+fi
+[ -n "$PASLI_BIN" ] || exit 0
+"$PASLI_BIN" trigger --event post-commit --depo "$(basename "$(pwd)")" &
+exit 0

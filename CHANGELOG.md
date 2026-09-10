@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`watch` now runs the same pipeline as `build`** — previously `watch` used an AST-only rebuild that never loaded `graphify-rs.toml`, so the LLM provider, `no_llm`, `code_only` and `formats` settings were ignored and doc/paper files got **no semantic extraction**. Every rebuild silently overwrote a full graph with a code-only one (measured on a 27-file repo: 494 nodes → 260). `watch` now loads the config and calls `cmd_build`, preserving semantic nodes across rebuilds; `--no-llm` is accepted on `watch` for parity with `build`.
+
+### Added
+
+- `graphify_watch::watch_directory_with(root, out, rebuild_fn)` and the `RebuildFn` alias — inject a custom rebuild; `watch_directory` is unchanged and delegates to it with the built-in AST rebuild.
+
 ## [0.8.2] - 2026-07-05
 
 ### Changed

@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use notify::RecursiveMode;
@@ -42,6 +43,15 @@ pub enum WatchError {
     #[error("rebuild failed: {0}")]
     Rebuild(String),
 }
+
+/// Rebuild callback invoked on the initial build and after every debounced change.
+///
+/// Arguments: `(root, output_dir, changed_files)`. `changed_files` is `None` for the
+/// initial build. The default (`watch_directory`) uses the AST-only [`rebuild`];
+/// callers that need the full pipeline (config, semantic extraction, export
+/// formats) pass their own via [`watch_directory_with`].
+pub type RebuildFn =
+    Arc<dyn Fn(&Path, &Path, Option<&[PathBuf]>) -> Result<(), WatchError> + Send + Sync>;
 
 /// Check if a path should be ignored based on common patterns.
 fn should_ignore(path: &Path) -> bool {
@@ -228,6 +238,18 @@ fn rebuild(
 /// * `root` - Directory to watch recursively.
 /// * `output_dir` - Where to write rebuild output.
 pub async fn watch_directory(root: &Path, output_dir: &Path) -> Result<(), WatchError> {
+    watch_directory_with(root, output_dir, Arc::new(rebuild)).await
+}
+
+/// Like [`watch_directory`], but runs `rebuild_fn` instead of the built-in
+/// AST-only [`rebuild`]. This is how the CLI routes watch through the same
+/// pipeline as `build`, so `graphify-rs.toml` (LLM provider, formats, `no_llm`)
+/// is honored and doc/paper files get semantic extraction on every rebuild.
+pub async fn watch_directory_with(
+    root: &Path,
+    output_dir: &Path,
+    rebuild_fn: RebuildFn,
+) -> Result<(), WatchError> {
     let (tx, mut rx) = mpsc::channel::<Vec<PathBuf>>(100);
 
     let mut debouncer = new_debouncer(
@@ -258,7 +280,8 @@ pub async fn watch_directory(root: &Path, output_dir: &Path) -> Result<(), Watch
     println!("Running initial build...");
     let root_clone = root.to_path_buf();
     let out_clone = output_dir.to_path_buf();
-    match tokio::task::spawn_blocking(move || rebuild(&root_clone, &out_clone, None)).await {
+    let f = Arc::clone(&rebuild_fn);
+    match tokio::task::spawn_blocking(move || f(&root_clone, &out_clone, None)).await {
         Ok(Ok(())) => println!("Initial build complete."),
         Ok(Err(e)) => eprintln!("Initial build failed: {e}"),
         Err(e) => eprintln!("Initial build panicked: {e}"),
@@ -284,8 +307,8 @@ pub async fn watch_directory(root: &Path, output_dir: &Path) -> Result<(), Watch
 
         let root_clone = root.to_path_buf();
         let out_clone = output_dir.to_path_buf();
-        match tokio::task::spawn_blocking(move || rebuild(&root_clone, &out_clone, Some(&relevant)))
-            .await
+        let f = Arc::clone(&rebuild_fn);
+        match tokio::task::spawn_blocking(move || f(&root_clone, &out_clone, Some(&relevant))).await
         {
             Ok(Ok(())) => println!("Rebuild complete."),
             Ok(Err(e)) => eprintln!("Rebuild failed: {e}"),
@@ -345,6 +368,16 @@ mod tests {
     fn test_filter_changes_empty() {
         let filtered = filter_changes(&[]);
         assert!(filtered.is_empty());
+    }
+
+    /// `watch_directory` delegates to `watch_directory_with(Arc::new(rebuild))`;
+    /// if `rebuild`'s signature ever drifts from `RebuildFn`, this fails to compile.
+    #[test]
+    fn test_default_rebuild_matches_rebuild_fn() {
+        let f: RebuildFn = Arc::new(rebuild);
+        let dir = tempfile::tempdir().unwrap();
+        let output = tempfile::tempdir().unwrap();
+        assert!(f(dir.path(), output.path(), None).is_ok());
     }
 
     #[test]

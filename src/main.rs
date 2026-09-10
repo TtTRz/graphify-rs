@@ -143,6 +143,8 @@ enum Commands {
         path: String,
         #[arg(short, long)]
         output: Option<String>,
+        #[arg(long)]
+        no_llm: bool,
     },
     /// Ingest URL content
     Ingest {
@@ -467,13 +469,53 @@ async fn main() -> Result<()> {
             }
             graphify_serve::start_server(graph_path).await?;
         }
-        Commands::Watch { path, output } => {
-            let out_dir = output.unwrap_or_else(|| {
-                paths::resolve_default_output(Path::new(&path))
-                    .to_string_lossy()
-                    .to_string()
-            });
-            graphify_watch::watch_directory(Path::new(&path), Path::new(&out_dir)).await?;
+        Commands::Watch {
+            path,
+            output,
+            no_llm,
+        } => {
+            // Watch previously used an AST-only rebuild that never loaded
+            // `graphify-rs.toml`: doc/paper files got no semantic extraction, so
+            // every rebuild overwrote a full graph with a code-only one. Resolve
+            // the same settings `build` does and reuse its pipeline.
+            let app_cfg = config::load_config(Path::new(&path));
+            let out_dir = match output {
+                Some(o) => o,
+                None => app_cfg.output.clone().unwrap_or_else(|| {
+                    paths::resolve_default_output(Path::new(&path))
+                        .to_string_lossy()
+                        .to_string()
+                }),
+            };
+            let effective_no_llm = no_llm || app_cfg.no_llm.unwrap_or(false);
+            let effective_code_only = app_cfg.code_only.unwrap_or(false);
+            let effective_formats = app_cfg.formats.clone().unwrap_or_default();
+            let llm_cfg = app_cfg.llm.clone();
+            let jobs = cli.jobs;
+            let handle = tokio::runtime::Handle::current();
+
+            let rebuild_fn: graphify_watch::RebuildFn = std::sync::Arc::new(
+                move |root: &Path, out: &Path, _changed: Option<&[PathBuf]>| {
+                    // Runs on a spawn_blocking thread, so block_on is safe here
+                    // (never called from a runtime worker thread).
+                    handle
+                        .block_on(cmd_build::cmd_build(
+                            &root.to_string_lossy(),
+                            &out.to_string_lossy(),
+                            effective_no_llm,
+                            effective_code_only,
+                            &effective_formats,
+                            verb,
+                            jobs,
+                            None,
+                            llm_cfg.clone(),
+                        ))
+                        .map_err(|e| graphify_watch::WatchError::Rebuild(e.to_string()))
+                },
+            );
+
+            graphify_watch::watch_directory_with(Path::new(&path), Path::new(&out_dir), rebuild_fn)
+                .await?;
         }
         Commands::Ingest { url, output } => {
             let out_dir = output.unwrap_or_else(|| {

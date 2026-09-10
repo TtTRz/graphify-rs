@@ -1,0 +1,9 @@
+#!/bin/sh
+# Paslı Beyin post-push kanca şablonu. post-commit ile aynı söz: bloklamaz.
+PASLI_BIN="$(command -v pasli 2>/dev/null || true)"
+if [ -z "$PASLI_BIN" ] && [ -n "$LOCALAPPDATA" ] && [ -f "$LOCALAPPDATA/pasli-beyin/pasli.exe" ]; then
+  PASLI_BIN="$LOCALAPPDATA/pasli-beyin/pasli.exe"
+fi
+[ -n "$PASLI_BIN" ] || exit 0
+"$PASLI_BIN" trigger --event post-push --depo "$(basename "$(pwd)")" &
+exit 0
