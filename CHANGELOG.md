@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **Dependency vulnerability remediation** — an OSV.dev scan of the workspace lockfile reported six packages with published advisories. All are updated to their patched versions, and the lockfile now scans clean (0 vulnerable packages across 329):
+  - `anyhow` 1.0.102 → 1.0.104 (RUSTSEC-2026-0190, unsoundness in `Error::downcast_mut()` when a context is set)
+  - `crossbeam-epoch` 0.9.18 → 0.9.21 (RUSTSEC-2026-0204, invalid pointer dereference in the `fmt::Pointer` impl for `Atomic`/`Shared`)
+  - `h2` 0.4.13 → 0.4.19 (RUSTSEC-2026-0258, unbounded queuing of empty DATA frames)
+  - `openssl` 0.10.76 → 0.10.81 (eight advisories, including CVE-2026-41678 out-of-bounds write in AES key wrap, CVE-2026-41681 `digest_final` buffer overflow, CVE-2026-41898 unchecked PSK/cookie callback length, CVE-2026-42327 undefined behavior in `X509Ref::ocsp_responders`). `openssl-sys` moves 0.9.112 → 0.9.117.
+  - `rustls-webpki` 0.103.10 → 0.103.15 (RUSTSEC-2026-0104, panic on a malformed CRL BIT STRING, plus the URI and wildcard name-constraint advisories)
+  - `number_prefix` 0.4.0 removed (RUSTSEC-2025-0119, crate is unmaintained and has no patched release)
+
+### Changed
+
+- **`indicatif` 0.17 → 0.18** — this is what clears `number_prefix`, which has no fixed version: indicatif 0.18 uses the maintained `unit-prefix` instead. `console` moves 0.15.11 → 0.16.6 as a transitive consequence. No application source changes were required; the `ProgressBar` / `ProgressStyle` API surface used in `src/cmd_build.rs` is unchanged across the minor bump.
+
 ## [0.8.2] - 2026-07-05
 
 ### Changed
