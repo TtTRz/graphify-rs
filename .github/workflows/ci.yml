@@ -6,28 +6,39 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: 1
 
 jobs:
   test:
-    name: Test (${{ matrix.os }} / ${{ matrix.rust }})
+    name: Test (${{ matrix.os }})
+    timeout-minutes: 30
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        rust: [stable]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
-          toolchain: ${{ matrix.rust }}
+          prefix-key: "v1-rust"
+          cache-on-failure: true
       - run: cargo check --workspace
       - run: cargo test --workspace
 
   fmt:
     name: Format
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -38,9 +49,14 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - run: cargo clippy --workspace -- -D warnings
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-rust-clippy"
+          cache-on-failure: true
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
