@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            bin_name: graphify-rs
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin_name: graphify-rs.exe
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            bin_name: graphify-rs
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            bin_name: graphify-rs
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-rust-release-${{ matrix.target }}"
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package binary (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $tag = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "v0.8.2" }
+          $staging = "graphify-rs-$tag-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $staging
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.bin_name }}" -Destination "$staging/"
+          if (Test-Path "README.md") { Copy-Item "README.md" -Destination "$staging/" }
+          if (Test-Path "LICENSE") { Copy-Item "LICENSE" -Destination "$staging/" }
+          Compress-Archive -Path "$staging/*" -DestinationPath "$staging.zip"
+
+      - name: Package binary (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          tag="${GITHUB_REF_NAME:-v0.8.2}"
+          staging="graphify-rs-$tag-${{ matrix.target }}"
+          mkdir -p "$staging"
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin_name }}" "$staging/"
+          [ -f README.md ] && cp README.md "$staging/" || true
+          [ -f LICENSE ] && cp LICENSE "$staging/" || true
+          tar czvf "$staging.tar.gz" -C "$staging" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: graphify-rs-*.*
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.8.2' }}
+          files: artifacts/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
