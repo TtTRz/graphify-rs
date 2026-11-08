@@ -13,8 +13,7 @@ Turn any folder of files into a navigable knowledge graph with community detecti
 ```
 /graphify-rs                                             # full pipeline on current directory
 /graphify-rs <path>                                      # full pipeline on specific path
-/graphify-rs <path> --code-only                          # code files only, no LLM needed
-/graphify-rs <path> --no-llm                             # skip semantic extraction (AST only)
+/graphify-rs <path> --code-only                          # code files only
 /graphify-rs <path> --format html,svg                    # add visual outputs (opt-in)
 /graphify-rs <path> --format graphml                     # export graph.graphml (Gephi, yEd)
 /graphify-rs <path> --format cypher                      # generate graphify-rs-out/cypher.txt for Neo4j
@@ -22,25 +21,24 @@ Turn any folder of files into a navigable knowledge graph with community detecti
 /graphify-rs query "<question>"                          # BFS traversal - broad context
 /graphify-rs query "<question>" --dfs                    # DFS - trace a specific path
 /graphify-rs query "<question>" --budget 1500            # cap answer at N tokens
-/graphify-rs add <url>                                   # fetch URL, save to ./raw, update graph
+/graphify-rs add <url>                                   # fetch URL, save to ./raw
 /graphify-rs watch <path>                                # watch folder, auto-rebuild on code changes
 /graphify-rs serve                                       # start MCP stdio server for agent access
 ```
 
 ## What graphify-rs is for
 
-graphify-rs is built around Andrej Karpathy's /raw folder workflow: drop anything into a folder - papers, tweets, screenshots, code, notes - and get a structured knowledge graph that shows you what you didn't know was connected.
+graphify-rs turns a folder of source code into a structured knowledge graph that shows you what you didn't know was connected.
 
 Three things it does that Claude alone cannot:
 1. **Persistent graph** - relationships are stored in `graphify-rs-out/graph.json` and survive across sessions. Ask questions weeks later without re-reading everything.
-2. **Honest audit trail** - every edge is tagged EXTRACTED, INFERRED, or AMBIGUOUS. You know what was found vs invented.
-3. **Cross-document surprise** - community detection finds connections between concepts in different files that you would never think to ask about directly.
+2. **Honest audit trail** - every edge is tagged EXTRACTED, INFERRED, or AMBIGUOUS. You know what was found vs inferred.
+3. **Cross-module surprise** - community detection finds connections between modules in different parts of the codebase that you would never think to ask about directly.
 
 Use it for:
 - A codebase you're new to (understand architecture before touching anything)
-- A reading list (papers + tweets + notes → one navigable graph)
-- A research corpus (citation graph + concept graph in one)
-- Your personal /raw folder (drop everything in, let it grow, query it)
+- Refactoring prep (see which modules depend on what before changing them)
+- Test impact analysis (which tests cover a changed file?)
 
 ## What You Must Do When Invoked
 
@@ -71,15 +69,14 @@ graphify-rs build --path INPUT_PATH --output graphify-rs-out
 Replace INPUT_PATH with the actual path the user provided.
 
 Available flags:
-- `--no-llm`: skip Claude API semantic extraction (AST-only, free, fast)
-- `--code-only`: only process code files
+- `--code-only`: only process code files (skip docs/papers/images in detection counts)
 - `--format json,wiki,report,html,svg,graphml,cypher,obsidian`: select export formats (default: json,report)
 - `--jobs N`: control parallelism
 - `--max-viz-nodes N`: maximum nodes in HTML visualization (only applies with `--format html`)
 
 The command outputs progress with a progress bar and colored status messages.
 
-If the user specified `--code-only` or `--no-llm`, pass those flags through.
+If the user specified `--code-only`, pass it through.
 
 ### Step 3 - Present results
 
@@ -143,10 +140,10 @@ When `graphify-rs-out/` exists in the project, prefer graph tools over Grep/Glob
 After you finish a batch of code changes (new files, edited functions, refactored modules), run:
 
 ```bash
-graphify-rs build --path . --output graphify-rs-out --no-llm
+graphify-rs build --path . --output graphify-rs-out
 ```
 
-- `--no-llm`: skip Claude API (AST-only rebuild is free and fast, ~2-5s)
+- Fast AST-only rebuild (~2-5s)
 - Automatically skips the full rebuild if no file content changed (changeindex detects this)
 - This updates `graph.json` and `GRAPH_REPORT.md` (plus any other selected formats)
 
@@ -221,13 +218,13 @@ Start a background watcher that monitors a folder and auto-updates the graph:
 graphify-rs watch --path INPUT_PATH --output graphify-rs-out
 ```
 
-Code changes trigger AST re-extraction + rebuild automatically (no LLM needed). Press Ctrl+C to stop.
+Code changes trigger AST re-extraction + rebuild automatically. Press Ctrl+C to stop.
 
 ---
 
 ## For MCP server
 
-Start a stdio MCP server exposing 15 query tools. If the graph file does not exist, it is auto-built from the current directory (AST-only, no LLM):
+Start a stdio MCP server exposing 15 query tools. If the graph file does not exist, it is auto-built from the current directory (AST-only):
 
 ```bash
 graphify-rs serve --graph graphify-rs-out/graph.json
@@ -257,7 +254,7 @@ graphify-rs hook uninstall   # remove hooks
 graphify-rs hook status      # check if hooks are installed
 ```
 
-After every `git commit`, the hook auto-rebuilds the graph (code-only, no LLM).
+After every `git commit`, the hook auto-rebuilds the graph (code-only).
 
 ---
 

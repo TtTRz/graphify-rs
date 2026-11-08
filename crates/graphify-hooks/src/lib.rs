@@ -15,7 +15,7 @@ const HOOK_MARKER_END: &str = "# graphify-rs-hook-end";
 /// The hook script block injected into git hooks.
 const HOOK_SCRIPT: &str = r"
 # graphify-rs-hook-start
-# Auto-run graphify-rs AST extraction on commit (code-only, no LLM)
+# Auto-run graphify-rs AST extraction on commit (code-only)
 if command -v graphify-rs >/dev/null 2>&1; then
   graphify-rs build --code-only --output graphify-rs-out &
 fi
