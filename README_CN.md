@@ -7,13 +7,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
-AI 驱动的知识图谱构建工具 — 将代码、文档、论文和图片转化为可查询的交互式知识图谱。
+AI 驱动的代码知识图谱构建工具 — 将源代码转化为可查询的交互式知识图谱。
 
 [English](README.md) | [CLI 参考](docs/CLI_CN.md) | [更新日志](CHANGELOG.md)
 
 ## 什么是 graphify-rs？
 
-**graphify-rs** 基于 [Andrej Karpathy 的 /raw 文件夹工作流](https://x.com/karpathy/status/1871129915774632404)：把任何东西丢进一个文件夹 — 论文、推文、截图、代码、笔记 — 就能得到一个结构化的知识图谱，发现你从未想到的跨文档关联。
+**graphify-rs** 是一个代码知识图谱构建工具：把源代码丢进一个文件夹，就能得到一个结构化的知识图谱，发现你从未想到的跨模块关联。
 
 它是 [graphify](https://github.com/safishamsi/graphify)（Python）的 Rust 完全重写版，功能完全对等且性能大幅提升。
 
@@ -21,13 +21,13 @@ AI 驱动的知识图谱构建工具 — 将代码、文档、论文和图片转
 
 1. **持久化图谱** — 关系存储在 `graph.json` 中，跨会话存活。几周后提问也无需重新阅读所有文件。
 2. **诚实的审计链** — 每条边都标记为 `EXTRACTED`（确定性提取）、`INFERRED`（推断）或 `AMBIGUOUS`（模糊）。你永远知道哪些是从源码中找到的，哪些是推断出来的。
-3. **跨文档惊喜** — 社区检测能发现不同文件中的概念之间的联系，这些联系你永远不会想到去直接询问。
+3. **跨模块惊喜** — 社区检测能发现不同模块之间的联系，这些联系你永远不会想到去直接询问。
 
 ### 使用场景
 
 - **初识代码库** — 在动手之前先理解架构
-- **研究语料库** — 论文 + 推文 + 笔记 → 一个可导航的图谱，包含引用和概念边
-- **个人 /raw 文件夹** — 什么都丢进去，让它自然生长，随时查询
+- **重构准备** — 改动之前看清模块之间的依赖关系
+- **测试影响分析** — 改了一个文件，哪些测试需要重跑？
 - **Agent 工作流** — AI Agent 通过 MCP 服务器查询图谱，获取结构化的上下文
 
 ## 与 Python 原版的区别
@@ -65,7 +65,7 @@ cargo install --path .
 
 ```bash
 # 1. 构建知识图谱（免费、快速、无需 API Key）
-graphify-rs build --no-llm
+graphify-rs build
 
 # 2. 在浏览器中探索交互式可视化（输出在 ~/.graphify-rs/<project>-<hash>/）
 open "$(ls -d ~/.graphify-rs/*graphify* | head -1)/graph.html"
@@ -73,9 +73,8 @@ open "$(ls -d ~/.graphify-rs/*graphify* | head -1)/graph.html"
 # 3. 查询图谱
 graphify-rs query "认证是如何工作的？"
 
-# 4.（可选）启用 LLM 语义提取
-export ANTHROPIC_API_KEY=sk-...   # 或在 graphify-rs.toml 中配置 [llm] 段
-graphify-rs build                  # 添加 LLM 推断的 INFERRED 边
+# 4. 启用更多输出格式（可选）
+graphify-rs build --format html,svg   # 生成交互式可视化
 ```
 
 完整 CLI 参考请见 **[docs/CLI_CN.md](docs/CLI_CN.md)**。
@@ -107,9 +106,7 @@ graphify-rs build                  # 添加 LLM 推断的 INFERRED 边
 
 使用 [tree-sitter](https://tree-sitter.github.io/) 将源代码解析为 AST，然后提取函数、类、导入和调用关系。支持 21 种语言，其中 11 种有原生 tree-sitter 语法，其余走正则回退。此轮的每条边标记为 `EXTRACTED`，置信度 1.0。
 
-**第 2 轮 — LLM 语义提取**（可选，`--no-llm` 跳过）：
 
-将文档/论文/图片内容发送给 LLM API（支持 Anthropic、OpenAI、Ollama、OpenAI 兼容端点），发现语法本身无法揭示的高层关系 — 概念关联、共享假设、设计意图。此轮的边标记为 `INFERRED`，置信度 0.4–0.9。通过 `graphify-rs.toml` 的 `[llm]` 段配置。
 
 ### 置信度体系
 
@@ -141,7 +138,7 @@ graphify-rs build                  # 添加 LLM 推断的 INFERRED 边
 |-------|------|
 | `graphify-core` | 数据模型（`GraphNode`, `GraphEdge`, `KnowledgeGraph`）、ID 生成、置信度体系 |
 | `graphify-detect` | 文件发现、分类（code/doc/paper/image）、`.graphifyignore`、敏感文件过滤 |
-| `graphify-extract` | AST 提取（tree-sitter，21 种语言）、多 Provider LLM 语义提取、去重 |
+| `graphify-extract` | AST 提取（tree-sitter，21 种语言）、跨文件导入/调用解析、去重 |
 | `graphify-build` | 从提取结果组装图谱、节点/边去重 |
 | `graphify-cluster` | Leiden 社区检测、凝聚力评分、社区拆分/合并 |
 | `graphify-analyze` | 高连接节点、跨社区惊奇连接、建议问题、图谱 diff |
@@ -175,7 +172,7 @@ graphify-rs build                  # 添加 LLM 推断的 INFERRED 边
 快速概览：
 
 ```bash
-graphify-rs build [--path .] [--no-llm] [--format json,html]  # 构建图谱
+graphify-rs build [--path .] [--format json,html]  # 构建图谱
 graphify-rs query "问题" [--dfs] [--budget 2000]               # 查询图谱
 graphify-rs watch --path .                                      # 自动重建
 graphify-rs serve                                                # MCP 服务器

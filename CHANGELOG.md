@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.8.2] - 2026-07-05
 
+> The package version stays at `0.8.2`. The breaking changes below were applied in this revision without a version bump.
+
+### Removed (breaking)
+
+- **Semantic extraction (Pass 2) — removed.** The LLM-based extraction pipeline that previously processed documents, papers, and images has been removed entirely. Only AST extraction remains. The tool now produces graphs from source code only.
+- **`--no-llm` CLI flag removed** (was a no-op after the above).
+- **`no_llm` config key removed.**
+- **`[llm]` config section and its `provider`/`model`/API-key fields removed.**
+- **`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` environment variables no longer read** for semantic extraction.
+- **LLM provider modules deleted:** `graphify_extract::semantic` and all of its providers (Anthropic, OpenAI, Ollama, OpenAI-compatible). `reqwest` is no longer a dependency of `graphify-extract`.
+- **Stale configs still parse:** `no_llm = true` and a `[llm]` section in an existing `graphify-rs.toml` are now silently ignored instead of erroring.
+
+### Migration
+
+- If you previously used `graphify-rs build --no-llm` to skip the semantic pass, just run `graphify-rs build` now.
+- If you had `[llm]` configured in `graphify-rs.toml`, the keys can be removed; they have no effect.
+- Re-run `graphify-rs install` to refresh any installed skill files (`skill.md` is updated).
+- If you relied on extracting docs/papers/images into the graph, this capability is gone — feed `graphify-rs` source code only.
+
 ### Changed
 
 - **Default output moved back into project directory** — reverts the `~/.graphify-rs/<name>-<hash>/` behavior introduced in 0.6.0. Output now writes to `graphify-rs-out/` inside the directory where the command is run. Explicit `--output` still works as before.

@@ -37,8 +37,8 @@ Three things it does that an **LLM alone cannot**:
 # Install
 cargo install graphify-rs
 
-# Build a knowledge graph (free, fast, no API key needed)
-graphify-rs build --no-llm
+# Build a knowledge graph (free, fast)
+graphify-rs build
 
 # Explore interactively (output is at ~/.graphify-rs/<project>-<hash>/)
 open "$(ls -d ~/.graphify-rs/*graphify* | head -1)/graph.html"
@@ -46,9 +46,6 @@ open "$(ls -d ~/.graphify-rs/*graphify* | head -1)/graph.html"
 # Query the graph
 graphify-rs query "how does auth work?"
 
-# (Optional) Add semantic extraction via LLM
-export ANTHROPIC_API_KEY=sk-...   # or configure [llm] in graphify-rs.toml
-graphify-rs build
 ```
 
 ## Performance
@@ -85,7 +82,7 @@ Rust rewrite of [graphify](https://github.com/safishamsi/graphify) (Python) — 
 
 **Pass 1 — AST extraction** (free, always runs): tree-sitter parses 21 languages into functions, classes, imports, calls. All edges tagged `EXTRACTED` (confidence 1.0).
 
-**Pass 2 — Semantic extraction** (optional, `--no-llm` to skip): LLM API (Anthropic, OpenAI, Ollama, or OpenAI-compatible) discovers conceptual links, shared assumptions, design rationale. Edges tagged `INFERRED` (confidence 0.4–0.9). Configure via `[llm]` in `graphify-rs.toml`.
+**Cross-file resolution** — after AST extraction, the resolver walks import edges and produces inferred `uses` and `calls` edges between entities across files (Python, JS/TS, Rust, Go, Java, Kotlin, Swift, C/C++ via includes, Ruby, PHP, C#, Dart, etc.). Edges tagged `INFERRED` (confidence 0.5–0.85).
 
 ## Graph Algorithms
 
@@ -127,7 +124,7 @@ Agents auto-check the graph before architecture questions and rebuild after code
 | Crate | Role |
 |-------|------|
 | `graphify-core` | Data models, graph structure, confidence system |
-| `graphify-extract` | AST extraction (21 languages), multi-provider LLM semantic extraction |
+| `graphify-extract` | AST extraction (21 languages), cross-file import/call resolution |
 | `graphify-cluster` | Leiden community detection, incremental re-clustering |
 | `graphify-analyze` | PageRank, cycles, embeddings, god nodes, temporal risk |
 | `graphify-serve` | MCP server (16 tools), smart summarization, full-text search index |
@@ -149,7 +146,7 @@ Agents auto-check the graph before architecture questions and rebuild after code
 ## CLI at a Glance
 
 ```bash
-graphify-rs build [--path .] [--no-llm] [--format json,html]   # build graph
+graphify-rs build [--path .] [--format json,html]   # build graph
 graphify-rs query "question" [--dfs] [--budget 2000]            # query
 graphify-rs watch --path .                                       # auto-rebuild
 graphify-rs serve                                                 # MCP server

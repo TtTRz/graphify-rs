@@ -1,6 +1,6 @@
 # CLI Reference
 
-`graphify-rs` is an AI-powered knowledge graph builder that transforms code, docs, papers, and images into queryable, interactive knowledge graphs.
+`graphify-rs` is an AI-powered knowledge graph builder that transforms source code into queryable, interactive knowledge graphs.
 
 ## Table of Contents
 
@@ -30,7 +30,7 @@ These flags can be used with **any** subcommand.
 |------|-------|------|---------|-------------|
 | `--quiet` | `-q` | `bool` | `false` | Suppress non-essential output. Only errors are printed. |
 | `--verbose` | `-v` | `bool` | `false` | Enable verbose output (debug-level). Sets log filter to `debug`. |
-| `--jobs <N>` | `-j` | `usize` | Number of CPUs | Number of parallel jobs. Controls rayon thread pool size and semantic extraction concurrency. |
+| `--jobs <N>` | `-j` | `usize` | Number of CPUs | Number of parallel jobs. Controls rayon thread pool size. |
 
 ```bash
 graphify-rs -q build                    # silent build
@@ -45,7 +45,7 @@ graphify-rs -q -j 2 serve               # quiet mode, 2 threads
 
 ### `graphify-rs build`
 
-Build the knowledge graph from files in a directory. This is the main pipeline: detect files -> extract AST (pass 1) -> semantic extraction via LLM API (pass 2) -> build graph -> cluster communities -> analyze -> export.
+Build the knowledge graph from files in a directory. This is the main pipeline: detect files -> extract AST -> build graph -> cluster communities -> analyze -> export.
 
 #### Parameters
 
@@ -53,7 +53,6 @@ Build the knowledge graph from files in a directory. This is the main pipeline: 
 |------|-------|------|---------|-------------|
 | `--path <PATH>` | `-p` | `String` | `"."` | Root directory to scan for source files. |
 | `--output <DIR>` | `-o` | `String` | `~/.graphify-rs/<name>-<hash>/` | Output directory for all generated files. |
-| `--no-llm` | | `bool` | `false` | Skip LLM semantic extraction (pass 2). Only AST extraction runs. |
 | `--code-only` | | `bool` | `false` | Only process code files, skip docs and papers. |
 | `--update` | | `bool` | `false` | Incremental rebuild: only re-extract new/modified files since last build. |
 | `--format <FMT,...>` | | `String` (comma-separated) | all formats | Export formats to generate. Available: `json`, `html`, `graphml`, `cypher`, `svg`, `wiki`, `obsidian`, `report`. |
@@ -68,9 +67,6 @@ graphify-rs build
 # Build a specific project, output to custom dir
 graphify-rs build --path /path/to/project --output my-graph
 
-# Fast AST-only build (no Claude API calls)
-graphify-rs build --no-llm
-
 # Only code files, skip docs/papers
 graphify-rs build --code-only
 
@@ -84,18 +80,17 @@ graphify-rs build --format json,html
 graphify-rs build --format report
 
 # Combine: fast incremental, code-only, JSON+report
-graphify-rs build --update --code-only --no-llm --format json,report
+graphify-rs build --update --code-only --format json,report
 ```
 
 #### Build Pipeline
 
 1. **Detect** — Scans `--path` for code, doc, paper, and image files (respects `.graphifyignore`, skips sensitive files).
-2. **Extract AST (Pass 1)** — Deterministic tree-sitter + regex extraction for code files. Per-file SHA256 cache in `<output>/cache/`.
-3. **Semantic Extraction (Pass 2)** — Concurrent LLM extraction for docs/papers (skipped with `--no-llm` or `--code-only`). Supports Anthropic, OpenAI, Ollama, and OpenAI-compatible providers. Configure via `[llm]` in `graphify.toml`, or set `ANTHROPIC_API_KEY` env var for backward compat. Concurrency = `min(--jobs, 8)`, default 4.
-4. **Build Graph** — Assemble nodes and edges, deduplicate. If `.codegraph/codegraph.db` exists in the project root, CodeGraph edges (calls, imports, contains, etc.) are merged automatically.
-5. **Cluster** — Leiden community detection + cohesion scoring.
-6. **Analyze** — God nodes, surprising connections, suggested questions.
-7. **Export** — Write selected formats to `--output`.
+2. **Extract AST** — Deterministic tree-sitter + regex extraction for code files. Per-file SHA256 cache in `<output>/cache/`.
+3. **Build Graph** — Assemble nodes and edges, deduplicate. If `.codegraph/codegraph.db` exists in the project root, CodeGraph edges (calls, imports, contains, etc.) are merged automatically.
+4. **Cluster** — Leiden community detection + cohesion scoring.
+5. **Analyze** — God nodes, surprising connections, suggested questions.
+6. **Export** — Write selected formats to `--output`.
 
 ---
 
@@ -200,7 +195,7 @@ graphify-rs watch --path src --output my-graph
 
 Start the MCP (Model Context Protocol) server over JSON-RPC 2.0 (stdio). Provides 16 tools that AI agents can call directly.
 
-If the specified graph file does not exist, `serve` automatically runs a fast AST-only build (`--no-llm --code-only --format json`) on the current directory before starting the server. This means `graphify-rs serve` works as a zero-config entry point — no manual `build` step required.
+If the specified graph file does not exist, `serve` automatically runs a fast AST-only build (`--code-only --format json`) on the current directory before starting the server. This means `graphify-rs serve` works as a zero-config entry point — no manual `build` step required.
 
 #### Parameters
 
@@ -458,27 +453,12 @@ Generated file:
 # Output directory for graph files (default: ~/.graphify-rs/<name>-<hash>/)
 # output = "~/.graphify-rs/my-project-a1b2c3d4"
 
-# Disable LLM-based semantic extraction
-# no_llm = false
-
 # Only process code files (skip docs/papers)
 # code_only = false
 
 # Export formats (comma-separated). Available: json,html,graphml,cypher,svg,wiki,obsidian,report
 # Leave empty or omit for all formats.
 # formats = ["json", "html", "report"]
-
-# LLM provider for semantic extraction
-# [llm]
-# provider = "anthropic"          # anthropic | openai | ollama | openai_compatible
-# model = "claude-sonnet-4.6"  # required, no default
-# anthropic_api_key = "sk-..."    # optional, falls back to ANTHROPIC_API_KEY env or Claude Code OAuth
-# anthropic_base_url = "https://api.anthropic.com"  # optional override
-# openai_api_key = "sk-..."       # optional, falls back to OPENAI_API_KEY env
-# openai_base_url = "https://api.openai.com/v1"     # optional override
-# ollama_base_url = "http://localhost:11434"          # optional override
-# openai_compatible_api_key = "..."                   # optional
-# openai_compatible_base_url = "http://localhost:8000/v1"  # required for openai_compatible
 ```
 
 ---
@@ -605,52 +585,10 @@ Create a `graphify-rs.toml` file in your project root (or run `graphify-rs init`
 ### Fields
 
 | Field | Type | Default | CLI Override | Description |
-|-------|------|---------|-------------|-------------|
+|-------|------|--------|-------------|-------------|
 | `output` | `String` | `~/.graphify-rs/<name>-<hash>/` | `--output` | Output directory for graph files. |
-| `no_llm` | `bool` | `false` | `--no-llm` | Disable LLM-based semantic extraction. |
 | `code_only` | `bool` | `false` | `--code-only` | Only process code files (skip docs/papers). |
 | `formats` | `String[]` | `[]` (all formats) | `--format` | Export formats to generate. |
-
-### LLM Configuration (`[llm]`)
-
-Configure the LLM provider for semantic extraction (Pass 2). When this section is absent, falls back to `ANTHROPIC_API_KEY` env var for backward compat.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `provider` | `String` | *required* | LLM provider: `anthropic`, `openai`, `ollama`, or `openai_compatible`. |
-| `model` | `String` | *required* | Model name (e.g., `claude-sonnet-4.6`, `gpt-4o`, `llama3`). No default. |
-| `anthropic_api_key` | `String` | env: `ANTHROPIC_API_KEY` | Anthropic API key. Falls back to env var, then Claude Code OAuth token. |
-| `anthropic_base_url` | `String` | `https://api.anthropic.com` | Override Anthropic API endpoint. |
-| `openai_api_key` | `String` | env: `OPENAI_API_KEY` | OpenAI API key. Falls back to env var. |
-| `openai_base_url` | `String` | `https://api.openai.com/v1` | Override OpenAI API endpoint. |
-| `ollama_base_url` | `String` | `http://localhost:11434` | Override Ollama API endpoint. |
-| `openai_compatible_api_key` | `String` | — | Optional API key for OpenAI-compatible endpoint. |
-| `openai_compatible_base_url` | `String` | *required* | Base URL for OpenAI-compatible endpoint (e.g., vLLM, LM Studio). |
-
-### LLM Examples
-
-```toml
-# Use Anthropic Claude with OAuth (no API key needed if logged in via Claude Code)
-[llm]
-provider = "anthropic"
-model = "claude-sonnet-4.6"
-
-# Use OpenAI GPT-4o
-[llm]
-provider = "openai"
-model = "gpt-4o"
-
-# Use local Ollama
-[llm]
-provider = "ollama"
-model = "llama3"
-
-# Use a custom OpenAI-compatible endpoint (vLLM, LM Studio, etc.)
-[llm]
-provider = "openai_compatible"
-model = "my-fine-tuned-model"
-openai_compatible_base_url = "http://localhost:8000/v1"
-```
 
 ### Precedence Rules
 
@@ -660,7 +598,6 @@ openai_compatible_base_url = "http://localhost:8000/v1"
 
 Specific merging rules:
 - `output`: CLI value is used if it differs from the built-in default (`~/.graphify-rs/<name>-<hash>/`); otherwise falls back to config.
-- `no_llm`: `true` if **either** CLI flag or config is `true` (OR logic).
 - `code_only`: `true` if **either** CLI flag or config is `true` (OR logic).
 - `formats`: CLI value is used if non-empty; otherwise falls back to config. Empty means all formats.
 
@@ -670,9 +607,6 @@ Specific merging rules:
 # Always output to a custom directory
 output = "knowledge-graph"
 
-# Skip LLM calls by default
-no_llm = true
-
 # Only generate JSON and HTML
 formats = ["json", "html"]
 ```
@@ -681,8 +615,6 @@ formats = ["json", "html"]
 
 | Variable | Description |
 |----------|-------------|
-| `ANTHROPIC_API_KEY` | API key for Anthropic Claude (Pass 2). Also used as fallback when `[llm]` config is absent. |
-| `OPENAI_API_KEY` | API key for OpenAI (Pass 2). Falls back from `openai_api_key` in `[llm]` config. |
 | `RUST_LOG` | Log level filter (default: `warn`). Overridden by `-v` (`debug`) or `-q` (`error`). |
 
 ---
@@ -778,7 +710,7 @@ Once installed, the agent follows these rules (injected into `CLAUDE.md` or `AGE
 1. **Before answering architecture or codebase questions** — read `GRAPH_REPORT.md` for god nodes and community structure.
 2. **If `wiki/index.md` exists** — navigate the wiki instead of reading raw files.
 3. **For specific questions** — run `graphify-rs query "<question>"` to get relevant subgraph context.
-4. **After modifying code files** — run `graphify-rs build --path . --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s).
+4. **After modifying code files** — run `graphify-rs build --path .` to keep the graph current (fast, AST-only, ~2-5s).
 
 The `PreToolUse` hook automatically fires when the agent uses `Glob` or `Grep` tools (Claude/CodeBuddy) or `Bash` (Codex), injecting a reminder to check the graph first.
 
@@ -822,7 +754,7 @@ The agent can then call tools like `query_graph`, `get_node`, `get_neighbors`, `
 
 ```bash
 # Fast incremental rebuild (AST-only, ~2-5 seconds)
-graphify-rs build --no-llm --update
+graphify-rs build
 
 # Or use watch mode for automatic rebuilds
 graphify-rs watch
