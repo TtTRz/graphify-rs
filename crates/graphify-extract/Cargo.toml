@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "AST and semantic extraction engine for graphify"
+description = "AST extraction engine for graphify"
 
 [dependencies]
 graphify-core.workspace = true
@@ -12,7 +12,6 @@ graphify-cache.workspace = true
 graphify-security.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-reqwest.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
@@ -30,7 +29,6 @@ tree-sitter-ruby = "0.23"
 tree-sitter-c-sharp = "0.23"
 tree-sitter-dart = "0.1"
 rayon = "1"
-dirs = "5"
 
 [dev-dependencies]
 tempfile = "3"

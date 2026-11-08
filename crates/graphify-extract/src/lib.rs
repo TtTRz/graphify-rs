@@ -1,17 +1,12 @@
-//! AST and semantic extraction engine for graphify.
+//! AST extraction engine for graphify.
 //!
-//! Implements a two-pass extraction pipeline ported from the Python `extract.py`:
-//!
-//! - **Pass 1** (deterministic): regex-based AST extraction of functions, classes,
-//!   imports, and call relationships from source code.
-//! - **Pass 2** (semantic): Claude API–based extraction of higher-level concepts
-//!   from documents, papers, and images.
+//! Deterministic extraction of functions, classes, imports, and call
+//! relationships from source code, using tree-sitter with a regex fallback.
 
 pub mod ast_extract;
 pub mod dedup;
 pub mod lang_config;
 pub mod parser;
-pub mod semantic;
 pub mod treesitter;
 
 use std::collections::{HashMap, HashSet};

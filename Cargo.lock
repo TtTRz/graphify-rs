@@ -727,13 +727,11 @@ name = "graphify-extract"
 version = "0.8.2"
 dependencies = [
  "anyhow",
- "dirs",
  "graphify-cache",
  "graphify-core",
  "graphify-security",
  "rayon",
  "regex",
- "reqwest",
  "serde",
  "serde_json",
  "tempfile",
