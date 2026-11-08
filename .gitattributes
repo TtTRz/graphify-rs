@@ -1,0 +1,3 @@
+# Always use LF line endings: when Windows tools rewrite a file with CRLF, git
+# reports every line as changed, and the shell hooks (.githooks) do not run.
+* text=auto eol=lf
