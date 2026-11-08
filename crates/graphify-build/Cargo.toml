@@ -10,7 +10,9 @@ description = "Graph assembly and deduplication for graphify"
 graphify-core.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
-rusqlite = { version = "0.31", features = ["bundled"] }
+# 0.32: shares the same libsqlite3-sys as zopay (zopay-db/zopay-search); two
+# versions cannot coexist because they both declare `links="sqlite3"`. API compatible.
+rusqlite = { version = "0.32", features = ["bundled"] }
 serde_json.workspace = true
 
 [dev-dependencies]
