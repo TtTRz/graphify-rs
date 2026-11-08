@@ -44,8 +44,6 @@ enum Commands {
         #[arg(short, long)]
         output: Option<String>,
         #[arg(long)]
-        no_llm: bool,
-        #[arg(long)]
         code_only: bool,
         /// Export formats (comma-separated). Available: json,html,graphml,cypher,svg,wiki,obsidian,report. Default: json,report
         #[arg(long, value_delimiter = ',')]
@@ -232,10 +230,6 @@ impl Verbosity {
     pub(crate) fn is_quiet(self) -> bool {
         matches!(self, Self::Quiet)
     }
-
-    pub(crate) fn is_verbose(self) -> bool {
-        matches!(self, Self::Verbose)
-    }
 }
 
 /// Print helper that respects verbosity.
@@ -243,15 +237,6 @@ impl Verbosity {
 macro_rules! info_print {
     ($verb:expr, $($arg:tt)*) => {
         if !$verb.is_quiet() {
-            println!($($arg)*);
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! verbose_print {
-    ($verb:expr, $($arg:tt)*) => {
-        if $verb.is_verbose() {
             println!($($arg)*);
         }
     };
@@ -287,7 +272,6 @@ async fn main() -> Result<()> {
         Commands::Build {
             path,
             output,
-            no_llm,
             code_only,
             format,
             max_viz_nodes,
@@ -301,7 +285,6 @@ async fn main() -> Result<()> {
                 Some(o) => o,
                 None => app_cfg.output.unwrap_or(default_output),
             };
-            let effective_no_llm = no_llm || app_cfg.no_llm.unwrap_or(false);
             let effective_code_only = code_only || app_cfg.code_only.unwrap_or(false);
             let effective_formats = if format.is_empty() {
                 app_cfg.formats.unwrap_or_default()
@@ -312,13 +295,10 @@ async fn main() -> Result<()> {
             cmd_build::cmd_build(
                 &effective_path,
                 &effective_output,
-                effective_no_llm,
                 effective_code_only,
                 &effective_formats,
                 verb,
-                cli.jobs,
                 max_viz_nodes,
-                app_cfg.llm,
             )
             .await?;
         }
@@ -455,11 +435,8 @@ async fn main() -> Result<()> {
                     ".",
                     &output_dir,
                     true,
-                    true,
                     &["json".to_string()],
                     Verbosity::Quiet,
-                    None,
-                    None,
                     None,
                 )
                 .await
@@ -772,27 +749,12 @@ fn cmd_init() -> Result<()> {
 # Output directory for graph files
 # output = "graphify-rs-out"
 
-# Disable LLM-based semantic extraction
-# no_llm = false
-
 # Only process code files (skip docs/papers)
 # code_only = false
 
 # Export formats (comma-separated). Available: json,html,graphml,cypher,svg,wiki,obsidian,report
 # Leave empty or omit for all formats.
 # formats = ["json", "html", "report"]
-
-# LLM provider for semantic extraction
-# [llm]
-# provider = "anthropic"          # anthropic | openai | ollama | openai_compatible
-# model = "claude-sonnet-4.6"  # required, no default
-# anthropic_api_key = "sk-..."    # optional, falls back to ANTHROPIC_API_KEY env or Claude Code OAuth
-# anthropic_base_url = "https://api.anthropic.com"  # optional override
-# openai_api_key = "sk-..."       # optional, falls back to OPENAI_API_KEY env
-# openai_base_url = "https://api.openai.com/v1"     # optional override
-# ollama_base_url = "http://localhost:11434"          # optional override
-# openai_compatible_api_key = "..."                   # optional
-# openai_compatible_base_url = "http://localhost:8000/v1"  # required for openai_compatible
 "#,
     )?;
     println!("{} Created graphify-rs.toml", "✓".green());
