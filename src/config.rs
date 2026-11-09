@@ -2,7 +2,7 @@ use serde::Deserialize;
 use std::path::Path;
 
 /// Configuration loaded from `graphify-rs.toml`.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Clone)]
 #[serde(default)]
 pub struct Config {
     pub output: Option<String>,
@@ -13,7 +13,7 @@ pub struct Config {
 }
 
 /// LLM provider configuration from `[llm]` section.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Clone)]
 #[serde(default)]
 pub struct LLMConfig {
     pub provider: Option<String>,
